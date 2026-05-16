@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coach Dashboard — Tampa Bay Pirates XC</title>
+  <style>
+    :root {
+      --red:      #c8102e;
+      --red-dark: #a00d24;
+      --black:    #1a1a1a;
+      --bone:     #f9f6f0;
+      --paper:    #ffffff;
+      --slate:    #4a5568;
+      --slate-2:  #6b7280;
+      --silver:   #d1d5db;
+      --silver-2: #e5e7eb;
+      --green:    #1b5e20;
+      --amber:    #b45309;
+      --font-display: Georgia, 'Times New Roman', serif;
+      --font-body:    'Helvetica Neue', Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background: var(--bone);
+      color: var(--black);
+      min-height: 100vh;
+    }
+
+    /* ---------- top bar ---------- */
+    .topbar {
+      background: var(--black);
+      color: var(--paper);
+      padding: 0.85rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 4px solid var(--red);
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+    }
+
+    .brand .script {
+      font-family: var(--font-display);
+      font-style: italic;
+      color: var(--red);
+      font-size: 1rem;
+    }
+
+    .brand .name {
+      font-weight: 900;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-size: 1.05rem;
+    }
+
+    .brand .division {
+      font-size: 0.7rem;
+      color: var(--silver);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .user-area {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.85rem;
+    }
+
+    .user-name { color: var(--silver); }
+
+    .signout-btn {
+      background: transparent;
+      color: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 0.35rem 0.8rem;
+      font-size: 0.8rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      letter-spacing: 0.5px;
+    }
+    .signout-btn:hover { background: var(--red); border-color: var(--red); }
+
+    /* ---------- main ---------- */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--slate);
+      margin: 0 0 1rem 0;
+      font-weight: 700;
+    }
+
+    .page-title {
+      font-size: 1.6rem;
+      margin: 0 0 0.25rem 0;
+      font-weight: 700;
+    }
+
+    .page-sub {
+      color: var(--slate);
+      margin: 0 0 2rem 0;
+      font-size: 0.95rem;
+    }
+
+    /* ---------- stats row ---------- */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .stat {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-left: 4px solid var(--red);
+      padding: 1.25rem;
+      border-radius: 4px;
+    }
+
+    .stat .label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate-2);
+      margin-bottom: 0.4rem;
+    }
+
+    .stat .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--black);
+      line-height: 1;
+    }
+
+    .stat .unit {
+      font-size: 0.85rem;
+      color: var(--slate);
+      margin-left: 0.25rem;
+      font-weight: 400;
+    }
+
+    /* ---------- nav cards ---------- */
+    .nav-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .nav-card {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 1.5rem;
+      border-radius: 4px;
+      text-decoration: none;
+      color: var(--black);
+      display: block;
+      transition: transform 0.1s, box-shadow 0.1s, border-color 0.1s;
+    }
+
+    .nav-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+      border-color: var(--red);
+    }
+
+    .nav-card.disabled {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .nav-card .nav-title {
+      font-weight: 700;
+      font-size: 1.05rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .nav-card .nav-desc {
+      font-size: 0.85rem;
+      color: var(--slate);
+      line-height: 1.4;
+    }
+
+    .nav-card .nav-coming-soon {
+      display: inline-block;
+      font-size: 0.65rem;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-top: 0.5rem;
+    }
+
+    /* ---------- recent activity ---------- */
+    .recent {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 4px;
+      padding: 1.5rem;
+    }
+
+    .recent table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    .recent th {
+      text-align: left;
+      font-weight: 700;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate-2);
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--silver-2);
+    }
+
+    .recent td {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--silver-2);
+    }
+
+    .recent tr:last-child td { border-bottom: none; }
+
+    .empty {
+      color: var(--slate-2);
+      font-style: italic;
+      text-align: center;
+      padding: 2rem 1rem;
+    }
+
+    .type-pill {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+    }
+
+    .type-easy, .type-long { background: #e8f5e9; color: #1b5e20; }
+    .type-tempo, .type-intervals { background: #fff3e0; color: #b45309; }
+    .type-race { background: #ffebee; color: #b71c1c; }
+    .type-cross_train { background: #ede7f6; color: #4527a0; }
+
+    .loading {
+      color: var(--slate-2);
+      text-align: center;
+      padding: 2rem;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <span class="script">Tampa Bay</span>
+      <span class="name">Pirates</span>
+      <span class="division">XC</span>
+    </div>
+    <div class="user-area">
+      <span class="user-name" id="user-name">…</span>
+      <button class="signout-btn" id="signout-btn">Sign out</button>
+    </div>
+  </div>
+
+  <main>
+    <h1 class="page-title">Coach dashboard</h1>
+    <p class="page-sub">This week at a glance.</p>
+
+    <div class="stats" id="stats">
+      <div class="stat">
+        <div class="label">Active athletes</div>
+        <div class="value" id="stat-athletes">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Runs this week</div>
+        <div class="value" id="stat-runs">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Team miles this week</div>
+        <div class="value" id="stat-miles">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Workout days</div>
+        <div class="value" id="stat-workouts">—</div>
+      </div>
+    </div>
+
+    <h2>Manage</h2>
+    <div class="nav-grid">
+      <a href="roster.html" class="nav-card">
+        <div class="nav-title">Roster</div>
+        <div class="nav-desc">Add, edit, or deactivate athletes.</div>
+      </a>
+      <a href="#" class="nav-card disabled">
+        <div class="nav-title">Athlete detail</div>
+        <div class="nav-desc">Drill into one athlete's training history.</div>
+        <div class="nav-coming-soon">Coming soon</div>
+      </a>
+      <a href="#" class="nav-card disabled">
+        <div class="nav-title">Bulk log</div>
+        <div class="nav-desc">Log a workout for multiple athletes at once.</div>
+        <div class="nav-coming-soon">Coming soon</div>
+      </a>
+    </div>
+
+    <h2>Recent runs</h2>
+    <div class="recent">
+      <div id="recent-body" class="loading">Loading…</div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
+
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // ---- auth guard ---------------------------------------------------------
+    async function requireCoach() {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { window.location.href = 'index.html'; return null; }
+
+      const { data: coach } = await sb
+        .from('coaches')
+        .select('id, first_name, last_name')
+        .eq('auth_user_id', session.user.id)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (!coach) {
+        // Authenticated but not a coach — bounce to athlete view
+        window.location.href = 'log_run.html';
+        return null;
+      }
+      return coach;
+    }
+
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      await sb.auth.signOut();
+      window.location.href = 'index.html';
+    });
+
+    // ---- helpers ------------------------------------------------------------
+    function startOfWeekISO() {
+      // Monday as week start
+      const now = new Date();
+      const day = now.getDay();              // 0=Sun..6=Sat
+      const diff = (day + 6) % 7;            // days since Monday
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - diff);
+      monday.setHours(0, 0, 0, 0);
+      return monday.toISOString().slice(0, 10);
+    }
+
+    function formatDate(iso) {
+      const d = new Date(iso + 'T00:00:00');
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function workoutType(t) { return ['tempo', 'intervals', 'race'].includes(t); }
+
+    // ---- load dashboard data -----------------------------------------------
+    async function load() {
+      const coach = await requireCoach();
+      if (!coach) return;
+
+      document.getElementById('user-name').textContent = coach.first_name + ' ' + coach.last_name.charAt(0) + '.';
+
+      const weekStart = startOfWeekISO();
+
+      // active athletes
+      const { count: athleteCount } = await sb
+        .from('athletes')
+        .select('id', { count: 'exact', head: true })
+        .eq('active', true);
+      document.getElementById('stat-athletes').textContent = athleteCount ?? 0;
+
+      // runs this week + miles + workouts
+      const { data: weekRuns } = await sb
+        .from('runs')
+        .select('id, run_type, distance_miles, athlete_id')
+        .gte('run_date', weekStart);
+
+      const runs = weekRuns || [];
+      document.getElementById('stat-runs').textContent = runs.length;
+      const totalMiles = runs.reduce((s, r) => s + Number(r.distance_miles || 0), 0);
+      document.getElementById('stat-miles').innerHTML =
+        totalMiles.toFixed(1) + '<span class="unit">mi</span>';
+      const workoutCount = runs.filter(r => workoutType(r.run_type)).length;
+      document.getElementById('stat-workouts').textContent = workoutCount;
+
+      // recent runs table (last 10)
+      const { data: recent } = await sb
+        .from('runs')
+        .select('id, run_date, run_type, distance_miles, duration_seconds, athletes(first_name, last_name)')
+        .order('run_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      const body = document.getElementById('recent-body');
+      if (!recent || recent.length === 0) {
+        body.innerHTML = '<div class="empty">No runs logged yet. Once athletes start logging, you\'ll see them here.</div>';
+        return;
+      }
+
+      body.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Athlete</th>
+              <th>Type</th>
+              <th>Miles</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recent.map(r => `
+              <tr>
+                <td>${formatDate(r.run_date)}</td>
+                <td>${r.athletes ? r.athletes.first_name + ' ' + r.athletes.last_name : '—'}</td>
+                <td><span class="type-pill type-${r.run_type}">${r.run_type.replace('_', ' ')}</span></td>
+                <td>${r.distance_miles ? Number(r.distance_miles).toFixed(2) : '—'}</td>
+                <td>${formatDuration(r.duration_seconds)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function formatDuration(sec) {
+      if (!sec) return '—';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `${m}:${String(s).padStart(2,'0')}`;
+    }
+
+    load();
+  </script>
+</body>
+</html>
