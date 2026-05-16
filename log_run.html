@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log Run — Tampa Bay Pirates XC</title>
+  <style>
+    :root {
+      --red:      #c8102e;
+      --red-dark: #a00d24;
+      --black:    #1a1a1a;
+      --bone:     #f9f6f0;
+      --paper:    #ffffff;
+      --slate:    #4a5568;
+      --slate-2:  #6b7280;
+      --silver:   #d1d5db;
+      --silver-2: #e5e7eb;
+      --green:    #1b5e20;
+      --amber:    #b45309;
+      --font-display: Georgia, 'Times New Roman', serif;
+      --font-body:    'Helvetica Neue', Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background: var(--bone);
+      color: var(--black);
+      min-height: 100vh;
+    }
+
+    /* topbar */
+    .topbar {
+      background: var(--black);
+      color: var(--paper);
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 4px solid var(--red);
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      text-decoration: none;
+      color: inherit;
+    }
+    .brand .script {
+      font-family: var(--font-display);
+      font-style: italic;
+      color: var(--red);
+      font-size: 1rem;
+    }
+    .brand .name {
+      font-weight: 900;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-size: 1.05rem;
+    }
+    .brand .division {
+      font-size: 0.7rem;
+      color: var(--silver);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .user-area { display: flex; align-items: center; gap: 0.85rem; font-size: 0.85rem; }
+    .user-name { color: var(--silver); }
+    .signout-btn {
+      background: transparent;
+      color: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 0.35rem 0.7rem;
+      font-size: 0.78rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--font-body);
+    }
+    .signout-btn:hover { background: var(--red); border-color: var(--red); }
+
+    /* main */
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 4rem 1rem;
+    }
+    .page-title {
+      font-size: 1.6rem;
+      margin: 0 0 0.25rem 0;
+      font-weight: 700;
+    }
+    .page-sub {
+      color: var(--slate);
+      margin: 0 0 1.5rem 0;
+      font-size: 0.95rem;
+    }
+
+    .section {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 4px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .section h2 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--slate);
+      margin: 0 0 1rem 0;
+      font-weight: 700;
+    }
+
+    label {
+      display: block;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate);
+      margin-bottom: 0.3rem;
+      font-weight: 700;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="date"],
+    input[type="email"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      font-size: 1rem;
+      border: 1px solid var(--silver);
+      border-radius: 3px;
+      font-family: var(--font-body);
+      background: var(--paper);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--red);
+    }
+    textarea { resize: vertical; min-height: 60px; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .row.three { grid-template-columns: 1fr 1fr 1fr; }
+    .row .full { grid-column: 1 / -1; }
+    @media (max-width: 480px) {
+      .row, .row.three { grid-template-columns: 1fr; }
+    }
+
+    .helper {
+      font-size: 0.78rem;
+      color: var(--slate-2);
+      margin-top: 0.35rem;
+    }
+
+    /* run-type picker */
+    .type-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+    }
+    @media (max-width: 480px) {
+      .type-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .type-btn {
+      background: var(--paper);
+      border: 1.5px solid var(--silver);
+      padding: 0.85rem 0.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--slate);
+      text-transform: capitalize;
+      transition: all 0.15s;
+    }
+    .type-btn:hover { border-color: var(--black); color: var(--black); }
+    .type-btn.selected {
+      background: var(--red);
+      border-color: var(--red);
+      color: var(--paper);
+    }
+
+    /* mode toggle */
+    .mode-toggle {
+      display: inline-flex;
+      background: var(--bone);
+      border: 1px solid var(--silver);
+      border-radius: 4px;
+      padding: 2px;
+      gap: 2px;
+      margin-bottom: 1rem;
+    }
+    .mode-toggle button {
+      background: transparent;
+      border: none;
+      padding: 0.4rem 0.85rem;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 0.85rem;
+      color: var(--slate);
+      border-radius: 3px;
+    }
+    .mode-toggle button.active {
+      background: var(--paper);
+      color: var(--black);
+      font-weight: 700;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+
+    /* segments */
+    .segment-row {
+      display: grid;
+      grid-template-columns: 130px 1fr 1fr auto;
+      gap: 0.5rem;
+      align-items: end;
+      padding: 0.6rem;
+      background: var(--bone);
+      border-radius: 3px;
+      margin-bottom: 0.5rem;
+    }
+    .segment-row label { font-size: 0.65rem; margin-bottom: 0.15rem; }
+    .segment-row input, .segment-row select {
+      padding: 0.4rem 0.5rem;
+      font-size: 0.9rem;
+    }
+    .remove-seg {
+      background: transparent;
+      border: 1px solid var(--silver);
+      color: var(--slate);
+      padding: 0 0.55rem;
+      height: 36px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    .remove-seg:hover { border-color: var(--red); color: var(--red); }
+
+    .add-seg-btn {
+      background: transparent;
+      border: 1px dashed var(--silver);
+      color: var(--slate);
+      width: 100%;
+      padding: 0.6rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 0.85rem;
+      margin-top: 0.25rem;
+    }
+    .add-seg-btn:hover { border-color: var(--red); color: var(--red); }
+
+    .totals {
+      margin-top: 0.85rem;
+      padding: 0.75rem;
+      background: var(--black);
+      color: var(--paper);
+      border-radius: 3px;
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+    }
+    .totals .label {
+      color: var(--silver);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      display: block;
+      margin-bottom: 0.15rem;
+    }
+    .totals .value { font-weight: 700; font-size: 1rem; }
+
+    /* details disclosure */
+    details {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 4px;
+      margin-bottom: 1rem;
+    }
+    details summary {
+      padding: 0.85rem 1.25rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--slate);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    details[open] summary { border-bottom: 1px solid var(--silver-2); }
+    details .section-body { padding: 1.25rem; }
+
+    /* buttons */
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+    .btn-primary {
+      background: var(--red);
+      color: var(--paper);
+      border: none;
+      padding: 0.95rem 1.5rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      flex: 1;
+    }
+    .btn-primary:hover { background: var(--red-dark); }
+    .btn-primary:disabled { background: var(--silver); cursor: wait; }
+    .btn-secondary {
+      background: transparent;
+      color: var(--black);
+      border: 1px solid var(--silver);
+      padding: 0.85rem 1.5rem;
+      font-size: 0.9rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--font-body);
+    }
+    .btn-secondary:hover { border-color: var(--black); }
+
+    /* toast */
+    .toast {
+      position: fixed;
+      top: 1rem;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: var(--green);
+      color: var(--paper);
+      padding: 0.85rem 1.5rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+      transition: transform 0.25s;
+      z-index: 100;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.error { background: #b71c1c; }
+
+    /* celebration overlay */
+    .celebration {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.65);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem;
+      z-index: 200;
+      overflow-y: auto;
+    }
+    .celebration.show { display: flex; }
+    .celebration-card {
+      background: var(--paper);
+      max-width: 520px;
+      width: 100%;
+      border-radius: 4px;
+      padding: 2.25rem 1.75rem 1.75rem 1.75rem;
+      border-top: 6px solid var(--red);
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    }
+    .celebration .check {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      background: var(--green);
+      color: var(--paper);
+      font-size: 2.25rem;
+      line-height: 64px;
+      margin: 0 auto 0.75rem auto;
+    }
+    .celebration h2 {
+      font-size: 1.6rem;
+      margin: 0 0 0.4rem 0;
+      font-weight: 900;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .celebration .recap {
+      color: var(--slate);
+      margin: 0 0 1.5rem 0;
+      font-size: 1rem;
+    }
+    .celebration .facts { text-align: left; margin-bottom: 1.5rem; }
+    .fun-fact {
+      background: var(--bone);
+      border-left: 4px solid var(--red);
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.6rem;
+      border-radius: 3px;
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+    .fun-fact-label {
+      display: block;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 0.25rem;
+    }
+    .celebration .btn-primary { width: 100%; }
+
+    .form-error {
+      color: #b71c1c;
+      font-size: 0.85rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+    .form-error.show { display: block; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="#" class="brand">
+      <span class="script">Tampa Bay</span>
+      <span class="name">Pirates</span>
+      <span class="division">XC</span>
+    </a>
+    <div class="user-area">
+      <span class="user-name" id="user-name">…</span>
+      <button class="signout-btn" id="signout-btn">Sign out</button>
+    </div>
+  </div>
+
+  <main>
+    <h1 class="page-title">Log a run</h1>
+    <p class="page-sub">Pick the run type, then enter what you tracked.</p>
+
+    <form id="run-form" autocomplete="off">
+
+      <!-- Date + run type -->
+      <div class="section">
+        <div class="row">
+          <div>
+            <label for="run-date">Date</label>
+            <input type="date" id="run-date" required>
+          </div>
+        </div>
+        <label style="margin-top:1rem;">Run type</label>
+        <div class="type-grid" id="type-grid">
+          <button type="button" class="type-btn" data-type="easy">Easy</button>
+          <button type="button" class="type-btn" data-type="long">Long</button>
+          <button type="button" class="type-btn" data-type="tempo">Tempo</button>
+          <button type="button" class="type-btn" data-type="intervals">Intervals</button>
+          <button type="button" class="type-btn" data-type="race">Race</button>
+          <button type="button" class="type-btn" data-type="cross_train">Cross-train</button>
+        </div>
+      </div>
+
+      <!-- Cross-train activity (cross_train only) -->
+      <div class="section hidden" id="xtrain-section">
+        <h2>Activity</h2>
+        <input type="text" id="xtrain-activity" placeholder="e.g. swimming, biking, elliptical">
+      </div>
+
+      <!-- Mode toggle (hidden for cross_train) -->
+      <div class="section" id="mode-section">
+        <h2>How do you want to enter it?</h2>
+        <div class="mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="simple">Simple</button>
+          <button type="button" class="mode-btn" data-mode="detailed">By segment</button>
+        </div>
+
+        <!-- SIMPLE mode -->
+        <div id="simple-mode">
+          <div class="row">
+            <div>
+              <label for="simple-distance">Distance (mi)</label>
+              <input type="number" id="simple-distance" step="0.01" min="0" inputmode="decimal" placeholder="3.50">
+            </div>
+            <div>
+              <label for="simple-time">Time</label>
+              <input type="text" id="simple-time" placeholder="32:15 or 1:05:30">
+              <div class="helper" id="simple-pace"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DETAILED mode -->
+        <div id="detailed-mode" class="hidden">
+          <div id="segments-list"></div>
+          <button type="button" class="add-seg-btn" id="add-segment-btn">+ Add segment</button>
+          <div class="totals">
+            <div>
+              <span class="label">Total distance</span>
+              <span class="value" id="seg-total-dist">0.00 mi</span>
+            </div>
+            <div>
+              <span class="label">Total time</span>
+              <span class="value" id="seg-total-time">—</span>
+            </div>
+            <div>
+              <span class="label">Avg pace</span>
+              <span class="value" id="seg-total-pace">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Effort -->
+      <div class="section">
+        <h2>Effort</h2>
+        <div class="row">
+          <div>
+            <label for="rpe">RPE (1–10)</label>
+            <input type="number" id="rpe" min="1" max="10" step="1" placeholder="6">
+            <div class="helper">1 = very easy, 10 = maximal</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Race-specific fields -->
+      <div class="section hidden" id="race-section">
+        <h2>Race details</h2>
+        <div class="row">
+          <div class="full">
+            <label for="race-meet">Meet name</label>
+            <input type="text" id="race-meet" placeholder="e.g. Hillsborough County Championship">
+          </div>
+          <div>
+            <label for="race-course-type">Course type</label>
+            <select id="race-course-type">
+              <option value="">—</option>
+              <option value="xc">Cross country</option>
+              <option value="track">Track</option>
+              <option value="road">Road</option>
+            </select>
+          </div>
+          <div>
+            <label for="race-distance-m">Official distance (m)</label>
+            <input type="number" id="race-distance-m" placeholder="3200 / 5000">
+          </div>
+          <div>
+            <label for="race-course-name">Course / venue</label>
+            <input type="text" id="race-course-name">
+          </div>
+          <div>
+            <label for="race-place-overall">Finish (overall)</label>
+            <input type="number" id="race-place-overall">
+          </div>
+          <div>
+            <label for="race-place-team">Finish (on team)</label>
+            <input type="number" id="race-place-team">
+          </div>
+          <div>
+            <label for="race-team-score">Team score</label>
+            <input type="number" id="race-team-score">
+          </div>
+          <div class="full">
+            <label for="race-opponents">Opponents</label>
+            <input type="text" id="race-opponents" placeholder="Other teams competing">
+          </div>
+          <div class="full">
+            <label for="race-conditions">Conditions notes</label>
+            <input type="text" id="race-conditions" placeholder="Hot, hilly, muddy, etc.">
+          </div>
+        </div>
+      </div>
+
+      <!-- Optional more detail -->
+      <details>
+        <summary>More detail (cadence, HR, shoes, weather…)</summary>
+        <div class="section-body">
+          <div class="row three">
+            <div>
+              <label for="cadence">Cadence (spm)</label>
+              <input type="number" id="cadence" min="100" max="250">
+            </div>
+            <div>
+              <label for="avg-hr">Avg HR</label>
+              <input type="number" id="avg-hr" min="30" max="240">
+            </div>
+            <div>
+              <label for="max-hr">Max HR</label>
+              <input type="number" id="max-hr" min="30" max="240">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="route">Route</label>
+              <input type="text" id="route" placeholder="Bayshore loop">
+            </div>
+            <div>
+              <label for="shoes">Shoes</label>
+              <input type="text" id="shoes">
+            </div>
+          </div>
+          <div class="row three">
+            <div>
+              <label for="conditions">Conditions</label>
+              <input type="text" id="conditions" placeholder="Sunny, humid">
+            </div>
+            <div>
+              <label for="temp-f">Temp (°F)</label>
+              <input type="number" id="temp-f">
+            </div>
+            <div>
+              <label for="wind">Wind (mph)</label>
+              <input type="number" id="wind" step="0.1">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Notes -->
+      <div class="section">
+        <h2>Notes</h2>
+        <textarea id="notes" placeholder="How did it feel? Anything to remember?"></textarea>
+      </div>
+
+      <div class="form-error" id="form-error"></div>
+
+      <div class="actions">
+        <button type="submit" class="btn-primary" id="save-btn">Save run</button>
+        <button type="reset" class="btn-secondary" id="reset-btn">Clear</button>
+      </div>
+    </form>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Celebration overlay -->
+  <div class="celebration" id="celebration">
+    <div class="celebration-card">
+      <div class="check">✓</div>
+      <h2>Run logged!</h2>
+      <p class="recap" id="celebration-recap"></p>
+      <div class="facts" id="celebration-facts"></div>
+      <button type="button" class="btn-primary" id="log-another-btn">Log another run</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
+
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // ---- auth guard ----
+    async function requireAthlete() {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { window.location.href = 'index.html'; return null; }
+
+      const { data: coach } = await sb
+        .from('coaches')
+        .select('id')
+        .eq('auth_user_id', session.user.id)
+        .eq('active', true)
+        .maybeSingle();
+      if (coach) {
+        // Coaches log via bulk page (future). For now, allow them through but flag.
+        // Could redirect to dashboard, but log_run is fine for self-logging too.
+      }
+
+      const { data: athlete } = await sb
+        .from('athletes')
+        .select('id, first_name, last_name')
+        .eq('auth_user_id', session.user.id)
+        .eq('active', true)
+        .maybeSingle();
+
+      if (!athlete && !coach) {
+        // Authenticated but on no roster — bounce to login with msg
+        await sb.auth.signOut();
+        window.location.href = 'index.html';
+        return null;
+      }
+
+      return { session, athlete, isCoach: !!coach };
+    }
+
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      await sb.auth.signOut();
+      window.location.href = 'index.html';
+    });
+
+    // ---- duration parse/format ----
+    function parseDuration(text) {
+      if (!text) return null;
+      const t = text.trim();
+      if (!t) return null;
+      const parts = t.split(':').map(p => p.trim());
+      if (parts.length > 3) return null;
+      const nums = parts.map(p => parseInt(p, 10));
+      if (nums.some(isNaN)) return null;
+      if (nums.length === 1) return nums[0];
+      if (nums.length === 2) return nums[0] * 60 + nums[1];
+      return nums[0] * 3600 + nums[1] * 60 + nums[2];
+    }
+    function formatDuration(sec) {
+      if (sec == null) return '—';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      if (h) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `${m}:${String(s).padStart(2,'0')}`;
+    }
+    function formatPace(secPerMile) {
+      if (!secPerMile || !isFinite(secPerMile)) return '—';
+      const m = Math.floor(secPerMile / 60);
+      const s = Math.round(secPerMile % 60);
+      return `${m}:${String(s).padStart(2,'0')} /mi`;
+    }
+
+    // ---- run type selector ----
+    let selectedType = null;
+    document.querySelectorAll('.type-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedType = btn.dataset.type;
+        document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('selected', b === btn));
+        applyTypeChange();
+      });
+    });
+
+    function applyTypeChange() {
+      document.getElementById('xtrain-section').classList.toggle('hidden', selectedType !== 'cross_train');
+      document.getElementById('race-section').classList.toggle('hidden', selectedType !== 'race');
+      document.getElementById('mode-section').classList.toggle('hidden', selectedType === 'cross_train');
+    }
+
+    // ---- mode toggle ----
+    let mode = 'simple';
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        mode = btn.dataset.mode;
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.getElementById('simple-mode').classList.toggle('hidden', mode !== 'simple');
+        document.getElementById('detailed-mode').classList.toggle('hidden', mode !== 'detailed');
+        if (mode === 'detailed' && segments.length === 0) addSegment();
+      });
+    });
+
+    // ---- simple-mode pace helper ----
+    function updateSimplePace() {
+      const dist = parseFloat(document.getElementById('simple-distance').value);
+      const time = parseDuration(document.getElementById('simple-time').value);
+      const el = document.getElementById('simple-pace');
+      if (dist > 0 && time > 0) {
+        el.textContent = 'Pace: ' + formatPace(time / dist);
+      } else { el.textContent = ''; }
+    }
+    document.getElementById('simple-distance').addEventListener('input', updateSimplePace);
+    document.getElementById('simple-time').addEventListener('input', updateSimplePace);
+
+    // ---- segments ----
+    const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown'];
+    let segments = []; // [{type, distance, time}]
+
+    function renderSegments() {
+      const wrap = document.getElementById('segments-list');
+      wrap.innerHTML = '';
+      segments.forEach((seg, i) => {
+        const row = document.createElement('div');
+        row.className = 'segment-row';
+        row.innerHTML = `
+          <div>
+            <label>Type</label>
+            <select data-i="${i}" data-field="type">
+              ${SEG_TYPES.map(t => `<option value="${t}" ${t===seg.type?'selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label>Distance (mi)</label>
+            <input type="number" step="0.01" min="0" inputmode="decimal" data-i="${i}" data-field="distance" value="${seg.distance ?? ''}">
+          </div>
+          <div>
+            <label>Time</label>
+            <input type="text" data-i="${i}" data-field="time" value="${seg.time ?? ''}" placeholder="MM:SS">
+          </div>
+          <button type="button" class="remove-seg" data-i="${i}" aria-label="Remove">×</button>
+        `;
+        wrap.appendChild(row);
+      });
+
+      wrap.querySelectorAll('[data-field]').forEach(el => {
+        el.addEventListener('input', (e) => {
+          const i = parseInt(e.target.dataset.i, 10);
+          const f = e.target.dataset.field;
+          segments[i][f] = e.target.value;
+          updateSegmentTotals();
+        });
+      });
+      wrap.querySelectorAll('.remove-seg').forEach(btn => {
+        btn.addEventListener('click', () => {
+          segments.splice(parseInt(btn.dataset.i, 10), 1);
+          renderSegments();
+          updateSegmentTotals();
+        });
+      });
+    }
+
+    function addSegment() {
+      // default new segments to a sensible type based on context
+      const defaultType = segments.length === 0 ? 'warmup' :
+                          segments.length === 1 ? (selectedType === 'intervals' ? 'interval' : 'easy') : 'easy';
+      segments.push({ type: defaultType, distance: '', time: '' });
+      renderSegments();
+      updateSegmentTotals();
+    }
+    document.getElementById('add-segment-btn').addEventListener('click', addSegment);
+
+    function updateSegmentTotals() {
+      let totalDist = 0, totalTime = 0;
+      segments.forEach(s => {
+        const d = parseFloat(s.distance);
+        const t = parseDuration(s.time);
+        if (d > 0) totalDist += d;
+        if (t > 0) totalTime += t;
+      });
+      document.getElementById('seg-total-dist').textContent = totalDist.toFixed(2) + ' mi';
+      document.getElementById('seg-total-time').textContent = totalTime > 0 ? formatDuration(totalTime) : '—';
+      document.getElementById('seg-total-pace').textContent =
+        (totalDist > 0 && totalTime > 0) ? formatPace(totalTime / totalDist) : '—';
+    }
+
+    // ---- toast ----
+    function toast(msg, isError) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.toggle('error', !!isError);
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3500);
+    }
+
+    // ---- save ----
+    document.getElementById('run-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('form-error');
+      errEl.classList.remove('show');
+      errEl.textContent = '';
+
+      if (!selectedType) {
+        errEl.textContent = 'Pick a run type first.';
+        errEl.classList.add('show');
+        return;
+      }
+      const runDate = document.getElementById('run-date').value;
+      if (!runDate) {
+        errEl.textContent = 'Pick a date.';
+        errEl.classList.add('show');
+        return;
+      }
+
+      const auth = await requireAthlete();
+      if (!auth) return;
+      if (!auth.athlete) {
+        errEl.textContent = 'You need to be on the roster as an athlete to log a run. (Coaches: use bulk log when ready.)';
+        errEl.classList.add('show');
+        return;
+      }
+
+      // Build payload
+      let distance = null, duration = null;
+      let segmentsToInsert = [];
+
+      if (selectedType === 'cross_train') {
+        const activity = document.getElementById('xtrain-activity').value.trim();
+        if (!activity) { showErr('Tell us what cross-training activity you did.'); return; }
+        distance = parseFloat(document.getElementById('simple-distance').value) || null;
+        duration = parseDuration(document.getElementById('simple-time').value) || null;
+        if (!duration && !distance) { showErr('Enter at least a distance or a time.'); return; }
+      } else if (mode === 'simple') {
+        distance = parseFloat(document.getElementById('simple-distance').value) || null;
+        duration = parseDuration(document.getElementById('simple-time').value) || null;
+        if (!distance && !duration) { showErr('Enter at least a distance or a time.'); return; }
+        // Create one segment matching the run type
+        const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo' };
+        const segType = segTypeMap[selectedType];
+        if (segType) {
+          segmentsToInsert.push({
+            segment_order: 1, segment_type: segType,
+            distance_miles: distance, duration_seconds: duration,
+          });
+        }
+      } else {
+        // detailed mode
+        if (segments.length === 0) { showErr('Add at least one segment.'); return; }
+        let order = 1;
+        let totalDist = 0, totalTime = 0;
+        for (const s of segments) {
+          const d = parseFloat(s.distance) || null;
+          const t = parseDuration(s.time) || null;
+          if (!s.type) { showErr('Every segment needs a type.'); return; }
+          if (!d && !t) { showErr('Every segment needs a distance or a time.'); return; }
+          segmentsToInsert.push({
+            segment_order: order++, segment_type: s.type,
+            distance_miles: d, duration_seconds: t,
+          });
+          if (d) totalDist += d;
+          if (t) totalTime += t;
+        }
+        distance = totalDist > 0 ? totalDist : null;
+        duration = totalTime > 0 ? totalTime : null;
+      }
+
+      // optional fields
+      const num = (id) => { const v = parseFloat(document.getElementById(id).value); return isNaN(v) ? null : v; };
+      const txt = (id) => { const v = document.getElementById(id).value.trim(); return v || null; };
+      const int = (id) => { const v = parseInt(document.getElementById(id).value, 10); return isNaN(v) ? null : v; };
+
+      const runPayload = {
+        athlete_id: auth.athlete.id,
+        run_date: runDate,
+        run_type: selectedType,
+        distance_miles: distance,
+        duration_seconds: duration,
+        avg_cadence: int('cadence'),
+        avg_hr: int('avg-hr'),
+        max_hr: int('max-hr'),
+        effort_rpe: int('rpe'),
+        route: txt('route'),
+        shoes: txt('shoes'),
+        conditions: txt('conditions'),
+        temperature_f: int('temp-f'),
+        wind_mph: num('wind'),
+        cross_train_activity: selectedType === 'cross_train' ? txt('xtrain-activity') : null,
+        notes: txt('notes'),
+        created_by: auth.session.user.id,
+      };
+
+      const saveBtn = document.getElementById('save-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+
+      // Insert run
+      const { data: runRow, error: runErr } = await sb
+        .from('runs').insert(runPayload).select('id').single();
+
+      if (runErr) {
+        saveBtn.disabled = false; saveBtn.textContent = 'Save run';
+        showErr('Error saving run: ' + runErr.message);
+        return;
+      }
+
+      // Insert segments
+      if (segmentsToInsert.length) {
+        const segRows = segmentsToInsert.map(s => ({ ...s, run_id: runRow.id }));
+        const { error: segErr } = await sb.from('run_segments').insert(segRows);
+        if (segErr) {
+          saveBtn.disabled = false; saveBtn.textContent = 'Save run';
+          showErr('Run saved but segments failed: ' + segErr.message);
+          return;
+        }
+      }
+
+      // Insert race_results if race
+      if (selectedType === 'race') {
+        const racePayload = {
+          run_id: runRow.id,
+          meet_name: txt('race-meet'),
+          course_name: txt('race-course-name'),
+          course_type: txt('race-course-type'),
+          official_distance_meters: int('race-distance-m'),
+          finish_place_overall: int('race-place-overall'),
+          finish_place_team: int('race-place-team'),
+          team_score_total: int('race-team-score'),
+          opponents: txt('race-opponents'),
+          conditions_notes: txt('race-conditions'),
+        };
+        if (!racePayload.meet_name) {
+          showErr('Run saved but meet name was missing. Add it from My Runs once that page exists.');
+        } else {
+          const { error: raceErr } = await sb.from('race_results').insert(racePayload);
+          if (raceErr) {
+            showErr('Run saved but race details failed: ' + raceErr.message);
+          }
+        }
+      }
+
+      saveBtn.disabled = false; saveBtn.textContent = 'Save run';
+      await showCelebration(runPayload, auth.athlete.id);
+
+      function showErr(msg) {
+        saveBtn.disabled = false; saveBtn.textContent = 'Save run';
+        errEl.textContent = msg;
+        errEl.classList.add('show');
+      }
+    });
+
+    function showErr(msg) {
+      const errEl = document.getElementById('form-error');
+      errEl.textContent = msg;
+      errEl.classList.add('show');
+    }
+
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      setTimeout(resetForm, 0); // run after form's native reset
+    });
+
+    function resetForm() {
+      document.getElementById('run-form').reset();
+      document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
+      selectedType = null;
+      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
+      mode = 'simple';
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'simple'));
+      document.getElementById('simple-mode').classList.remove('hidden');
+      document.getElementById('detailed-mode').classList.add('hidden');
+      segments = [];
+      renderSegments();
+      updateSegmentTotals();
+      applyTypeChange();
+      document.getElementById('form-error').classList.remove('show');
+      document.getElementById('simple-pace').textContent = '';
+    }
+
+    // ---- celebration / fun facts ----
+    function startOfWeekISO() {
+      const now = new Date();
+      const day = now.getDay();
+      const diff = (day + 6) % 7;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - diff);
+      monday.setHours(0, 0, 0, 0);
+      return monday.toISOString().slice(0, 10);
+    }
+
+    function formatMiles(m) {
+      const n = Number(m);
+      return (n < 10 ? n.toFixed(2) : n.toFixed(1)) + ' miles';
+    }
+
+    function typeLabel(type) {
+      return ({
+        easy: 'Easy day',
+        long: 'Long run',
+        tempo: 'Tempo',
+        intervals: 'Speed work',
+        race: 'Race day!',
+        cross_train: 'Cross training'
+      })[type] || 'Nice run';
+    }
+
+    function runTypeFlavor(type, rpe) {
+      const flavors = {
+        easy: [
+          'Easy miles are the foundation. Most of great training looks like this.',
+          'Smooth and steady — exactly what easy days should be.',
+          'These are the miles that build your engine.',
+        ],
+        long: [
+          'Long runs build the engine. Every step counts.',
+          'This is the bread and butter of distance training.',
+          'Time on your feet today pays off on race day.',
+        ],
+        tempo: [
+          'Tempo work — this is where you get strong.',
+          'Comfortably hard. The exact pace that builds your race shape.',
+          'Tempos teach your body to handle hard efforts. Sneaky-important.',
+        ],
+        intervals: [
+          'Speed work! Uncomfortable now, fast later.',
+          'Intervals make the easy paces feel easier. Worth it.',
+          'This is how PRs get built.',
+        ],
+        race: [
+          'Race day! Way to show up and compete.',
+          'The toughest part of racing is starting. You did it.',
+          'Win or learn — either way, today made you a better runner.',
+        ],
+        cross_train: [
+          'Cross training builds fitness from a new angle.',
+          'Smart day — your legs will thank you.',
+          'Variety keeps the body sharp and the mind fresh.',
+        ],
+      };
+      const list = flavors[type] || ['Nice work logging this one.'];
+      let base = list[Math.floor(Math.random() * list.length)];
+      if (rpe >= 8) base += ' That was a tough one — hydrate and recover well.';
+      else if (rpe && rpe <= 3) base += ' Easy efforts are when your body builds back stronger.';
+      return base;
+    }
+
+    function stepComparison(steps) {
+      if (steps >= 25000) return "That's a marathon's worth of steps — wow!";
+      if (steps >= 20000) return 'About what it takes to walk a 10K.';
+      if (steps >= 15000) return 'Enough to walk the Tampa Riverwalk and back.';
+      if (steps >= 10000) return 'Past the daily step goal most adults aim for.';
+      if (steps >= 7500) return 'About the length of Bayshore Boulevard twice over.';
+      if (steps >= 5000) return 'Roughly the length of Bayshore Boulevard.';
+      if (steps >= 3000) return "More than climbing the stairs of Tampa's tallest building.";
+      if (steps >= 1500) return 'About a dozen city blocks.';
+      return 'Every step counts!';
+    }
+
+    function weekDistanceComparison(miles) {
+      if (miles >= 50) return "That's an enormous training week.";
+      if (miles >= 35) return "You'd run from Tampa to Lakeland this week.";
+      if (miles >= 26.2) return 'More than a marathon this week!';
+      if (miles >= 22) return 'Tampa all the way to Plant City!';
+      if (miles >= 15) return 'Tampa to Brandon and back.';
+      if (miles >= 13.1) return "That's a half marathon this week.";
+      if (miles >= 10) return 'Tampa to St. Pete.';
+      if (miles >= 6.2) return "You've run a 10K this week.";
+      if (miles >= 5) return 'About an 8K.';
+      if (miles >= 3.1) return "That's a 5K this week.";
+      return 'Great start to the week.';
+    }
+
+    function allTimeComparison(miles) {
+      if (miles >= 3000) return 'Coast to coast across America!';
+      if (miles >= 2400) return 'Tampa all the way to Los Angeles!';
+      if (miles >= 1500) return 'Tampa to Boston!';
+      if (miles >= 1150) return 'Tampa to New York City!';
+      if (miles >= 870) return 'Tampa to Washington, DC!';
+      if (miles >= 600) return 'Tampa to Charleston, SC.';
+      if (miles >= 400) return 'Tampa to Atlanta!';
+      if (miles >= 280) return 'Tampa to Miami.';
+      if (miles >= 200) return 'Tampa to Jacksonville.';
+      if (miles >= 130) return 'Tampa to Gainesville.';
+      if (miles >= 85) return 'Tampa to Orlando!';
+      if (miles >= 60) return 'Tampa to Sarasota.';
+      if (miles >= 35) return 'Tampa to Lakeland.';
+      if (miles >= 22) return 'Tampa to Plant City.';
+      if (miles >= 13.1) return "That's a half marathon stacked up — keep going.";
+      return "Keep stacking — those miles add up faster than you'd think.";
+    }
+
+    function escapeHtmlSimple(s) {
+      return String(s || '').replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+      ));
+    }
+
+    async function generateFunFacts(runPayload, athleteId) {
+      const facts = [];
+
+      facts.push({
+        label: typeLabel(runPayload.run_type),
+        text: runTypeFlavor(runPayload.run_type, runPayload.effort_rpe)
+      });
+
+      if (runPayload.avg_cadence && runPayload.duration_seconds) {
+        const steps = Math.round(runPayload.avg_cadence * runPayload.duration_seconds / 60);
+        facts.push({
+          label: 'Steps today',
+          text: `About ${steps.toLocaleString()} steps. ${stepComparison(steps)}`
+        });
+      }
+
+      const weekStart = startOfWeekISO();
+      const { data: weekRuns } = await sb.from('runs')
+        .select('distance_miles')
+        .eq('athlete_id', athleteId)
+        .gte('run_date', weekStart);
+      const weekMiles = (weekRuns || []).reduce((s, r) => s + Number(r.distance_miles || 0), 0);
+      if (weekMiles > 0) {
+        facts.push({
+          label: 'This week',
+          text: `You're up to ${formatMiles(weekMiles)} this week. ${weekDistanceComparison(weekMiles)}`
+        });
+      }
+
+      const { data: allRuns } = await sb.from('runs')
+        .select('distance_miles')
+        .eq('athlete_id', athleteId);
+      const allTimeMiles = (allRuns || []).reduce((s, r) => s + Number(r.distance_miles || 0), 0);
+      if (allTimeMiles >= 10) {
+        facts.push({
+          label: 'All-time',
+          text: `${formatMiles(allTimeMiles)} logged total. ${allTimeComparison(allTimeMiles)}`
+        });
+      }
+
+      return facts;
+    }
+
+    async function showCelebration(runPayload, athleteId) {
+      const recapEl = document.getElementById('celebration-recap');
+      const factsEl = document.getElementById('celebration-facts');
+
+      let recap;
+      if (runPayload.run_type === 'cross_train') {
+        const dur = runPayload.duration_seconds ? formatDuration(runPayload.duration_seconds) : '';
+        const act = runPayload.cross_train_activity || 'cross training';
+        recap = dur ? `${dur} of ${act}.` : `Logged your ${act} session.`;
+      } else {
+        const parts = [];
+        if (runPayload.distance_miles) parts.push(formatMiles(runPayload.distance_miles));
+        if (runPayload.duration_seconds) parts.push('in ' + formatDuration(runPayload.duration_seconds));
+        if (runPayload.distance_miles && runPayload.duration_seconds) {
+          parts.push('(' + formatPace(runPayload.duration_seconds / Number(runPayload.distance_miles)) + ')');
+        }
+        recap = parts.join(' ') || 'Logged!';
+      }
+
+      recapEl.textContent = recap;
+      factsEl.innerHTML = '<div class="fun-fact" style="font-style:italic;color:var(--slate-2);">Loading…</div>';
+      document.getElementById('celebration').classList.add('show');
+
+      const facts = await generateFunFacts(runPayload, athleteId);
+      factsEl.innerHTML = facts.map(f => `
+        <div class="fun-fact">
+          <span class="fun-fact-label">${escapeHtmlSimple(f.label)}</span>
+          ${escapeHtmlSimple(f.text)}
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('log-another-btn').addEventListener('click', () => {
+      document.getElementById('celebration').classList.remove('show');
+      resetForm();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    // ---- boot ----
+    (async () => {
+      const auth = await requireAthlete();
+      if (!auth) return;
+
+      const name = auth.athlete
+        ? auth.athlete.first_name + ' ' + auth.athlete.last_name.charAt(0) + '.'
+        : 'Coach';
+      document.getElementById('user-name').textContent = name;
+
+      document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
+    })();
+  </script>
+</body>
+</html>
