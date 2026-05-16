@@ -1281,28 +1281,34 @@
     }
 
     function stepComparison(steps) {
-      if (steps >= 25000) return "That's a marathon's worth of steps — wow!";
-      if (steps >= 20000) return 'About what it takes to walk a 10K.';
-      if (steps >= 15000) return 'Enough to walk the Tampa Riverwalk and back.';
-      if (steps >= 10000) return 'Past the daily step goal most adults aim for.';
-      if (steps >= 7500) return 'About the length of Bayshore Boulevard twice over.';
-      if (steps >= 5000) return 'Roughly the length of Bayshore Boulevard.';
-      if (steps >= 3000) return "More than climbing the stairs of Tampa's tallest building.";
-      if (steps >= 1500) return 'About a dozen city blocks.';
+      // Conversion: ~2000 running steps per mile for a kid's stride. Bayshore
+      // Blvd is 4.5 mi of continuous sidewalk (~9,000 steps one way).
+      if (steps >= 52000) return "That's a marathon's worth of steps — wow!";
+      if (steps >= 26000) return 'A half marathon on foot (13.1 mi).';
+      if (steps >= 18000) return 'Bayshore Boulevard out-and-back (9 miles of sidewalk).';
+      if (steps >= 12000) return 'A 10K (6.2 mi) worth of steps.';
+      if (steps >= 9000)  return "About the full length of Bayshore Boulevard (4.5 mi — longest continuous sidewalk in the world).";
+      if (steps >= 6500)  return 'More than a 5K worth of steps.';
+      if (steps >= 4500)  return 'Over two miles on foot — solid.';
+      if (steps >= 2500)  return 'About a mile — four laps around a track.';
+      if (steps >= 1500)  return 'Roughly three-quarters of a mile.';
       return 'Every step counts!';
     }
 
     function weekDistanceComparison(miles) {
+      // Driving distances from Tampa (approx, one-way):
+      //   Plant City 22  ·  Lakeland 35  ·  Sarasota 60
+      // Bayshore Blvd sidewalk = 4.5 mi continuous (longest in the world).
       if (miles >= 50) return "That's an enormous training week.";
-      if (miles >= 35) return "You'd run from Tampa to Lakeland this week.";
-      if (miles >= 26.2) return 'More than a marathon this week!';
-      if (miles >= 22) return 'Tampa all the way to Plant City!';
-      if (miles >= 15) return 'Tampa to Brandon and back.';
-      if (miles >= 13.1) return "That's a half marathon this week.";
-      if (miles >= 10) return 'Tampa to St. Pete.';
-      if (miles >= 6.2) return "You've run a 10K this week.";
-      if (miles >= 5) return 'About an 8K.';
-      if (miles >= 3.1) return "That's a 5K this week.";
+      if (miles >= 35) return 'From Tampa to Lakeland this week.';
+      if (miles >= 26.2) return 'A marathon in one week!';
+      if (miles >= 22) return 'Tampa to Plant City — big week.';
+      if (miles >= 18) return 'About Bayshore Boulevard four times over.';
+      if (miles >= 13.1) return 'More than a half marathon this week.';
+      if (miles >= 9) return 'Bayshore Boulevard twice over.';
+      if (miles >= 6.2) return "A 10K's worth of running this week.";
+      if (miles >= 4.5) return 'About the length of Bayshore Boulevard.';
+      if (miles >= 3.1) return 'A 5K this week — nice start.';
       return 'Great start to the week.';
     }
 
