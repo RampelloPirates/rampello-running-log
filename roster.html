@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Roster — Tampa Bay Pirates XC</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pirates XC">
   <style>
     :root {
       --red:      #c8102e;
@@ -66,24 +73,59 @@
       text-transform: uppercase;
     }
 
-    .user-area {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      font-size: 0.85rem;
-    }
-    .user-name { color: var(--silver); }
-    .signout-btn {
+    .user-area { position: relative; }
+    .menu-btn {
       background: transparent;
       color: var(--paper);
       border: 1px solid var(--silver-2);
-      padding: 0.35rem 0.8rem;
-      font-size: 0.8rem;
+      width: 38px;
+      height: 38px;
       border-radius: 3px;
       cursor: pointer;
+      font-size: 1.3rem;
+      font-weight: 700;
+      line-height: 1;
       font-family: var(--font-body);
+      padding: 0;
     }
-    .signout-btn:hover { background: var(--red); border-color: var(--red); }
+    .menu-btn:hover { background: var(--red); border-color: var(--red); }
+
+    .menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      background: var(--paper);
+      color: var(--black);
+      border: 1px solid var(--silver-2);
+      border-radius: 4px;
+      min-width: 220px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      display: none;
+      z-index: 50;
+      overflow: hidden;
+    }
+    .menu.show { display: block; }
+    .menu-user {
+      padding: 0.85rem 1rem;
+      font-size: 0.85rem;
+      color: var(--slate);
+      border-bottom: 1px solid var(--silver-2);
+      background: var(--bone);
+    }
+    .menu-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-family: var(--font-body);
+      color: var(--black);
+    }
+    .menu-item:hover { background: var(--bone); }
+    .menu-item.danger { color: var(--red); }
 
     /* ---------- main ---------- */
     main {
@@ -328,8 +370,11 @@
       <span class="division">XC</span>
     </a>
     <div class="user-area">
-      <span class="user-name" id="user-name">…</span>
-      <button class="signout-btn" id="signout-btn">Sign out</button>
+      <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
+      <div class="menu" id="menu" role="menu">
+        <div class="menu-user" id="user-name">…</div>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+      </div>
     </div>
   </div>
 
@@ -435,7 +480,19 @@
       return coach;
     }
 
+    // menu toggle
+    const menuBtn = document.getElementById('menu-btn');
+    const menu = document.getElementById('menu');
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.classList.toggle('show');
+    });
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
+    });
+
     document.getElementById('signout-btn').addEventListener('click', async () => {
+      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
       await sb.auth.signOut();
       window.location.href = 'index.html';
     });

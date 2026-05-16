@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sign In — Tampa Bay Pirates XC</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pirates XC">
   <style>
     :root {
       --red:      #c8102e;
@@ -170,6 +177,99 @@
       font-size: 0.8rem;
       color: var(--slate);
     }
+
+    .install-link {
+      display: block;
+      background: transparent;
+      color: var(--slate);
+      border: 1px dashed var(--silver);
+      padding: 0.7rem 1rem;
+      margin: 1rem 0 0 0;
+      text-align: center;
+      font-family: var(--font-body);
+      font-size: 0.85rem;
+      cursor: pointer;
+      border-radius: 4px;
+      width: 100%;
+      letter-spacing: 0.3px;
+    }
+    .install-link:hover {
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    .install-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      z-index: 200;
+      padding: 1.5rem 1rem;
+      overflow-y: auto;
+    }
+    .install-modal.show { display: flex; }
+    .install-card {
+      background: var(--bone);
+      border-radius: 6px;
+      width: 100%;
+      max-width: 480px;
+      border-top: 6px solid var(--red);
+      color: var(--black);
+    }
+    .install-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .install-header h2 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+    .install-close {
+      background: none;
+      border: none;
+      font-size: 1.6rem;
+      color: var(--slate);
+      cursor: pointer;
+      line-height: 1;
+      padding: 0;
+    }
+    .install-body {
+      padding: 1.25rem;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: #1a1a1a;
+    }
+    .install-intro {
+      margin: 0 0 1.25rem 0;
+      font-style: italic;
+      color: var(--slate);
+    }
+    .install-platform { margin-bottom: 1.5rem; }
+    .install-platform h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin: 0 0 0.6rem 0;
+      color: var(--red);
+    }
+    .install-platform ol { margin: 0; padding-left: 1.4rem; }
+    .install-platform li { margin-bottom: 0.5rem; }
+    .install-note {
+      margin: 1.5rem 0 0 0;
+      padding: 0.85rem 1rem;
+      background: #fff8e1;
+      border-left: 3px solid #b45309;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      border-radius: 0 3px 3px 0;
+    }
   </style>
 </head>
 <body>
@@ -200,6 +300,45 @@
     <div class="footer">
       Not on the roster? Ask Coach Sowell.
     </div>
+
+    <button type="button" class="install-link" id="install-link">
+      Install on your phone — one-tap access
+    </button>
+  </div>
+
+  <!-- Install instructions modal -->
+  <div class="install-modal" id="install-modal">
+    <div class="install-card">
+      <div class="install-header">
+        <h2>Add to home screen</h2>
+        <button type="button" class="install-close" id="install-close" aria-label="Close">×</button>
+      </div>
+      <div class="install-body">
+        <p class="install-intro">Once installed, just tap the icon — no need to type your email every time.</p>
+
+        <div class="install-platform">
+          <h3>iPhone or iPad (Safari)</h3>
+          <ol>
+            <li>Tap the <strong>Share</strong> button — the square with an arrow pointing up (bottom of the screen on iPhone, top-right on iPad).</li>
+            <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+            <li>Tap <strong>Add</strong> in the top right.</li>
+          </ol>
+        </div>
+
+        <div class="install-platform">
+          <h3>Android (Chrome)</h3>
+          <ol>
+            <li>Tap the <strong>menu</strong> button (⋮) in the top right.</li>
+            <li>Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+            <li>Tap <strong>Install</strong>.</li>
+          </ol>
+        </div>
+
+        <p class="install-note">
+          After installing, open the app from your home screen and sign in once. You'll stay signed in from then on — no more emails.
+        </p>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -208,6 +347,22 @@
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
 
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // ---- install modal ----
+    const installLink = document.getElementById('install-link');
+    const installModal = document.getElementById('install-modal');
+    const installClose = document.getElementById('install-close');
+
+    // Hide install prompt if already running as installed app
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+      installLink.style.display = 'none';
+    }
+
+    installLink.addEventListener('click', () => installModal.classList.add('show'));
+    installClose.addEventListener('click', () => installModal.classList.remove('show'));
+    installModal.addEventListener('click', (e) => {
+      if (e.target === installModal) installModal.classList.remove('show');
+    });
 
     const form = document.getElementById('login-form');
     const emailInput = document.getElementById('email');
