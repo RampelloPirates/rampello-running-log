@@ -432,7 +432,43 @@
       margin: 0 0 1.5rem 0;
       font-size: 1rem;
     }
-    .celebration .facts { text-align: left; margin-bottom: 1.5rem; }
+    .celebration .facts { text-align: left; margin-bottom: 1rem; }
+    .celebration .paces-mini {
+      text-align: left;
+      margin-bottom: 1.5rem;
+      background: var(--bone);
+      border-radius: 3px;
+      padding: 0.85rem 1rem;
+    }
+    .celebration .paces-mini-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 0.5rem;
+    }
+    .celebration .paces-mini table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .celebration .paces-mini td { padding: 0.3rem 0.25rem; border-bottom: 1px solid var(--silver-2); }
+    .celebration .paces-mini tr:last-child td { border-bottom: none; }
+    .celebration .paces-mini td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .celebration .paces-mini .pace { font-weight: 700; }
+    .celebration .paces-mini .seg-pill {
+      display: inline-block; font-size: 0.65rem;
+      padding: 0.15rem 0.5rem; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      font-weight: 700; background: var(--silver-2); color: var(--slate);
+    }
+    .celebration .paces-mini .seg-warmup { background:#e3f2fd; color:#0d47a1; }
+    .celebration .paces-mini .seg-easy   { background:#e8f5e9; color:#1b5e20; }
+    .celebration .paces-mini .seg-tempo  { background:#fff3e0; color:#b45309; }
+    .celebration .paces-mini .seg-threshold { background:#fff3e0; color:#a04000; }
+    .celebration .paces-mini .seg-interval,
+    .celebration .paces-mini .seg-hill { background:#ffebee; color:#b71c1c; }
+    .celebration .paces-mini .seg-rest { background:#ede7f6; color:#4527a0; }
+    .celebration .paces-mini .seg-fartlek { background:#fce4ec; color:#880e4f; }
+    .celebration .paces-mini .seg-strides { background:#e0f7fa; color:#006064; }
+    .celebration .paces-mini .seg-cooldown { background:#e0e0e0; color:#424242; }
     .fun-fact {
       background: var(--bone);
       border-left: 4px solid var(--red);
@@ -475,6 +511,7 @@
       <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
       <div class="menu" id="menu" role="menu">
         <div class="menu-user" id="user-name">…</div>
+        <a class="menu-item" href="my_runs.html" role="menuitem">My runs</a>
         <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
@@ -684,6 +721,7 @@
       <h2>Run logged!</h2>
       <p class="recap" id="celebration-recap"></p>
       <div class="facts" id="celebration-facts"></div>
+      <div class="paces-mini" id="celebration-paces" style="display:none"></div>
       <button type="button" class="btn-primary" id="log-another-btn">Log another run</button>
     </div>
   </div>
@@ -1039,7 +1077,7 @@
       }
 
       saveBtn.disabled = false; saveBtn.textContent = 'Save run';
-      await showCelebration(runPayload, auth.athlete.id);
+      await showCelebration(runPayload, segmentsToInsert, auth.athlete.id);
 
       function showErr(msg) {
         saveBtn.disabled = false; saveBtn.textContent = 'Save run';
@@ -1236,9 +1274,53 @@
       return facts;
     }
 
-    async function showCelebration(runPayload, athleteId) {
+    function renderPaceBreakdown(segments) {
+      const byType = {};
+      (segments || []).forEach(s => {
+        const t = s.segment_type;
+        if (!byType[t]) byType[t] = { miles: 0, seconds: 0 };
+        if (s.distance_miles) byType[t].miles += Number(s.distance_miles);
+        if (s.duration_seconds) byType[t].seconds += Number(s.duration_seconds);
+      });
+      const types = Object.keys(byType);
+      if (types.length < 2) return ''; // only show if there's variety
+
+      const order = ['warmup','easy','tempo','threshold','interval','hill','fartlek','strides','rest','cooldown'];
+      const sorted = types.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+
+      const rows = sorted.map(t => {
+        const d = byType[t];
+        const pace = (d.miles > 0 && d.seconds > 0) ? d.seconds / d.miles : null;
+        return `
+          <tr>
+            <td><span class="seg-pill seg-${t}">${t}</span></td>
+            <td class="num">${d.miles ? d.miles.toFixed(2) + ' mi' : '—'}</td>
+            <td class="num">${d.seconds ? formatDuration(d.seconds) : '—'}</td>
+            <td class="num pace">${formatPace(pace)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <div class="paces-mini-title">Your paces today</div>
+        <table>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    async function showCelebration(runPayload, segments, athleteId) {
       const recapEl = document.getElementById('celebration-recap');
       const factsEl = document.getElementById('celebration-facts');
+      const pacesEl = document.getElementById('celebration-paces');
+
+      const paceHtml = renderPaceBreakdown(segments);
+      if (paceHtml) {
+        pacesEl.innerHTML = paceHtml;
+        pacesEl.style.display = 'block';
+      } else {
+        pacesEl.style.display = 'none';
+      }
 
       let recap;
       if (runPayload.run_type === 'cross_train') {

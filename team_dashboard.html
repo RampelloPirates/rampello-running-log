@@ -352,12 +352,7 @@
     <div class="nav-grid">
       <a href="roster.html" class="nav-card">
         <div class="nav-title">Roster</div>
-        <div class="nav-desc">Add, edit, or deactivate athletes.</div>
-      </a>
-      <a href="#" class="nav-card disabled">
-        <div class="nav-title">Athlete detail</div>
-        <div class="nav-desc">Drill into one athlete's training history.</div>
-        <div class="nav-coming-soon">Coming soon</div>
+        <div class="nav-desc">Add or edit athletes. Click any name to see their training detail.</div>
       </a>
       <a href="#" class="nav-card disabled">
         <div class="nav-title">Bulk log</div>
@@ -468,7 +463,7 @@
       // recent runs table (last 10)
       const { data: recent } = await sb
         .from('runs')
-        .select('id, run_date, run_type, distance_miles, duration_seconds, athletes(first_name, last_name)')
+        .select('id, run_date, run_type, distance_miles, duration_seconds, athlete_id, athletes(first_name, last_name)')
         .order('run_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(10);
@@ -494,7 +489,9 @@
             ${recent.map(r => `
               <tr>
                 <td>${formatDate(r.run_date)}</td>
-                <td>${r.athletes ? r.athletes.first_name + ' ' + r.athletes.last_name : '—'}</td>
+                <td>${r.athletes
+                  ? `<a href="athlete_detail.html?id=${r.athlete_id}" style="color:var(--black);text-decoration:none;border-bottom:1px dotted var(--silver);">${r.athletes.first_name} ${r.athletes.last_name}</a>`
+                  : '—'}</td>
                 <td><span class="type-pill type-${r.run_type}">${r.run_type.replace('_', ' ')}</span></td>
                 <td>${r.distance_miles ? Number(r.distance_miles).toFixed(2) : '—'}</td>
                 <td>${formatDuration(r.duration_seconds)}</td>

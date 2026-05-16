@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Runs — Tampa Bay Pirates XC</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pirates XC">
+  <style>
+    :root {
+      --red:      #c8102e;
+      --red-dark: #a00d24;
+      --black:    #1a1a1a;
+      --bone:     #f9f6f0;
+      --paper:    #ffffff;
+      --slate:    #4a5568;
+      --slate-2:  #6b7280;
+      --silver:   #d1d5db;
+      --silver-2: #e5e7eb;
+      --green:    #1b5e20;
+      --amber:    #b45309;
+      --font-display: Georgia, 'Times New Roman', serif;
+      --font-body:    'Helvetica Neue', Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background: var(--bone);
+      color: var(--black);
+      min-height: 100vh;
+    }
+
+    /* topbar */
+    .topbar {
+      background: var(--black);
+      color: var(--paper);
+      padding: 0.85rem 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 4px solid var(--red);
+    }
+    .brand {
+      display: flex; align-items: baseline; gap: 0.6rem;
+      text-decoration: none; color: inherit;
+    }
+    .brand .script { font-family: var(--font-display); font-style: italic; color: var(--red); font-size: 1rem; }
+    .brand .name { font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; font-size: 1.05rem; }
+    .brand .division { font-size: 0.7rem; color: var(--silver); letter-spacing: 2px; text-transform: uppercase; }
+
+    .user-area { position: relative; }
+    .menu-btn {
+      background: transparent; color: var(--paper);
+      border: 1px solid var(--silver-2);
+      width: 38px; height: 38px;
+      border-radius: 3px; cursor: pointer;
+      font-size: 1.3rem; font-weight: 700; line-height: 1;
+      font-family: var(--font-body); padding: 0;
+    }
+    .menu-btn:hover { background: var(--red); border-color: var(--red); }
+    .menu {
+      position: absolute; top: calc(100% + 8px); right: 0;
+      background: var(--paper); color: var(--black);
+      border: 1px solid var(--silver-2); border-radius: 4px;
+      min-width: 220px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      display: none; z-index: 50; overflow: hidden;
+    }
+    .menu.show { display: block; }
+    .menu-user {
+      padding: 0.85rem 1rem; font-size: 0.85rem;
+      color: var(--slate);
+      border-bottom: 1px solid var(--silver-2);
+      background: var(--bone);
+    }
+    .menu-item {
+      display: block; width: 100%; text-align: left;
+      background: none; border: none;
+      padding: 0.75rem 1rem; font-size: 0.9rem;
+      cursor: pointer; font-family: var(--font-body); color: var(--black);
+      text-decoration: none;
+    }
+    .menu-item:hover { background: var(--bone); }
+    .menu-item.danger { color: var(--red); }
+
+    /* main */
+    main { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem 4rem 1rem; }
+
+    .page-title { font-size: 1.6rem; margin: 0 0 0.25rem 0; font-weight: 700; }
+    .page-sub { color: var(--slate); margin: 0 0 1.5rem 0; font-size: 0.95rem; }
+
+    h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--slate);
+      margin: 0 0 0.85rem 0;
+      font-weight: 700;
+    }
+
+    /* CTA log button */
+    .log-cta {
+      display: block;
+      background: var(--red); color: var(--paper);
+      padding: 1rem 1.25rem; border-radius: 4px;
+      text-decoration: none;
+      font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+      font-size: 0.9rem; text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .log-cta:hover { background: var(--red-dark); }
+
+    /* range filter */
+    .range-filter {
+      display: flex; gap: 0.25rem;
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 3px; border-radius: 4px;
+      margin-bottom: 1rem;
+      width: fit-content;
+    }
+    .range-btn {
+      background: transparent; border: none;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.8rem; cursor: pointer;
+      font-family: var(--font-body); color: var(--slate);
+      border-radius: 3px;
+    }
+    .range-btn.active {
+      background: var(--black); color: var(--paper); font-weight: 700;
+    }
+
+    /* stat tiles */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-left: 4px solid var(--red);
+      padding: 1rem;
+      border-radius: 4px;
+    }
+    .stat .label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate-2);
+      margin-bottom: 0.3rem;
+      font-weight: 700;
+    }
+    .stat .value {
+      font-size: 1.6rem; font-weight: 700; color: var(--black); line-height: 1;
+    }
+    .stat .unit { font-size: 0.75rem; color: var(--slate); margin-left: 0.2rem; font-weight: 400; }
+
+    /* pace-by-type panel */
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 4px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .panel-heading {
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--silver-2);
+      background: var(--bone);
+    }
+    .panel-heading h3 {
+      margin: 0;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--slate);
+      font-weight: 700;
+    }
+
+    .pace-table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    .pace-table th {
+      text-align: left;
+      padding: 0.6rem 1rem;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate-2);
+      border-bottom: 1px solid var(--silver-2);
+      font-weight: 700;
+    }
+    .pace-table th.num, .pace-table td.num { text-align: right; }
+    .pace-table td {
+      padding: 0.7rem 1rem;
+      border-bottom: 1px solid var(--silver-2);
+    }
+    .pace-table tr:last-child td { border-bottom: none; }
+    .seg-pill {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 700;
+      background: var(--silver-2);
+      color: var(--slate);
+    }
+    .seg-warmup { background:#e3f2fd; color:#0d47a1; }
+    .seg-easy   { background:#e8f5e9; color:#1b5e20; }
+    .seg-tempo  { background:#fff3e0; color:#b45309; }
+    .seg-threshold { background:#fff3e0; color:#a04000; }
+    .seg-interval, .seg-hill { background:#ffebee; color:#b71c1c; }
+    .seg-rest   { background:#ede7f6; color:#4527a0; }
+    .seg-fartlek { background:#fce4ec; color:#880e4f; }
+    .seg-strides { background:#e0f7fa; color:#006064; }
+    .seg-cooldown { background:#e0e0e0; color:#424242; }
+
+    /* run-list */
+    .run-list { padding: 0; }
+    .run-row {
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--silver-2);
+      display: grid;
+      grid-template-columns: 100px 1fr auto;
+      gap: 1rem;
+      align-items: center;
+      cursor: pointer;
+    }
+    .run-row:last-child { border-bottom: none; }
+    .run-row:hover { background: var(--bone); }
+    .run-row .date {
+      font-size: 0.85rem; color: var(--slate);
+    }
+    .run-row .date strong { display: block; color: var(--black); font-size: 0.95rem; }
+    .run-row .meta { font-size: 0.9rem; color: var(--slate); }
+    .run-row .meta strong { color: var(--black); }
+    .run-row .pace { font-size: 0.85rem; color: var(--slate-2); text-align: right; }
+    .run-row .pace strong { display: block; color: var(--black); font-size: 0.95rem; }
+    .run-segments {
+      display: none;
+      padding: 0.85rem 1.25rem 1.25rem 1.25rem;
+      background: var(--bone);
+      border-bottom: 1px solid var(--silver-2);
+    }
+    .run-segments.show { display: block; }
+    .seg-mini-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.85rem;
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .seg-mini-table th, .seg-mini-table td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--silver-2);
+      text-align: left;
+    }
+    .seg-mini-table th {
+      background: var(--bone);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      color: var(--slate-2);
+      letter-spacing: 1px;
+      font-weight: 700;
+    }
+    .seg-mini-table tr:last-child td { border-bottom: none; }
+    .seg-mini-table td.num { text-align: right; }
+    .run-notes {
+      margin-top: 0.85rem;
+      padding: 0.75rem 1rem;
+      background: var(--paper);
+      border-left: 3px solid var(--silver);
+      border-radius: 0 3px 3px 0;
+      font-size: 0.9rem;
+      color: var(--slate);
+      font-style: italic;
+    }
+
+    .empty { padding: 2.5rem 1.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
+    .loading { padding: 2.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
+
+    @media (max-width: 600px) {
+      .run-row { grid-template-columns: 80px 1fr; }
+      .run-row .pace { grid-column: 1 / -1; text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="#" class="brand">
+      <span class="script">Tampa Bay</span>
+      <span class="name">Pirates</span>
+      <span class="division">XC</span>
+    </a>
+    <div class="user-area">
+      <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
+      <div class="menu" id="menu" role="menu">
+        <div class="menu-user" id="user-name">…</div>
+        <a class="menu-item" href="log_run.html" role="menuitem">Log a run</a>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <h1 class="page-title">My runs</h1>
+    <p class="page-sub">Your log, paces, and trends.</p>
+
+    <a href="log_run.html" class="log-cta">+ Log a new run</a>
+
+    <div class="range-filter" role="tablist">
+      <button class="range-btn active" data-range="week" role="tab">This week</button>
+      <button class="range-btn" data-range="month" role="tab">This month</button>
+      <button class="range-btn" data-range="year" role="tab">This year</button>
+      <button class="range-btn" data-range="all" role="tab">All time</button>
+    </div>
+    <p id="range-sub" style="margin:0 0 1rem 0;font-size:0.8rem;color:var(--slate-2);"></p>
+
+    <div class="stats" id="stats">
+      <div class="stat"><div class="label">Runs</div><div class="value" id="stat-runs">—</div></div>
+      <div class="stat"><div class="label">Total miles</div><div class="value" id="stat-miles">—</div></div>
+      <div class="stat"><div class="label">Total time</div><div class="value" id="stat-time">—</div></div>
+      <div class="stat"><div class="label">Avg pace</div><div class="value" id="stat-pace">—</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-heading"><h3>Paces by segment type</h3></div>
+      <div id="pace-table-wrap">
+        <div class="loading">Loading…</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-heading"><h3>Run history</h3></div>
+      <div id="run-list-wrap" class="run-list">
+        <div class="loading">Loading…</div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // ---- menu ----
+    const menuBtn = document.getElementById('menu-btn');
+    const menu = document.getElementById('menu');
+    menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('show'); });
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
+    });
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
+      await sb.auth.signOut();
+      window.location.href = 'index.html';
+    });
+
+    // ---- auth ----
+    async function requireAthlete() {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { window.location.href = 'index.html'; return null; }
+      const { data: athlete } = await sb
+        .from('athletes')
+        .select('id, first_name, last_name')
+        .eq('auth_user_id', session.user.id)
+        .eq('active', true)
+        .maybeSingle();
+      if (!athlete) {
+        // Maybe a coach landed here — bounce to dashboard
+        const { data: coach } = await sb.from('coaches').select('id').eq('auth_user_id', session.user.id).eq('active', true).maybeSingle();
+        if (coach) { window.location.href = 'team_dashboard.html'; return null; }
+        await sb.auth.signOut();
+        window.location.href = 'index.html';
+        return null;
+      }
+      return athlete;
+    }
+
+    // ---- helpers ----
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function formatDuration(sec) {
+      if (sec == null) return '—';
+      sec = Math.round(sec);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h) return `${h}:${pad(m)}:${pad(s)}`;
+      return `${m}:${pad(s)}`;
+    }
+    function formatPace(secPerMile) {
+      if (!secPerMile || !isFinite(secPerMile) || secPerMile <= 0) return '—';
+      const m = Math.floor(secPerMile / 60);
+      const s = Math.round(secPerMile % 60);
+      return `${m}:${pad(s)} /mi`;
+    }
+    function formatMiles(m) {
+      const n = Number(m);
+      return (n < 10 ? n.toFixed(2) : n.toFixed(1));
+    }
+    function formatDate(iso) {
+      const d = new Date(iso + 'T00:00:00');
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function rangeStartISO(period) {
+      const now = new Date();
+      if (period === 'all') return '1900-01-01';
+      if (period === 'week') {
+        const monday = new Date(now);
+        const day = monday.getDay();
+        const diff = (day + 6) % 7;
+        monday.setDate(monday.getDate() - diff);
+        monday.setHours(0, 0, 0, 0);
+        return monday.toISOString().slice(0, 10);
+      }
+      if (period === 'month') {
+        return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+      }
+      if (period === 'year') {
+        return new Date(now.getFullYear(), 0, 1).toISOString().slice(0, 10);
+      }
+      return '1900-01-01';
+    }
+    function rangeLabel(period) {
+      const start = rangeStartISO(period);
+      if (period === 'all') return 'All runs ever logged';
+      const startD = new Date(start + 'T00:00:00');
+      const today = new Date();
+      const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      if (period === 'week') return 'Week of ' + fmt(startD) + ' (Mon–Sun)';
+      if (period === 'month') return startD.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      if (period === 'year') return startD.getFullYear() + ' year-to-date';
+      return fmt(startD) + ' – ' + fmt(today);
+    }
+
+    // ---- state ----
+    let athlete = null;
+    let activeRange = 'week';
+
+    // ---- data load ----
+    async function loadAll() {
+      const startDate = rangeStartISO(activeRange);
+      document.getElementById('range-sub').textContent = rangeLabel(activeRange);
+
+      const { data: runs, error: runsErr } = await sb
+        .from('runs')
+        .select(`
+          id, run_date, run_type, distance_miles, duration_seconds,
+          effort_rpe, avg_cadence, avg_hr, max_hr, route, shoes,
+          conditions, temperature_f, cross_train_activity, notes,
+          run_segments(id, segment_order, segment_type, distance_miles, duration_seconds, notes)
+        `)
+        .eq('athlete_id', athlete.id)
+        .gte('run_date', startDate)
+        .order('run_date', { ascending: false })
+        .order('created_at', { ascending: false });
+
+      if (runsErr) {
+        document.getElementById('pace-table-wrap').innerHTML = `<div class="empty">Error loading runs: ${escapeHtml(runsErr.message)}</div>`;
+        return;
+      }
+
+      renderStats(runs || []);
+      renderPaceByType(runs || []);
+      renderRunList(runs || []);
+    }
+
+    function renderStats(runs) {
+      const totalRuns = runs.length;
+      let totalMiles = 0, totalSec = 0;
+      runs.forEach(r => {
+        if (r.distance_miles) totalMiles += Number(r.distance_miles);
+        if (r.duration_seconds) totalSec += Number(r.duration_seconds);
+      });
+      document.getElementById('stat-runs').textContent = totalRuns;
+      document.getElementById('stat-miles').innerHTML = totalMiles ? formatMiles(totalMiles) + '<span class="unit">mi</span>' : '—';
+      document.getElementById('stat-time').textContent = totalSec ? formatDuration(totalSec) : '—';
+      document.getElementById('stat-pace').textContent =
+        (totalSec && totalMiles) ? formatPace(totalSec / totalMiles) : '—';
+    }
+
+    function renderPaceByType(runs) {
+      // Aggregate segments by segment_type across all runs
+      const byType = {}; // type -> { miles, seconds, count }
+      runs.forEach(r => {
+        (r.run_segments || []).forEach(s => {
+          const t = s.segment_type;
+          if (!byType[t]) byType[t] = { miles: 0, seconds: 0, count: 0 };
+          if (s.distance_miles) byType[t].miles += Number(s.distance_miles);
+          if (s.duration_seconds) byType[t].seconds += Number(s.duration_seconds);
+          byType[t].count += 1;
+        });
+      });
+
+      // Display order
+      const order = ['warmup','easy','long','tempo','threshold','interval','hill','fartlek','strides','rest','cooldown'];
+      const rows = order
+        .filter(t => byType[t])
+        .map(t => {
+          const d = byType[t];
+          const pace = d.miles > 0 && d.seconds > 0 ? d.seconds / d.miles : null;
+          return `
+            <tr>
+              <td><span class="seg-pill seg-${t}">${t}</span></td>
+              <td class="num">${d.miles ? formatMiles(d.miles) + ' mi' : '—'}</td>
+              <td class="num">${d.seconds ? formatDuration(d.seconds) : '—'}</td>
+              <td class="num"><strong>${formatPace(pace)}</strong></td>
+              <td class="num" style="color:var(--slate-2)">${d.count}</td>
+            </tr>
+          `;
+        }).join('');
+
+      const wrap = document.getElementById('pace-table-wrap');
+      if (!rows) {
+        wrap.innerHTML = '<div class="empty">No segment data in this range. Log a run with segments to see your paces here.</div>';
+        return;
+      }
+      wrap.innerHTML = `
+        <table class="pace-table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th class="num">Distance</th>
+              <th class="num">Time</th>
+              <th class="num">Avg pace</th>
+              <th class="num"># seg</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    function renderRunList(runs) {
+      const wrap = document.getElementById('run-list-wrap');
+      if (runs.length === 0) {
+        wrap.innerHTML = '<div class="empty">No runs in this range yet. Log your first one!</div>';
+        return;
+      }
+
+      wrap.innerHTML = runs.map(r => {
+        const dist = r.distance_miles ? Number(r.distance_miles) : 0;
+        const dur = r.duration_seconds ? Number(r.duration_seconds) : 0;
+        const pace = (dist > 0 && dur > 0) ? dur / dist : null;
+        const typeLabel = r.run_type.replace('_', ' ');
+        const segs = (r.run_segments || []).sort((a, b) => (a.segment_order || 0) - (b.segment_order || 0));
+
+        return `
+          <div class="run-row" data-id="${r.id}">
+            <div class="date">
+              <strong>${formatDate(r.run_date)}</strong>
+              <span class="seg-pill seg-${segMap(r.run_type)}">${typeLabel}</span>
+            </div>
+            <div class="meta">
+              <strong>${dist ? formatMiles(dist) + ' mi' : ''}</strong>${dist && dur ? ' · ' : ''}${dur ? formatDuration(dur) : ''}
+              ${r.cross_train_activity ? '<br><span style="color:var(--slate-2);font-size:0.85rem">' + escapeHtml(r.cross_train_activity) + '</span>' : ''}
+            </div>
+            <div class="pace">
+              <strong>${formatPace(pace)}</strong>
+              ${r.effort_rpe ? `<span>RPE ${r.effort_rpe}</span>` : ''}
+            </div>
+          </div>
+          <div class="run-segments" data-segments-for="${r.id}">
+            ${renderSegmentDetail(segs, r)}
+          </div>
+        `;
+      }).join('');
+
+      // expand/collapse
+      wrap.querySelectorAll('.run-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const id = row.dataset.id;
+          const detail = wrap.querySelector(`[data-segments-for="${id}"]`);
+          if (detail) detail.classList.toggle('show');
+        });
+      });
+    }
+
+    function segMap(runType) {
+      return ({ easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo', cross_train:'rest' })[runType] || 'easy';
+    }
+
+    function renderSegmentDetail(segs, run) {
+      let body = '';
+      if (segs.length) {
+        body += `
+          <table class="seg-mini-table">
+            <thead>
+              <tr><th>#</th><th>Type</th><th class="num">Distance</th><th class="num">Time</th><th class="num">Pace</th></tr>
+            </thead>
+            <tbody>
+              ${segs.map((s, i) => {
+                const d = s.distance_miles ? Number(s.distance_miles) : 0;
+                const t = s.duration_seconds ? Number(s.duration_seconds) : 0;
+                const p = (d > 0 && t > 0) ? t / d : null;
+                return `
+                  <tr>
+                    <td>${s.segment_order || i+1}</td>
+                    <td><span class="seg-pill seg-${s.segment_type}">${s.segment_type}</span></td>
+                    <td class="num">${d ? formatMiles(d) + ' mi' : '—'}</td>
+                    <td class="num">${t ? formatDuration(t) : '—'}</td>
+                    <td class="num">${formatPace(p)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        body += '<div style="color:var(--slate-2);font-size:0.9rem;font-style:italic;">No segments recorded.</div>';
+      }
+
+      // extras
+      const extras = [];
+      if (run.route) extras.push(`Route: ${escapeHtml(run.route)}`);
+      if (run.shoes) extras.push(`Shoes: ${escapeHtml(run.shoes)}`);
+      if (run.avg_cadence) extras.push(`Cadence: ${run.avg_cadence} spm`);
+      if (run.avg_hr) extras.push(`Avg HR: ${run.avg_hr}`);
+      if (run.max_hr) extras.push(`Max HR: ${run.max_hr}`);
+      if (run.temperature_f != null) extras.push(`${run.temperature_f}°F`);
+      if (run.conditions) extras.push(escapeHtml(run.conditions));
+      if (extras.length) {
+        body += `<div style="margin-top:0.6rem;font-size:0.85rem;color:var(--slate);">${extras.join(' · ')}</div>`;
+      }
+
+      if (run.notes) {
+        body += `<div class="run-notes">${escapeHtml(run.notes)}</div>`;
+      }
+      return body;
+    }
+
+    // ---- range filter ----
+    document.querySelectorAll('.range-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.range-btn').forEach(x => x.classList.toggle('active', x === b));
+        activeRange = b.dataset.range;
+        loadAll();
+      });
+    });
+
+    // ---- boot ----
+    (async () => {
+      athlete = await requireAthlete();
+      if (!athlete) return;
+      document.getElementById('user-name').textContent = athlete.first_name + ' ' + athlete.last_name.charAt(0) + '.';
+      loadAll();
+    })();
+  </script>
+</body>
+</html>

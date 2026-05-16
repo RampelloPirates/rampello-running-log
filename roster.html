@@ -537,7 +537,7 @@
           <tbody>
             ${data.map(a => `
               <tr class="${a.active ? '' : 'inactive'}" data-id="${a.id}">
-                <td><strong>${escapeHtml(a.last_name)}, ${escapeHtml(a.first_name)}</strong>${a.active ? '' : ' <span class="badge">inactive</span>'}</td>
+                <td><a href="athlete_detail.html?id=${a.id}" style="color:var(--black);text-decoration:none;font-weight:700;border-bottom:1px dotted var(--silver);">${escapeHtml(a.last_name)}, ${escapeHtml(a.first_name)}</a>${a.active ? '' : ' <span class="badge">inactive</span>'}</td>
                 <td class="hide-mobile">${escapeHtml(a.email)}</td>
                 <td>${a.grade ? a.grade : '—'}</td>
                 <td class="hide-mobile">${a.auth_user_id ? '<span class="badge linked">linked</span>' : '<span class="badge">pending</span>'}</td>
