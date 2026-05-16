@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaderboard — Tampa Bay Pirates XC</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pirates XC">
+  <style>
+    :root {
+      --red:      #c8102e;
+      --red-dark: #a00d24;
+      --black:    #1a1a1a;
+      --bone:     #f9f6f0;
+      --paper:    #ffffff;
+      --slate:    #4a5568;
+      --slate-2:  #6b7280;
+      --silver:   #d1d5db;
+      --silver-2: #e5e7eb;
+      --gold:     #d4a017;
+      --gold-bg:  #fff7d6;
+      --silv:     #9ca3af;
+      --silv-bg:  #f1f3f5;
+      --bronze:   #b06b2e;
+      --bronze-bg:#fcefe0;
+      --warn:     #b45309;
+      --warn-bg:  #fff3e0;
+      --danger:   #b91c1c;
+      --danger-bg:#fee2e2;
+      --font-display: Georgia, 'Times New Roman', serif;
+      --font-body:    'Helvetica Neue', Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background: var(--bone);
+      color: var(--black);
+      min-height: 100vh;
+    }
+
+    .topbar {
+      background: var(--black); color: var(--paper);
+      padding: 0.85rem 1.25rem;
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 4px solid var(--red);
+    }
+    .brand { display: flex; align-items: baseline; gap: 0.6rem; text-decoration: none; color: inherit; }
+    .brand .script { font-family: var(--font-display); font-style: italic; color: var(--red); font-size: 1rem; }
+    .brand .name { font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; font-size: 1.05rem; }
+    .brand .division { font-size: 0.7rem; color: var(--silver); letter-spacing: 2px; text-transform: uppercase; }
+
+    .user-area { position: relative; }
+    .menu-btn {
+      background: transparent; color: var(--paper);
+      border: 1px solid var(--silver-2);
+      width: 38px; height: 38px;
+      border-radius: 3px; cursor: pointer;
+      font-size: 1.3rem; font-weight: 700; line-height: 1;
+      font-family: var(--font-body); padding: 0;
+    }
+    .menu-btn:hover { background: var(--red); border-color: var(--red); }
+    .menu {
+      position: absolute; top: calc(100% + 8px); right: 0;
+      background: var(--paper); color: var(--black);
+      border: 1px solid var(--silver-2); border-radius: 4px;
+      min-width: 220px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      display: none; z-index: 50; overflow: hidden;
+    }
+    .menu.show { display: block; }
+    .menu-user {
+      padding: 0.85rem 1rem; font-size: 0.85rem;
+      color: var(--slate);
+      border-bottom: 1px solid var(--silver-2);
+      background: var(--bone);
+    }
+    .menu-item {
+      display: block; width: 100%; text-align: left;
+      background: none; border: none;
+      padding: 0.75rem 1rem; font-size: 0.9rem;
+      cursor: pointer; font-family: var(--font-body); color: var(--black);
+      text-decoration: none;
+    }
+    .menu-item:hover { background: var(--bone); }
+    .menu-item.danger { color: var(--red); }
+
+    main { max-width: 880px; margin: 0 auto; padding: 1.5rem 1rem 4rem 1rem; }
+    .page-title { font-size: 1.6rem; margin: 0 0 0.25rem 0; font-weight: 700; }
+    .page-sub { color: var(--slate); margin: 0 0 1.5rem 0; font-size: 0.95rem; }
+
+    /* toggle groups */
+    .toggles { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .toggle-group {
+      display: inline-flex;
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 3px;
+      border-radius: 4px;
+    }
+    .toggle-btn {
+      background: transparent;
+      border: none;
+      padding: 0.5rem 1rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-family: var(--font-body);
+      color: var(--slate);
+      border-radius: 3px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .toggle-btn.active {
+      background: var(--black);
+      color: var(--paper);
+      font-weight: 700;
+    }
+    .range-sub {
+      margin: 0 0 1.5rem 0;
+      font-size: 0.8rem;
+      color: var(--slate-2);
+    }
+
+    /* podium */
+    .podium {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.75rem;
+      align-items: end;
+      margin-bottom: 1.5rem;
+    }
+    .podium-card {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 6px;
+      padding: 1rem 0.75rem 1.25rem 0.75rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .podium-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 6px;
+    }
+    .podium-card.gold { padding-top: 1.5rem; }
+    .podium-card.gold::before { background: var(--gold); }
+    .podium-card.silver::before { background: var(--silv); }
+    .podium-card.bronze::before { background: var(--bronze); }
+    .podium-medal {
+      font-size: 2.5rem;
+      line-height: 1;
+      margin-bottom: 0.5rem;
+    }
+    .podium-card.gold .podium-medal { font-size: 3rem; }
+    .podium-rank {
+      font-size: 0.65rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--slate-2);
+      margin-bottom: 0.3rem;
+    }
+    .podium-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--black);
+      margin-bottom: 0.25rem;
+      line-height: 1.2;
+    }
+    .podium-card.gold .podium-name { font-size: 1.15rem; }
+    .podium-value {
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: var(--red);
+    }
+    .podium-card.gold .podium-value { font-size: 1.6rem; }
+    .podium-empty {
+      background: var(--bone);
+      border-style: dashed;
+      color: var(--slate-2);
+      font-size: 0.85rem;
+      padding: 1.5rem 0.5rem;
+      font-style: italic;
+    }
+    @media (max-width: 540px) {
+      .podium { grid-template-columns: 1fr; }
+      .podium-card.gold { order: -1; }
+    }
+
+    /* leaderboard list */
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .lb-row {
+      display: grid;
+      grid-template-columns: 36px 1fr auto auto;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.85rem 1.25rem;
+      border-bottom: 1px solid var(--silver-2);
+      font-size: 0.95rem;
+    }
+    .lb-row:last-child { border-bottom: none; }
+    .lb-row .lb-rank {
+      font-size: 0.85rem;
+      color: var(--slate-2);
+      font-weight: 700;
+      text-align: right;
+    }
+    .lb-row .lb-name { color: var(--black); font-weight: 600; }
+    .lb-row .lb-value {
+      font-weight: 700;
+      color: var(--red);
+      font-variant-numeric: tabular-nums;
+      min-width: 80px;
+      text-align: right;
+    }
+    .lb-row .lb-change {
+      font-size: 0.78rem;
+      min-width: 64px;
+      text-align: right;
+      color: var(--slate-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .lb-row .lb-change.warn   { color: var(--warn);   font-weight: 700; }
+    .lb-row .lb-change.danger { color: var(--danger); font-weight: 700; }
+
+    .empty { padding: 2.5rem 1.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
+    .loading { padding: 2.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
+
+    .coach-note {
+      margin-top: 1rem;
+      padding: 0.85rem 1.1rem;
+      background: var(--warn-bg);
+      border-left: 4px solid var(--warn);
+      border-radius: 0 4px 4px 0;
+      font-size: 0.85rem;
+      color: var(--black);
+      line-height: 1.45;
+    }
+    .coach-note strong { color: var(--warn); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="#" class="brand" id="home-brand">
+      <span class="script">Tampa Bay</span>
+      <span class="name">Pirates</span>
+      <span class="division">XC</span>
+    </a>
+    <div class="user-area">
+      <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
+      <div class="menu" id="menu" role="menu">
+        <div class="menu-user" id="user-name">…</div>
+        <a class="menu-item" id="menu-home" href="#" role="menuitem">Home</a>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <h1 class="page-title">Leaderboard 🏃‍♂️</h1>
+    <p class="page-sub">Top miles and time logged across the team. Cross-training doesn't count.</p>
+
+    <div class="toggles">
+      <div class="toggle-group" role="tablist" aria-label="Period">
+        <button class="toggle-btn active" data-period="week"  role="tab">This week</button>
+        <button class="toggle-btn"        data-period="month" role="tab">This month</button>
+      </div>
+      <div class="toggle-group" role="tablist" aria-label="Metric">
+        <button class="toggle-btn active" data-metric="miles" role="tab">Miles</button>
+        <button class="toggle-btn"        data-metric="time"  role="tab">Time</button>
+      </div>
+    </div>
+    <p class="range-sub" id="range-sub"></p>
+
+    <div id="podium-wrap"><div class="loading">Loading…</div></div>
+    <div class="panel" id="rest-wrap"></div>
+
+    <div class="coach-note" id="coach-note" style="display:none;">
+      <strong>Coach view:</strong> the percentage next to each name is the change vs the same number of days in the prior period.
+      <span style="color:var(--warn);">⚠ yellow</span> = +20–40% jump · <span style="color:var(--danger);">🚨 red</span> = more than +40%.
+      Suppressed when prior baseline is under 5 miles.
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // ---- menu ----
+    const menuBtn = document.getElementById('menu-btn');
+    const menu = document.getElementById('menu');
+    menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('show'); });
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
+    });
+    document.getElementById('signout-btn').addEventListener('click', async () => {
+      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
+      await sb.auth.signOut();
+      window.location.href = 'index.html';
+    });
+
+    // ---- auth: needs to know whether the viewer is a coach (for safety col) ----
+    async function requireSession() {
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { window.location.href = 'index.html'; return null; }
+      const [coachRes, athleteRes] = await Promise.all([
+        sb.from('coaches').select('id, first_name, last_name').eq('auth_user_id', session.user.id).eq('active', true).maybeSingle(),
+        sb.from('athletes').select('id, first_name, last_name').eq('auth_user_id', session.user.id).eq('active', true).maybeSingle(),
+      ]);
+      const coach = coachRes.data;
+      const athlete = athleteRes.data;
+      if (!coach && !athlete) {
+        await sb.auth.signOut();
+        window.location.href = 'index.html';
+        return null;
+      }
+      const isCoach = !!coach;
+      const me = coach || athlete;
+      const homeHref = isCoach ? 'team_dashboard.html' : 'log_run.html';
+      document.getElementById('home-brand').href = homeHref;
+      document.getElementById('menu-home').href = homeHref;
+      document.getElementById('menu-home').textContent = isCoach ? 'Dashboard' : 'Log a run';
+      document.getElementById('user-name').textContent = me.first_name + ' ' + me.last_name.charAt(0) + '.';
+      if (isCoach) document.getElementById('coach-note').style.display = '';
+      return { isCoach, me, session };
+    }
+
+    // ---- helpers ----
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function iso(d) { return d.toISOString().slice(0, 10); }
+    function formatDuration(sec) {
+      if (!sec || sec <= 0) return '—';
+      sec = Math.round(sec);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h) return `${h}:${pad(m)}:${pad(s)}`;
+      return `${m}:${pad(s)}`;
+    }
+    function formatMiles(m) {
+      const n = Number(m);
+      return (n < 10 ? n.toFixed(2) : n.toFixed(1));
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // Period math — returns { thisStart, thisEnd, lastStart, lastEnd, label, elapsedDays }
+    function periodWindow(period) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (period === 'week') {
+        const day = today.getDay();
+        const diff = (day + 6) % 7;             // days back to Monday
+        const thisStart = new Date(today); thisStart.setDate(today.getDate() - diff);
+        const thisEnd   = new Date(today);
+        const lastStart = new Date(thisStart); lastStart.setDate(thisStart.getDate() - 7);
+        const lastEnd   = new Date(lastStart); lastEnd.setDate(lastStart.getDate() + (today.getTime() - thisStart.getTime()) / 86400000);
+        const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return {
+          thisStart: iso(thisStart), thisEnd: iso(thisEnd),
+          lastStart: iso(lastStart), lastEnd: iso(lastEnd),
+          label: `Week of ${fmt(thisStart)} (Mon–Sun)`,
+          elapsedDays: diff + 1,
+        };
+      }
+      // month
+      const thisStart = new Date(today.getFullYear(), today.getMonth(), 1);
+      const thisEnd   = new Date(today);
+      const elapsedDays = today.getDate();
+      const lastStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const lastEnd   = new Date(lastStart); lastEnd.setDate(lastStart.getDate() + elapsedDays - 1);
+      return {
+        thisStart: iso(thisStart), thisEnd: iso(thisEnd),
+        lastStart: iso(lastStart), lastEnd: iso(lastEnd),
+        label: today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) + ' (to date)',
+        elapsedDays,
+      };
+    }
+
+    // ---- state ----
+    let activePeriod = 'week';
+    let activeMetric = 'miles';
+    let isCoach = false;
+
+    // ---- data load ----
+    async function loadBoard() {
+      const win = periodWindow(activePeriod);
+      document.getElementById('range-sub').textContent = win.label;
+
+      const podiumWrap = document.getElementById('podium-wrap');
+      const restWrap   = document.getElementById('rest-wrap');
+      podiumWrap.innerHTML = '<div class="loading">Loading…</div>';
+      restWrap.innerHTML   = '';
+
+      // Pull two windows in parallel. Excludes cross_train per product call.
+      const [thisRes, lastRes] = await Promise.all([
+        sb.from('runs')
+          .select('athlete_id, distance_miles, duration_seconds, athletes!inner(first_name, last_name, active)')
+          .neq('run_type', 'cross_train')
+          .gte('run_date', win.thisStart)
+          .lte('run_date', win.thisEnd),
+        sb.from('runs')
+          .select('athlete_id, distance_miles, duration_seconds')
+          .neq('run_type', 'cross_train')
+          .gte('run_date', win.lastStart)
+          .lte('run_date', win.lastEnd),
+      ]);
+
+      if (thisRes.error) {
+        podiumWrap.innerHTML = `<div class="empty">Error loading: ${escapeHtml(thisRes.error.message)}</div>`;
+        return;
+      }
+
+      const thisRuns = (thisRes.data || []).filter(r => r.athletes && r.athletes.active);
+      const lastRuns = lastRes.data || [];
+
+      const byAthThis = aggregate(thisRuns, true);
+      const byAthLast = aggregate(lastRuns, false);
+
+      // Build leaderboard rows
+      const rows = Object.values(byAthThis)
+        .map(r => {
+          const baseline = byAthLast[r.athlete_id]?.[activeMetric] || 0;
+          const value = r[activeMetric];
+          let changePct = null;
+          // Only show change if prior baseline is meaningful (>=5 mi or >=30 min)
+          const minBaseline = activeMetric === 'miles' ? 5 : 30 * 60;
+          if (baseline >= minBaseline) {
+            changePct = (value - baseline) / baseline;
+          }
+          return { ...r, value, changePct };
+        })
+        .filter(r => r.value > 0)
+        .sort((a, b) => b.value - a.value);
+
+      // Tie-aware ranks
+      let lastVal = null, lastRank = 0;
+      rows.forEach((r, i) => {
+        if (r.value !== lastVal) { lastRank = i + 1; lastVal = r.value; }
+        r.rank = lastRank;
+      });
+
+      renderPodium(rows.slice(0, 3));
+      renderRest(rows.slice(3));
+    }
+
+    function aggregate(runs, includeName) {
+      const out = {};
+      for (const r of runs) {
+        const id = r.athlete_id;
+        if (!out[id]) {
+          out[id] = {
+            athlete_id: id,
+            miles: 0,
+            time: 0,
+            name: includeName && r.athletes ? `${r.athletes.first_name} ${r.athletes.last_name}` : '',
+          };
+        }
+        if (r.distance_miles) out[id].miles += Number(r.distance_miles);
+        if (r.duration_seconds) out[id].time += Number(r.duration_seconds);
+      }
+      return out;
+    }
+
+    function fmtValue(r) {
+      return activeMetric === 'miles'
+        ? formatMiles(r.value) + ' mi'
+        : formatDuration(r.value);
+    }
+
+    function fmtChange(r) {
+      if (!isCoach) return '';
+      if (r.changePct == null) return '<span style="color:var(--slate-2);">—</span>';
+      const pct = (r.changePct * 100).toFixed(0);
+      const sign = r.changePct >= 0 ? '+' : '';
+      let cls = '';
+      if (r.changePct > 0.40) cls = 'danger';
+      else if (r.changePct > 0.20) cls = 'warn';
+      const icon = cls === 'danger' ? ' 🚨' : cls === 'warn' ? ' ⚠' : '';
+      return `<span class="lb-change ${cls}">${sign}${pct}%${icon}</span>`;
+    }
+
+    function renderPodium(top3) {
+      const wrap = document.getElementById('podium-wrap');
+      if (top3.length === 0) {
+        wrap.innerHTML = '<div class="podium-card podium-empty">No runs logged in this period yet. Be the first to log!</div>';
+        return;
+      }
+      // Order: silver(2) | gold(1) | bronze(3)  on desktop. CSS handles mobile stacking.
+      const [g, s, b] = top3;
+      const slot = (athlete, cls, medal, rankLabel) => {
+        if (!athlete) {
+          return `<div class="podium-card ${cls} podium-empty">Spot open</div>`;
+        }
+        return `
+          <div class="podium-card ${cls}">
+            <div class="podium-medal">${medal}</div>
+            <div class="podium-rank">${rankLabel}</div>
+            <div class="podium-name">${escapeHtml(athlete.name)}</div>
+            <div class="podium-value">${fmtValue(athlete)}</div>
+          </div>`;
+      };
+      wrap.innerHTML = `
+        <div class="podium">
+          ${slot(s, 'silver', '🥈', '2nd')}
+          ${slot(g, 'gold',   '🥇', '1st')}
+          ${slot(b, 'bronze', '🥉', '3rd')}
+        </div>
+      `;
+    }
+
+    function renderRest(rest) {
+      const wrap = document.getElementById('rest-wrap');
+      if (rest.length === 0) {
+        wrap.innerHTML = '';
+        return;
+      }
+      wrap.innerHTML = rest.map(r => `
+        <div class="lb-row">
+          <div class="lb-rank">${r.rank}.</div>
+          <div class="lb-name">${escapeHtml(r.name)}</div>
+          <div class="lb-value">${fmtValue(r)}</div>
+          ${isCoach ? fmtChange(r) : ''}
+        </div>
+      `).join('');
+    }
+
+    // ---- toggle wiring ----
+    document.querySelectorAll('[data-period]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('[data-period]').forEach(x => x.classList.toggle('active', x === b));
+        activePeriod = b.dataset.period;
+        loadBoard();
+      });
+    });
+    document.querySelectorAll('[data-metric]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('[data-metric]').forEach(x => x.classList.toggle('active', x === b));
+        activeMetric = b.dataset.metric;
+        loadBoard();
+      });
+    });
+
+    (async () => {
+      const auth = await requireSession();
+      if (!auth) return;
+      isCoach = auth.isCoach;
+      loadBoard();
+    })();
+  </script>
+</body>
+</html>
