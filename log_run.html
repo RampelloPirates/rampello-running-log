@@ -258,7 +258,7 @@
     /* segments */
     .segment-row {
       display: grid;
-      grid-template-columns: 130px 1fr 1fr auto;
+      grid-template-columns: 120px 1fr 1fr auto;
       gap: 0.5rem;
       align-items: end;
       padding: 0.6rem;
@@ -267,6 +267,23 @@
       margin-bottom: 0.5rem;
     }
     .segment-row label { font-size: 0.65rem; margin-bottom: 0.15rem; }
+
+    /* distance + unit picker combo */
+    .dist-input-group {
+      display: grid;
+      grid-template-columns: 1fr 64px;
+      gap: 4px;
+    }
+    .dist-input-group .unit-pick {
+      padding: 0.4rem 0.3rem;
+      font-size: 0.85rem;
+      font-family: var(--font-body);
+      border: 1px solid var(--silver);
+      border-radius: 3px;
+      background: var(--paper);
+      color: var(--slate);
+    }
+    .dist-input-group .unit-pick:focus { outline: none; border-color: var(--red); }
     .segment-row input, .segment-row select {
       padding: 0.4rem 0.5rem;
       font-size: 0.9rem;
@@ -560,8 +577,15 @@
         <div id="simple-mode">
           <div class="row">
             <div>
-              <label for="simple-distance">Distance (mi)</label>
-              <input type="number" id="simple-distance" step="0.01" min="0" inputmode="decimal" placeholder="3.50">
+              <label for="simple-distance">Distance</label>
+              <div class="dist-input-group">
+                <input type="number" id="simple-distance" step="0.01" min="0" inputmode="decimal" placeholder="3.50">
+                <select id="simple-distance-unit" class="unit-pick" aria-label="Unit">
+                  <option value="mi">mi</option>
+                  <option value="km">km</option>
+                  <option value="m">m</option>
+                </select>
+              </div>
             </div>
             <div>
               <label for="simple-time">Time</label>
@@ -654,7 +678,7 @@
 
       <!-- Optional more detail -->
       <details>
-        <summary>More detail (cadence, HR, shoes, weather…)</summary>
+        <summary>More detail (cadence, HR, route)</summary>
         <div class="section-body">
           <div class="row three">
             <div>
@@ -671,27 +695,11 @@
             </div>
           </div>
           <div class="row">
-            <div>
+            <div class="full">
               <label for="route">Route</label>
-              <input type="text" id="route" placeholder="Bayshore loop">
-            </div>
-            <div>
-              <label for="shoes">Shoes</label>
-              <input type="text" id="shoes">
-            </div>
-          </div>
-          <div class="row three">
-            <div>
-              <label for="conditions">Conditions</label>
-              <input type="text" id="conditions" placeholder="Sunny, humid">
-            </div>
-            <div>
-              <label for="temp-f">Temp (°F)</label>
-              <input type="number" id="temp-f">
-            </div>
-            <div>
-              <label for="wind">Wind (mph)</label>
-              <input type="number" id="wind" step="0.1">
+              <input type="text" id="route" list="routes-list" placeholder="Bayshore loop" autocomplete="off">
+              <datalist id="routes-list"></datalist>
+              <div class="helper">Pick from a previous route or type a new one — it'll be available to your teammates next time.</div>
             </div>
           </div>
         </div>
@@ -841,11 +849,12 @@
 
     // ---- simple-mode pace helper ----
     function updateSimplePace() {
-      const dist = parseFloat(document.getElementById('simple-distance').value);
+      const unit = document.getElementById('simple-distance-unit').value;
+      const miles = toMiles(document.getElementById('simple-distance').value, unit);
       const time = parseDuration(document.getElementById('simple-time').value);
       const el = document.getElementById('simple-pace');
-      if (dist > 0 && time > 0) {
-        el.textContent = 'Pace: ' + formatPace(time / dist);
+      if (miles > 0 && time > 0) {
+        el.textContent = 'Pace: ' + formatPace(time / miles);
       } else { el.textContent = ''; }
     }
     document.getElementById('simple-distance').addEventListener('input', updateSimplePace);
@@ -853,12 +862,31 @@
 
     // ---- segments ----
     const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown'];
-    let segments = []; // [{type, distance, time}]
+    let segments = []; // [{type, distance, time, unit}]
+
+    // Distance unit picker. Default to miles; once the athlete picks km or m,
+    // subsequent segments default to that unit (sticky for the session).
+    let lastUnit = 'mi';
+    function toMiles(value, unit) {
+      const n = parseFloat(value);
+      if (!isFinite(n) || n <= 0) return null;
+      if (unit === 'km') return n * 0.621371;
+      if (unit === 'm')  return n * 0.000621371;
+      return n; // mi
+    }
+
+    // Wire up the simple-mode unit picker so it updates lastUnit and the pace
+    // helper immediately when changed.
+    document.getElementById('simple-distance-unit').addEventListener('change', (e) => {
+      lastUnit = e.target.value;
+      updateSimplePace();
+    });
 
     function renderSegments() {
       const wrap = document.getElementById('segments-list');
       wrap.innerHTML = '';
       segments.forEach((seg, i) => {
+        const unit = seg.unit || 'mi';
         const row = document.createElement('div');
         row.className = 'segment-row';
         row.innerHTML = `
@@ -869,8 +897,15 @@
             </select>
           </div>
           <div>
-            <label>Distance (mi)</label>
-            <input type="number" step="0.01" min="0" inputmode="decimal" data-i="${i}" data-field="distance" value="${seg.distance ?? ''}">
+            <label>Distance</label>
+            <div class="dist-input-group">
+              <input type="number" step="0.01" min="0" inputmode="decimal" data-i="${i}" data-field="distance" value="${seg.distance ?? ''}">
+              <select class="unit-pick" data-i="${i}" data-field="unit" aria-label="Unit">
+                <option value="mi" ${unit==='mi'?'selected':''}>mi</option>
+                <option value="km" ${unit==='km'?'selected':''}>km</option>
+                <option value="m"  ${unit==='m' ?'selected':''}>m</option>
+              </select>
+            </div>
           </div>
           <div>
             <label>Time</label>
@@ -882,12 +917,15 @@
       });
 
       wrap.querySelectorAll('[data-field]').forEach(el => {
-        el.addEventListener('input', (e) => {
+        const handler = (e) => {
           const i = parseInt(e.target.dataset.i, 10);
           const f = e.target.dataset.field;
           segments[i][f] = e.target.value;
+          if (f === 'unit') lastUnit = e.target.value;
           updateSegmentTotals();
-        });
+        };
+        el.addEventListener('input', handler);
+        if (el.tagName === 'SELECT') el.addEventListener('change', handler);
       });
       wrap.querySelectorAll('.remove-seg').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -899,10 +937,9 @@
     }
 
     function addSegment() {
-      // default new segments to a sensible type based on context
       const defaultType = segments.length === 0 ? 'warmup' :
                           segments.length === 1 ? (selectedType === 'intervals' ? 'interval' : 'easy') : 'easy';
-      segments.push({ type: defaultType, distance: '', time: '' });
+      segments.push({ type: defaultType, distance: '', time: '', unit: lastUnit });
       renderSegments();
       updateSegmentTotals();
     }
@@ -911,7 +948,7 @@
     function updateSegmentTotals() {
       let totalDist = 0, totalTime = 0;
       segments.forEach(s => {
-        const d = parseFloat(s.distance);
+        const d = toMiles(s.distance, s.unit || 'mi');
         const t = parseDuration(s.time);
         if (d > 0) totalDist += d;
         if (t > 0) totalTime += t;
@@ -962,14 +999,15 @@
       let distance = null, duration = null;
       let segmentsToInsert = [];
 
+      const simpleUnit = document.getElementById('simple-distance-unit').value;
       if (selectedType === 'cross_train') {
         const activity = document.getElementById('xtrain-activity').value.trim();
         if (!activity) { showErr('Tell us what cross-training activity you did.'); return; }
-        distance = parseFloat(document.getElementById('simple-distance').value) || null;
+        distance = toMiles(document.getElementById('simple-distance').value, simpleUnit);
         duration = parseDuration(document.getElementById('simple-time').value) || null;
         if (!duration && !distance) { showErr('Enter at least a distance or a time.'); return; }
       } else if (mode === 'simple') {
-        distance = parseFloat(document.getElementById('simple-distance').value) || null;
+        distance = toMiles(document.getElementById('simple-distance').value, simpleUnit);
         duration = parseDuration(document.getElementById('simple-time').value) || null;
         if (!distance && !duration) { showErr('Enter at least a distance or a time.'); return; }
         // Create one segment matching the run type
@@ -987,7 +1025,7 @@
         let order = 1;
         let totalDist = 0, totalTime = 0;
         for (const s of segments) {
-          const d = parseFloat(s.distance) || null;
+          const d = toMiles(s.distance, s.unit || 'mi');
           const t = parseDuration(s.time) || null;
           if (!s.type) { showErr('Every segment needs a type.'); return; }
           if (!d && !t) { showErr('Every segment needs a distance or a time.'); return; }
@@ -1018,10 +1056,6 @@
         max_hr: int('max-hr'),
         effort_rpe: int('rpe'),
         route: txt('route'),
-        shoes: txt('shoes'),
-        conditions: txt('conditions'),
-        temperature_f: int('temp-f'),
-        wind_mph: num('wind'),
         cross_train_activity: selectedType === 'cross_train' ? txt('xtrain-activity') : null,
         notes: txt('notes'),
         created_by: auth.session.user.id,
@@ -1116,6 +1150,9 @@
     function resetForm() {
       document.getElementById('run-form').reset();
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
+      // Keep the unit sticky to whatever the athlete last picked; form.reset()
+      // already restores it to the first option ("mi") so re-apply lastUnit.
+      document.getElementById('simple-distance-unit').value = lastUnit;
       selectedType = null;
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
       mode = 'simple';
@@ -1418,6 +1455,28 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
+    // ---- route autocomplete ----
+    // Pull distinct routes athletes have used before (team-wide). Drops into a
+    // <datalist> so the route input is suggestion-backed but still accepts
+    // free-text entries -- the first time someone runs Bayshore it becomes
+    // available to everyone after.
+    async function loadRouteSuggestions() {
+      try {
+        const { data, error } = await sb
+          .from('runs')
+          .select('route')
+          .not('route', 'is', null)
+          .limit(2000);
+        if (error || !data) return;
+        const uniq = [...new Set(data.map(r => (r.route || '').trim()).filter(Boolean))];
+        uniq.sort((a, b) => a.localeCompare(b));
+        const dl = document.getElementById('routes-list');
+        if (dl) dl.innerHTML = uniq.map(r =>
+          `<option value="${r.replace(/"/g,'&quot;')}"></option>`
+        ).join('');
+      } catch(_) { /* non-fatal */ }
+    }
+
     // ---- boot ----
     (async () => {
       const auth = await requireAthlete();
@@ -1429,6 +1488,7 @@
       document.getElementById('user-name').textContent = name;
 
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
+      loadRouteSuggestions();
     })();
   </script>
 </body>
