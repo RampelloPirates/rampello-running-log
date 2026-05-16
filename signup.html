@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up — Tampa Bay Pirates XC</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c8102e">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pirates XC">
+  <style>
+    :root {
+      --red:      #c8102e;
+      --red-dark: #a00d24;
+      --black:    #1a1a1a;
+      --bone:     #f9f6f0;
+      --paper:    #ffffff;
+      --slate:    #4a5568;
+      --slate-2:  #6b7280;
+      --silver:   #d1d5db;
+      --silver-2: #e5e7eb;
+      --green:    #1b5e20;
+      --font-display: Georgia, 'Times New Roman', serif;
+      --font-body:    'Helvetica Neue', Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background: var(--black);
+      background-image:
+        radial-gradient(circle at 20% 30%, rgba(200, 16, 46, 0.15), transparent 50%),
+        radial-gradient(circle at 80% 70%, rgba(200, 16, 46, 0.1), transparent 50%);
+      color: var(--black);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .card {
+      background: var(--bone);
+      border-radius: 4px;
+      padding: 2rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      max-width: 600px;
+      width: 100%;
+      margin: 0 auto;
+      border-top: 6px solid var(--red);
+    }
+    @media (max-width: 480px) {
+      .card { padding: 1.5rem 1.25rem; }
+    }
+
+    .logo { text-align: center; margin-bottom: 1.5rem; }
+    .logo .script {
+      font-family: var(--font-display); font-style: italic;
+      color: var(--red); font-size: 1.2rem;
+      letter-spacing: 0.5px; margin: 0; font-weight: 400;
+    }
+    .logo .name {
+      font-family: var(--font-body); color: var(--black);
+      font-size: 2rem; font-weight: 900;
+      letter-spacing: 2px; margin: -0.15rem 0 0 0;
+      text-transform: uppercase;
+    }
+    .logo .division {
+      display: inline-block; margin-top: 0.4rem;
+      padding: 0.2rem 0.75rem;
+      background: var(--red); color: var(--paper);
+      font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 3px; border-radius: 2px;
+    }
+
+    .page-title {
+      text-align: center;
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin: 1rem 0 0.25rem 0;
+    }
+    .page-sub {
+      text-align: center;
+      color: var(--slate);
+      margin: 0 0 1.75rem 0;
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+
+    fieldset {
+      border: none;
+      padding: 0;
+      margin: 0 0 1.25rem 0;
+    }
+    legend {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--red);
+      font-weight: 700;
+      margin: 0 0 0.85rem 0;
+      padding: 0;
+    }
+    label {
+      display: block;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate);
+      margin-bottom: 0.3rem;
+      font-weight: 700;
+    }
+    label .req { color: var(--red); }
+    input, select, textarea {
+      width: 100%;
+      padding: 0.7rem 0.85rem;
+      font-size: 1rem;
+      border: 1px solid var(--silver);
+      border-radius: 3px;
+      font-family: var(--font-body);
+      background: var(--paper);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: var(--red);
+    }
+    textarea { resize: vertical; min-height: 70px; }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.85rem; }
+    .row .full { grid-column: 1 / -1; }
+    @media (max-width: 480px) { .row { grid-template-columns: 1fr; } }
+    .row > div > label:not(:first-child) { margin-top: 0; }
+
+    .helper { font-size: 0.78rem; color: var(--slate-2); margin-top: 0.35rem; }
+
+    button[type="submit"] {
+      width: 100%;
+      padding: 1rem;
+      background: var(--red);
+      color: var(--paper);
+      border: none;
+      border-radius: 3px;
+      font-size: 0.95rem;
+      font-family: var(--font-body);
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      margin-top: 0.5rem;
+    }
+    button[type="submit"]:hover { background: var(--red-dark); }
+    button[type="submit"]:disabled { background: var(--silver); cursor: wait; }
+
+    .form-error {
+      color: #b71c1c;
+      font-size: 0.9rem;
+      margin-top: 0.85rem;
+      padding: 0.75rem 1rem;
+      background: #ffebee;
+      border: 1px solid #ef9a9a;
+      border-radius: 3px;
+      display: none;
+    }
+    .form-error.show { display: block; }
+
+    .login-link {
+      text-align: center;
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--slate);
+    }
+    .login-link a { color: var(--red); text-decoration: none; font-weight: 700; }
+    .login-link a:hover { text-decoration: underline; }
+
+    /* Success state */
+    .success {
+      display: none;
+      text-align: center;
+    }
+    .success.show { display: block; }
+    .success .check {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: var(--green); color: var(--paper);
+      font-size: 2.75rem; line-height: 80px;
+      margin: 0.5rem auto 1rem;
+    }
+    .success h2 {
+      font-size: 1.75rem;
+      font-weight: 900;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin: 0 0 0.75rem 0;
+    }
+    .success .summary {
+      color: var(--slate);
+      font-size: 1rem;
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+    }
+    .next-steps {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      border-left: 4px solid var(--red);
+      border-radius: 3px;
+      padding: 1.25rem;
+      text-align: left;
+      margin-bottom: 1.5rem;
+    }
+    .next-steps h3 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--red);
+      margin: 0 0 0.75rem 0;
+      font-weight: 700;
+    }
+    .next-steps ol {
+      margin: 0; padding-left: 1.4rem;
+      font-size: 0.95rem; line-height: 1.55;
+    }
+    .next-steps li { margin-bottom: 0.4rem; }
+    .next-steps li:last-child { margin-bottom: 0; }
+    .next-steps strong { color: var(--black); }
+    .next-steps code {
+      background: var(--bone);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.85rem;
+      color: var(--red-dark);
+    }
+    .success-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .success-actions button, .success-actions a {
+      flex: 1;
+      padding: 0.85rem 1rem;
+      border-radius: 3px;
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      cursor: pointer;
+      text-decoration: none;
+      text-align: center;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .success-actions .btn-primary {
+      background: var(--red); color: var(--paper); border: none;
+    }
+    .success-actions .btn-primary:hover { background: var(--red-dark); }
+    .success-actions .btn-secondary {
+      background: transparent; color: var(--black);
+      border: 1px solid var(--silver);
+    }
+    .success-actions .btn-secondary:hover { border-color: var(--black); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <p class="script">Tampa Bay</p>
+      <h1 class="name">Pirates</h1>
+      <span class="division">Cross Country</span>
+    </div>
+
+    <!-- FORM STATE -->
+    <div id="form-state">
+      <h2 class="page-title">Sign up an athlete</h2>
+      <p class="page-sub">Welcome to the team! Fill this out and we'll have your runner ready to log workouts.</p>
+
+      <form id="signup-form" autocomplete="on">
+
+        <fieldset>
+          <legend>Athlete</legend>
+          <div class="row">
+            <div>
+              <label for="a-first">First name <span class="req">*</span></label>
+              <input type="text" id="a-first" autocomplete="given-name" required>
+            </div>
+            <div>
+              <label for="a-last">Last name <span class="req">*</span></label>
+              <input type="text" id="a-last" autocomplete="family-name" required>
+            </div>
+          </div>
+          <div class="row">
+            <div class="full">
+              <label for="a-email">Email <span class="req">*</span></label>
+              <input type="email" id="a-email" autocomplete="email" required>
+              <div class="helper">This is what they'll use to sign in to the app. A school or personal email is fine.</div>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="a-dob">Date of birth <span class="req">*</span></label>
+              <input type="date" id="a-dob" required>
+              <div class="helper">Needed for race registrations.</div>
+            </div>
+            <div>
+              <label for="a-grade">Grade</label>
+              <select id="a-grade">
+                <option value="">—</option>
+                <option value="3">3rd</option>
+                <option value="4">4th</option>
+                <option value="5">5th</option>
+                <option value="6">6th</option>
+                <option value="7">7th</option>
+                <option value="8">8th</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="a-gender">Gender</label>
+              <select id="a-gender">
+                <option value="">—</option>
+                <option value="M">Male</option>
+                <option value="F">Female</option>
+                <option value="X">Other / prefer not to say</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Parent / Guardian</legend>
+          <div class="row">
+            <div>
+              <label for="p-first">First name <span class="req">*</span></label>
+              <input type="text" id="p-first" required>
+            </div>
+            <div>
+              <label for="p-last">Last name <span class="req">*</span></label>
+              <input type="text" id="p-last" required>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="p-email">Email <span class="req">*</span></label>
+              <input type="email" id="p-email" required>
+            </div>
+            <div>
+              <label for="p-phone">Phone <span class="req">*</span></label>
+              <input type="tel" id="p-phone" autocomplete="tel" placeholder="(813) 555-0123" required>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Emergency contact (optional)</legend>
+          <p class="helper" style="margin-top:-0.25rem;margin-bottom:0.85rem;">Only fill this out if it's <em>different</em> from the parent/guardian above.</p>
+          <div class="row">
+            <div>
+              <label for="e-name">Name</label>
+              <input type="text" id="e-name">
+            </div>
+            <div>
+              <label for="e-phone">Phone</label>
+              <input type="tel" id="e-phone">
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Anything else?</legend>
+          <textarea id="notes" placeholder="Allergies, medical concerns, prior running experience — anything Coach should know."></textarea>
+        </fieldset>
+
+        <button type="submit" id="submit-btn">Submit signup</button>
+
+        <div class="form-error" id="form-error"></div>
+
+        <div class="login-link">
+          Already on the team? <a href="index.html">Sign in</a>
+        </div>
+      </form>
+    </div>
+
+    <!-- SUCCESS STATE -->
+    <div class="success" id="success-state">
+      <div class="check">✓</div>
+      <h2>You're in!</h2>
+      <p class="summary" id="success-name">Welcome to the Pirates.</p>
+
+      <div class="next-steps">
+        <h3>Next steps</h3>
+        <ol>
+          <li>Open <code id="app-url">rampello-running-log.vercel.app</code> on the athlete's phone.</li>
+          <li>Tap <strong>Install on your phone</strong> for one-tap access (recommended).</li>
+          <li>Sign in with the athlete's email — a magic link will be emailed.</li>
+          <li>Start logging runs!</li>
+        </ol>
+      </div>
+
+      <div class="success-actions">
+        <button type="button" class="btn-secondary" id="another-btn">Sign up a sibling</button>
+        <a href="index.html" class="btn-primary">Done</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const form = document.getElementById('signup-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const errEl = document.getElementById('form-error');
+
+    function showErr(msg) {
+      errEl.textContent = msg;
+      errEl.classList.add('show');
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }
+    function txt(id) { const v = document.getElementById(id).value.trim(); return v || null; }
+    function intOrNull(id) { const v = parseInt(document.getElementById(id).value, 10); return isNaN(v) ? null : v; }
+    function gradeOrNull(id) {
+      const v = document.getElementById(id).value;
+      return v ? parseInt(v, 10) : null;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.classList.remove('show');
+
+      const athleteEmail = (document.getElementById('a-email').value || '').trim().toLowerCase();
+      const parentEmail  = (document.getElementById('p-email').value || '').trim().toLowerCase();
+
+      const payload = {
+        first_name:    txt('a-first'),
+        last_name:     txt('a-last'),
+        email:         athleteEmail || null,
+        date_of_birth: document.getElementById('a-dob').value || null,
+        grade:         gradeOrNull('a-grade'),
+        gender:        txt('a-gender'),
+        active:        true,
+        signup_source: 'self',
+        parent_first_name: txt('p-first'),
+        parent_last_name:  txt('p-last'),
+        parent_email:      parentEmail,
+        parent_phone:      txt('p-phone'),
+        emergency_contact_name:  txt('e-name'),
+        emergency_contact_phone: txt('e-phone'),
+        signup_notes:  txt('notes'),
+      };
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting…';
+
+      const { error } = await sb.from('athletes').insert(payload);
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit signup';
+
+      if (error) {
+        // Friendly messages for common cases
+        if (/duplicate key/.test(error.message) && /email/.test(error.message)) {
+          showErr("That athlete email is already on the team. If this is a mistake or you need to update info, please contact Coach Sowell.");
+        } else {
+          showErr('Something went wrong: ' + error.message + '. Please try again or contact Coach Sowell.');
+        }
+        return;
+      }
+
+      // Success!
+      document.getElementById('success-name').textContent =
+        `${payload.first_name} ${payload.last_name} is on the team.`;
+      document.getElementById('app-url').textContent = window.location.origin.replace(/^https?:\/\//, '');
+
+      document.getElementById('form-state').style.display = 'none';
+      document.getElementById('success-state').classList.add('show');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    document.getElementById('another-btn').addEventListener('click', () => {
+      // reset form, hide success, but preserve parent fields for sibling signup convenience
+      const parentFields = {
+        'p-first': document.getElementById('p-first').value,
+        'p-last':  document.getElementById('p-last').value,
+        'p-email': document.getElementById('p-email').value,
+        'p-phone': document.getElementById('p-phone').value,
+        'e-name':  document.getElementById('e-name').value,
+        'e-phone': document.getElementById('e-phone').value,
+      };
+      form.reset();
+      Object.entries(parentFields).forEach(([id, v]) => {
+        document.getElementById(id).value = v;
+      });
+      document.getElementById('form-state').style.display = '';
+      document.getElementById('success-state').classList.remove('show');
+      document.getElementById('a-first').focus();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  </script>
+</body>
+</html>

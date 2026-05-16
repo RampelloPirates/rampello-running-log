@@ -222,6 +222,29 @@
     .seg-strides { background:#e0f7fa; color:#006064; }
     .seg-cooldown { background:#e0e0e0; color:#424242; }
 
+    /* contact panel */
+    .contact-body > div {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 0.5rem;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--silver-2);
+    }
+    .contact-body > div:last-child { border-bottom: none; }
+    .contact-body .ci-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--slate-2);
+      font-weight: 700;
+    }
+    .contact-body .ci-val { color: var(--black); }
+    .contact-body a { color: var(--red); text-decoration: none; }
+    .contact-body a:hover { text-decoration: underline; }
+    @media (max-width: 480px) {
+      .contact-body > div { grid-template-columns: 1fr; gap: 0.1rem; }
+    }
+
     /* weekly mileage chart (simple bars) */
     .week-bars { padding: 1rem 1.25rem; }
     .week-bar-row {
@@ -339,6 +362,11 @@
         <p class="athlete-meta" id="athlete-meta"></p>
       </div>
     </div>
+
+    <details class="panel" id="contact-panel" style="display:none;">
+      <summary style="padding:0.85rem 1.25rem;cursor:pointer;font-size:0.8rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--slate);font-weight:700;background:var(--bone);border-bottom:1px solid var(--silver-2);">Contact &amp; background</summary>
+      <div class="contact-body" id="contact-body" style="padding:1rem 1.25rem;font-size:0.9rem;"></div>
+    </details>
 
     <div class="range-filter" role="tablist">
       <button class="range-btn active" data-range="week" role="tab">This week</button>
@@ -485,7 +513,12 @@
       }
       const { data, error } = await sb
         .from('athletes')
-        .select('id, first_name, last_name, email, grade, gender, active, auth_user_id, notes')
+        .select(`
+          id, first_name, last_name, email, grade, gender, active, auth_user_id, notes,
+          date_of_birth, signup_source, signup_notes,
+          parent_first_name, parent_last_name, parent_email, parent_phone,
+          emergency_contact_name, emergency_contact_phone
+        `)
         .eq('id', athleteId)
         .maybeSingle();
       if (error || !data) {
@@ -500,7 +533,57 @@
       const linked = data.auth_user_id ? '<span class="badge" style="background:#e8f5e9;color:#1b5e20">linked</span>' : '<span class="badge">pending sign-in</span>';
       const active = data.active ? '' : '<span class="badge inactive">inactive</span>';
       document.getElementById('athlete-meta').innerHTML = metaBits.join(' · ') + ' ' + linked + active;
+      renderContactPanel(data);
       return data;
+    }
+
+    function calcAge(dobISO) {
+      if (!dobISO) return null;
+      const dob = new Date(dobISO + 'T00:00:00');
+      const today = new Date();
+      let age = today.getFullYear() - dob.getFullYear();
+      const m = today.getMonth() - dob.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+      return age;
+    }
+    function formatDOB(dobISO) {
+      if (!dobISO) return null;
+      const d = new Date(dobISO + 'T00:00:00');
+      return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+
+    function renderContactPanel(a) {
+      const panel = document.getElementById('contact-panel');
+      if (!a) { panel.style.display = 'none'; return; }
+      const hasParent = a.parent_first_name || a.parent_last_name || a.parent_email || a.parent_phone;
+      const hasEmergency = a.emergency_contact_name || a.emergency_contact_phone;
+      const hasDob = a.date_of_birth;
+      const hasNotes = a.signup_notes || a.notes;
+      if (!hasParent && !hasEmergency && !hasDob && !hasNotes) {
+        panel.style.display = 'none';
+        return;
+      }
+      panel.style.display = '';
+
+      const rows = [];
+      if (hasDob) {
+        const age = calcAge(a.date_of_birth);
+        rows.push(`<div><span class="ci-label">Born</span><span class="ci-val">${formatDOB(a.date_of_birth)}${age != null ? ` (age ${age})` : ''}</span></div>`);
+      }
+      if (hasParent) {
+        const name = [a.parent_first_name, a.parent_last_name].filter(Boolean).join(' ');
+        rows.push(`<div><span class="ci-label">Parent / Guardian</span><span class="ci-val">${escapeHtml(name || '—')}</span></div>`);
+        if (a.parent_email) rows.push(`<div><span class="ci-label">Email</span><span class="ci-val"><a href="mailto:${escapeHtml(a.parent_email)}">${escapeHtml(a.parent_email)}</a></span></div>`);
+        if (a.parent_phone) rows.push(`<div><span class="ci-label">Phone</span><span class="ci-val"><a href="tel:${escapeHtml(a.parent_phone)}">${escapeHtml(a.parent_phone)}</a></span></div>`);
+      }
+      if (hasEmergency) {
+        rows.push(`<div><span class="ci-label">Emergency contact</span><span class="ci-val">${escapeHtml(a.emergency_contact_name || '—')}</span></div>`);
+        if (a.emergency_contact_phone) rows.push(`<div><span class="ci-label">Emergency phone</span><span class="ci-val"><a href="tel:${escapeHtml(a.emergency_contact_phone)}">${escapeHtml(a.emergency_contact_phone)}</a></span></div>`);
+      }
+      if (a.signup_notes) rows.push(`<div><span class="ci-label">Signup notes</span><span class="ci-val">${escapeHtml(a.signup_notes)}</span></div>`);
+      if (a.notes) rows.push(`<div><span class="ci-label">Coach notes</span><span class="ci-val">${escapeHtml(a.notes)}</span></div>`);
+
+      document.getElementById('contact-body').innerHTML = rows.join('');
     }
 
     async function loadRuns() {

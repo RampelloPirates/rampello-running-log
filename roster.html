@@ -419,6 +419,10 @@
               <input type="email" id="f-email" required>
             </div>
             <div>
+              <label for="f-dob">Date of birth</label>
+              <input type="date" id="f-dob">
+            </div>
+            <div>
               <label for="f-grade">Grade</label>
               <select id="f-grade">
                 <option value="">—</option>
@@ -507,7 +511,7 @@
       panel.innerHTML = '<div class="loading">Loading…</div>';
 
       let q = sb.from('athletes')
-        .select('id, first_name, last_name, email, grade, gender, active, auth_user_id')
+        .select('id, first_name, last_name, email, grade, gender, active, auth_user_id, signup_source')
         .order('last_name', { ascending: true });
 
       if (!showInactive) q = q.eq('active', true);
@@ -537,7 +541,7 @@
           <tbody>
             ${data.map(a => `
               <tr class="${a.active ? '' : 'inactive'}" data-id="${a.id}">
-                <td><a href="athlete_detail.html?id=${a.id}" style="color:var(--black);text-decoration:none;font-weight:700;border-bottom:1px dotted var(--silver);">${escapeHtml(a.last_name)}, ${escapeHtml(a.first_name)}</a>${a.active ? '' : ' <span class="badge">inactive</span>'}</td>
+                <td><a href="athlete_detail.html?id=${a.id}" style="color:var(--black);text-decoration:none;font-weight:700;border-bottom:1px dotted var(--silver);">${escapeHtml(a.last_name)}, ${escapeHtml(a.first_name)}</a>${a.active ? '' : ' <span class="badge">inactive</span>'}${a.signup_source === 'self' ? ' <span class="badge" style="background:#fff3e0;color:#b45309;">self-signed</span>' : ''}</td>
                 <td class="hide-mobile">${escapeHtml(a.email)}</td>
                 <td>${a.grade ? a.grade : '—'}</td>
                 <td class="hide-mobile">${a.auth_user_id ? '<span class="badge linked">linked</span>' : '<span class="badge">pending</span>'}</td>
@@ -586,6 +590,7 @@
           document.getElementById('f-first').value = a.first_name || '';
           document.getElementById('f-last').value = a.last_name || '';
           document.getElementById('f-email').value = a.email || '';
+          document.getElementById('f-dob').value = a.date_of_birth || '';
           document.getElementById('f-grade').value = a.grade || '';
           document.getElementById('f-gender').value = a.gender || '';
           document.getElementById('f-notes').value = a.notes || '';
@@ -612,12 +617,13 @@
       errorEl.classList.remove('show');
 
       const payload = {
-        first_name: document.getElementById('f-first').value.trim(),
-        last_name:  document.getElementById('f-last').value.trim(),
-        email:      document.getElementById('f-email').value.trim().toLowerCase(),
-        grade:      document.getElementById('f-grade').value || null,
-        gender:     document.getElementById('f-gender').value || null,
-        notes:      document.getElementById('f-notes').value.trim() || null,
+        first_name:    document.getElementById('f-first').value.trim(),
+        last_name:     document.getElementById('f-last').value.trim(),
+        email:         document.getElementById('f-email').value.trim().toLowerCase(),
+        date_of_birth: document.getElementById('f-dob').value || null,
+        grade:         document.getElementById('f-grade').value || null,
+        gender:        document.getElementById('f-gender').value || null,
+        notes:         document.getElementById('f-notes').value.trim() || null,
       };
 
       const saveBtn = document.getElementById('form-save');
