@@ -459,7 +459,8 @@
         .select(`
           id, run_date, run_type, distance_miles, duration_seconds,
           effort_rpe, avg_cadence, avg_hr, max_hr, route, shoes,
-          conditions, temperature_f, cross_train_activity, notes,
+          conditions, temperature_f, dewpoint_f, humidity_percent, wind_mph,
+          cross_train_activity, notes,
           run_segments(id, segment_order, segment_type, distance_miles, duration_seconds, notes)
         `)
         .eq('athlete_id', athlete.id)
@@ -630,6 +631,9 @@
       if (run.avg_hr) extras.push(`Avg HR: ${run.avg_hr}`);
       if (run.max_hr) extras.push(`Max HR: ${run.max_hr}`);
       if (run.temperature_f != null) extras.push(`${run.temperature_f}°F`);
+      if (run.dewpoint_f != null) extras.push(`Dew ${run.dewpoint_f}°F`);
+      if (run.humidity_percent != null) extras.push(`${run.humidity_percent}% hum`);
+      if (run.wind_mph != null) extras.push(`Wind ${run.wind_mph} mph`);
       if (run.conditions) extras.push(escapeHtml(run.conditions));
       if (extras.length) {
         body += `<div style="margin-top:0.6rem;font-size:0.85rem;color:var(--slate);">${extras.join(' · ')}</div>`;

@@ -1031,6 +1031,23 @@
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving…';
 
+      // Auto-fetch weather if user didn't enter any of the weather fields
+      const weatherUntouched = (
+        runPayload.temperature_f == null &&
+        runPayload.conditions == null &&
+        runPayload.wind_mph == null
+      );
+      if (weatherUntouched && runPayload.run_type !== 'cross_train') {
+        const w = await fetchWeatherForDate(runPayload.run_date);
+        if (w) {
+          runPayload.temperature_f    ??= w.temperature_f;
+          runPayload.conditions       ??= w.conditions;
+          runPayload.wind_mph         ??= w.wind_mph;
+          runPayload.humidity_percent ??= w.humidity_percent;
+          runPayload.dewpoint_f       ??= w.dewpoint_f;
+        }
+      }
+
       // Insert run
       const { data: runRow, error: runErr } = await sb
         .from('runs').insert(runPayload).select('id').single();
@@ -1111,6 +1128,51 @@
       applyTypeChange();
       document.getElementById('form-error').classList.remove('show');
       document.getElementById('simple-pace').textContent = '';
+    }
+
+    // ---- weather auto-fetch (Open-Meteo, free, no key) ----
+    function weatherCodeToText(code) {
+      if (code === 0) return 'Clear';
+      if (code === 1 || code === 2) return 'Partly cloudy';
+      if (code === 3) return 'Overcast';
+      if ([45, 48].includes(code)) return 'Foggy';
+      if ([51, 53, 55].includes(code)) return 'Drizzle';
+      if ([56, 57].includes(code)) return 'Freezing drizzle';
+      if ([61, 63, 65].includes(code)) return 'Rain';
+      if ([66, 67].includes(code)) return 'Freezing rain';
+      if ([71, 73, 75, 77].includes(code)) return 'Snow';
+      if ([80, 81, 82].includes(code)) return 'Showers';
+      if ([85, 86].includes(code)) return 'Snow showers';
+      if (code === 95) return 'Thunderstorm';
+      if (code === 96 || code === 99) return 'Thunderstorm with hail';
+      return null;
+    }
+
+    async function fetchWeatherForDate(dateISO) {
+      const LAT = 27.95, LON = -82.46;  // Tampa, FL — change later if club expands locations
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=temperature_2m,relativehumidity_2m,dewpoint_2m,windspeed_10m,weathercode&temperature_unit=fahrenheit&windspeed_unit=mph&start_date=${dateISO}&end_date=${dateISO}`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const today = new Date().toISOString().slice(0, 10);
+        // pick a representative hour: current if today, 5pm if past
+        const hour = dateISO === today ? new Date().getHours() : 17;
+        const t = data.hourly?.temperature_2m?.[hour];
+        const h = data.hourly?.relativehumidity_2m?.[hour];
+        const d = data.hourly?.dewpoint_2m?.[hour];
+        const w = data.hourly?.windspeed_10m?.[hour];
+        const c = data.hourly?.weathercode?.[hour];
+        return {
+          temperature_f:    t != null ? Math.round(t) : null,
+          humidity_percent: h != null ? Math.round(h) : null,
+          dewpoint_f:       d != null ? Math.round(d) : null,
+          wind_mph:         w != null ? Number(w.toFixed(1)) : null,
+          conditions:       weatherCodeToText(c),
+        };
+      } catch {
+        return null;
+      }
     }
 
     // ---- celebration / fun facts ----

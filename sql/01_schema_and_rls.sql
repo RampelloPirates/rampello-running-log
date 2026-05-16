@@ -61,6 +61,7 @@ create table runs (
   temperature_f         smallint,
   wind_mph              numeric(4,1),
   humidity_percent      smallint check (humidity_percent between 0 and 100),
+  dewpoint_f            smallint,                 -- better "feels like" signal in Florida
   cross_train_activity  text,                    -- only used when run_type = 'cross_train'
   notes                 text,
   created_at            timestamptz not null default now(),
