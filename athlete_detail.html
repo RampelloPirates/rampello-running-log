@@ -385,7 +385,7 @@
     </div>
 
     <div class="panel">
-      <div class="panel-heading"><h3>Weekly mileage</h3></div>
+      <div class="panel-heading"><h3 id="trend-title">Mileage trend</h3></div>
       <div class="week-bars" id="week-bars"><div class="loading">Loading…</div></div>
     </div>
 
@@ -682,31 +682,87 @@
     }
 
     function renderWeeklyBars(runs) {
+      // Bucket granularity follows the active range filter:
+      //   week  -> bars per day (Mon..today)
+      //   month -> bars per week (Mon-starting weeks within the month)
+      //   year / all -> bars per month
       const wrap = document.getElementById('week-bars');
-      if (runs.length === 0) {
-        wrap.innerHTML = '<div class="empty">No runs to chart yet.</div>';
-        return;
-      }
-      // bucket by week start
-      const buckets = new Map(); // iso week start -> miles
-      runs.forEach(r => {
-        const wkStart = isoOf(startOfWeek(r.run_date + 'T00:00:00'));
-        if (!buckets.has(wkStart)) buckets.set(wkStart, 0);
-        if (r.distance_miles) buckets.set(wkStart, buckets.get(wkStart) + Number(r.distance_miles));
-      });
-      const sorted = [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-      const maxMi = Math.max(1, ...sorted.map(e => e[1]));
-      wrap.innerHTML = sorted.map(([wk, mi]) => {
-        const wkLabel = new Date(wk + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const pct = (mi / maxMi) * 100;
+      const title = document.getElementById('trend-title');
+
+      if (activeRange === 'week')  { title.textContent = 'Daily mileage (this week)'; return renderDailyBars(runs, wrap); }
+      if (activeRange === 'month') { title.textContent = 'Weekly mileage (this month)'; return renderWeekBuckets(runs, wrap); }
+      title.textContent = (activeRange === 'year') ? 'Monthly mileage (this year)' : 'Monthly mileage';
+      return renderMonthBuckets(runs, wrap);
+    }
+
+    function emitBars(rows, wrap) {
+      if (!rows.length) { wrap.innerHTML = '<div class="empty">No runs to chart yet.</div>'; return; }
+      const maxMi = Math.max(0.5, ...rows.map(r => r.miles));
+      wrap.innerHTML = rows.map(r => {
+        const pct = (r.miles / maxMi) * 100;
+        const val = r.miles ? formatMiles(r.miles) + ' mi' : '—';
         return `
           <div class="week-bar-row">
-            <div class="week-label">Wk of ${wkLabel}</div>
+            <div class="week-label">${r.label}</div>
             <div class="week-bar-track"><div class="week-bar-fill" style="width:${pct}%"></div></div>
-            <div class="week-bar-val">${formatMiles(mi)} mi</div>
+            <div class="week-bar-val">${val}</div>
           </div>
         `;
       }).join('');
+    }
+
+    function renderDailyBars(runs, wrap) {
+      // Always show all 7 days Mon-Sun so the chart spacing is consistent;
+      // days in the future show as "—".
+      const monday = startOfWeek(new Date());
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const milesByDate = {};
+      runs.forEach(r => {
+        if (r.distance_miles) milesByDate[r.run_date] = (milesByDate[r.run_date] || 0) + Number(r.distance_miles);
+      });
+      const rows = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday); d.setDate(monday.getDate() + i);
+        const future = d > today;
+        const iso = isoOf(d);
+        rows.push({
+          label: d.toLocaleDateString('en-US', { weekday: 'short' }),
+          miles: future ? 0 : (milesByDate[iso] || 0),
+        });
+      }
+      emitBars(rows, wrap);
+    }
+
+    function renderWeekBuckets(runs, wrap) {
+      const buckets = new Map();
+      runs.forEach(r => {
+        const wkStart = isoOf(startOfWeek(r.run_date + 'T00:00:00'));
+        const cur = buckets.get(wkStart) || 0;
+        if (r.distance_miles) buckets.set(wkStart, cur + Number(r.distance_miles));
+        else if (!buckets.has(wkStart)) buckets.set(wkStart, 0);
+      });
+      const sorted = [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const rows = sorted.map(([wk, mi]) => ({
+        label: 'Wk of ' + new Date(wk + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        miles: mi,
+      }));
+      emitBars(rows, wrap);
+    }
+
+    function renderMonthBuckets(runs, wrap) {
+      const buckets = new Map();
+      runs.forEach(r => {
+        const key = r.run_date.slice(0, 7);  // YYYY-MM
+        const cur = buckets.get(key) || 0;
+        if (r.distance_miles) buckets.set(key, cur + Number(r.distance_miles));
+        else if (!buckets.has(key)) buckets.set(key, 0);
+      });
+      const sorted = [...buckets.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const rows = sorted.map(([ym, mi]) => ({
+        label: new Date(ym + '-01T00:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        miles: mi,
+      }));
+      emitBars(rows, wrap);
     }
 
     function renderRunList(runs) {
