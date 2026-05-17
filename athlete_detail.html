@@ -369,11 +369,20 @@
       <div class="contact-body" id="contact-body" style="padding:1rem 1.25rem;font-size:0.9rem;"></div>
     </details>
 
-    <div class="range-filter" role="tablist">
+    <div class="range-filter" role="tablist" aria-label="Date range">
       <button class="range-btn active" data-range="week" role="tab">This week</button>
       <button class="range-btn" data-range="month" role="tab">This month</button>
       <button class="range-btn" data-range="year" role="tab">This year</button>
       <button class="range-btn" data-range="all" role="tab">All time</button>
+    </div>
+    <div class="range-filter" role="tablist" aria-label="Run type" style="margin-left:0.5rem;flex-wrap:wrap;">
+      <button class="range-btn active" data-type="all"         role="tab">All types</button>
+      <button class="range-btn"        data-type="easy"        role="tab">Easy</button>
+      <button class="range-btn"        data-type="long"        role="tab">Long</button>
+      <button class="range-btn"        data-type="tempo"       role="tab">Tempo</button>
+      <button class="range-btn"        data-type="intervals"   role="tab">Intervals</button>
+      <button class="range-btn"        data-type="race"        role="tab">Race</button>
+      <button class="range-btn"        data-type="cross_train" role="tab">Cross-train</button>
     </div>
     <p id="range-sub" style="margin:0 0 1rem 0;font-size:0.8rem;color:var(--slate-2);"></p>
 
@@ -505,6 +514,7 @@
     }
 
     let activeRange = 'week';
+    let activeType = 'all';
     let athlete = null;
 
     async function loadAthlete() {
@@ -605,11 +615,21 @@
         .order('run_date', { ascending: false })
         .order('created_at', { ascending: false });
 
-      const list = runs || [];
-      renderStats(list);
-      renderPaceByType(list);
-      renderWeeklyBars(list);
-      renderRunList(list);
+      allRunsInRange = runs || [];
+      rerenderWithFilter();
+    }
+
+    // Cache the fetched runs so the run-type filter can re-render without a
+    // new fetch.
+    let allRunsInRange = [];
+    function rerenderWithFilter() {
+      const filtered = (activeType === 'all')
+        ? allRunsInRange
+        : allRunsInRange.filter(r => r.run_type === activeType);
+      renderStats(filtered);
+      renderPaceByType(filtered);
+      renderWeeklyBars(filtered);
+      renderRunList(filtered);
     }
 
     function renderStats(runs) {
@@ -873,11 +893,20 @@
       return body;
     }
 
-    document.querySelectorAll('.range-btn').forEach(b => {
+    // Date range pills: changing requires a re-fetch (the date filter is server-side).
+    document.querySelectorAll('.range-btn[data-range]').forEach(b => {
       b.addEventListener('click', () => {
-        document.querySelectorAll('.range-btn').forEach(x => x.classList.toggle('active', x === b));
+        document.querySelectorAll('.range-btn[data-range]').forEach(x => x.classList.toggle('active', x === b));
         activeRange = b.dataset.range;
         loadRuns();
+      });
+    });
+    // Run-type pills: client-side filter only, just re-render from cache.
+    document.querySelectorAll('.range-btn[data-type]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.range-btn[data-type]').forEach(x => x.classList.toggle('active', x === b));
+        activeType = b.dataset.type;
+        rerenderWithFilter();
       });
     });
 

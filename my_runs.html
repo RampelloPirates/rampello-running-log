@@ -317,11 +317,20 @@
 
     <a href="log_run.html" class="log-cta">+ Log a new run</a>
 
-    <div class="range-filter" role="tablist">
+    <div class="range-filter" role="tablist" aria-label="Date range">
       <button class="range-btn active" data-range="week" role="tab">This week</button>
       <button class="range-btn" data-range="month" role="tab">This month</button>
       <button class="range-btn" data-range="year" role="tab">This year</button>
       <button class="range-btn" data-range="all" role="tab">All time</button>
+    </div>
+    <div class="range-filter" role="tablist" aria-label="Run type" style="margin-left:0.5rem;flex-wrap:wrap;">
+      <button class="range-btn active" data-type="all"         role="tab">All types</button>
+      <button class="range-btn"        data-type="easy"        role="tab">Easy</button>
+      <button class="range-btn"        data-type="long"        role="tab">Long</button>
+      <button class="range-btn"        data-type="tempo"       role="tab">Tempo</button>
+      <button class="range-btn"        data-type="intervals"   role="tab">Intervals</button>
+      <button class="range-btn"        data-type="race"        role="tab">Race</button>
+      <button class="range-btn"        data-type="cross_train" role="tab">Cross-train</button>
     </div>
     <p id="range-sub" style="margin:0 0 1rem 0;font-size:0.8rem;color:var(--slate-2);"></p>
 
@@ -449,6 +458,8 @@
     // ---- state ----
     let athlete = null;
     let activeRange = 'week';
+    let activeType = 'all';
+    let allRunsInRange = [];
 
     // ---- data load ----
     async function loadAll() {
@@ -474,9 +485,17 @@
         return;
       }
 
-      renderStats(runs || []);
-      renderPaceByType(runs || []);
-      renderRunList(runs || []);
+      allRunsInRange = runs || [];
+      rerenderWithFilter();
+    }
+
+    function rerenderWithFilter() {
+      const filtered = (activeType === 'all')
+        ? allRunsInRange
+        : allRunsInRange.filter(r => r.run_type === activeType);
+      renderStats(filtered);
+      renderPaceByType(filtered);
+      renderRunList(filtered);
     }
 
     function renderStats(runs) {
@@ -654,12 +673,20 @@
       return body;
     }
 
-    // ---- range filter ----
-    document.querySelectorAll('.range-btn').forEach(b => {
+    // Date-range pills trigger a re-fetch (date filter is server-side).
+    document.querySelectorAll('.range-btn[data-range]').forEach(b => {
       b.addEventListener('click', () => {
-        document.querySelectorAll('.range-btn').forEach(x => x.classList.toggle('active', x === b));
+        document.querySelectorAll('.range-btn[data-range]').forEach(x => x.classList.toggle('active', x === b));
         activeRange = b.dataset.range;
         loadAll();
+      });
+    });
+    // Run-type pills are client-side: re-render from cache, no fetch.
+    document.querySelectorAll('.range-btn[data-type]').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.range-btn[data-type]').forEach(x => x.classList.toggle('active', x === b));
+        activeType = b.dataset.type;
+        rerenderWithFilter();
       });
     });
 
