@@ -341,8 +341,12 @@
         <div class="value" id="stat-runs">—</div>
       </div>
       <div class="stat">
-        <div class="label">Team miles this week</div>
-        <div class="value" id="stat-miles">—</div>
+        <div class="label">Most runs by athlete</div>
+        <div class="value" id="stat-most">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Fewest runs by athlete</div>
+        <div class="value" id="stat-fewest">—</div>
       </div>
       <div class="stat">
         <div class="label">Workout days</div>
@@ -444,14 +448,15 @@
 
       const weekStart = startOfWeekISO();
 
-      // active athletes
-      const { count: athleteCount } = await sb
+      // Pull active athlete ids in one shot (also gives us the count).
+      const { data: activeAthletes } = await sb
         .from('athletes')
-        .select('id', { count: 'exact', head: true })
+        .select('id')
         .eq('active', true);
-      document.getElementById('stat-athletes').textContent = athleteCount ?? 0;
+      const activeIds = (activeAthletes || []).map(a => a.id);
+      document.getElementById('stat-athletes').textContent = activeIds.length;
 
-      // runs this week + miles + workouts
+      // runs this week + workouts + per-athlete tallies
       const { data: weekRuns } = await sb
         .from('runs')
         .select('id, run_type, distance_miles, athlete_id')
@@ -459,11 +464,21 @@
 
       const runs = weekRuns || [];
       document.getElementById('stat-runs').textContent = runs.length;
-      const totalMiles = runs.reduce((s, r) => s + Number(r.distance_miles || 0), 0);
-      document.getElementById('stat-miles').innerHTML =
-        totalMiles.toFixed(1) + '<span class="unit">mi</span>';
       const workoutCount = runs.filter(r => workoutType(r.run_type)).length;
       document.getElementById('stat-workouts').textContent = workoutCount;
+
+      // Most/fewest runs per athlete (includes athletes with 0 so fewest
+      // surfaces athletes who haven't logged this week).
+      const perAthlete = {};
+      activeIds.forEach(id => perAthlete[id] = 0);
+      runs.forEach(r => {
+        if (perAthlete[r.athlete_id] != null) perAthlete[r.athlete_id]++;
+      });
+      const counts = Object.values(perAthlete);
+      const most   = counts.length ? Math.max(...counts) : 0;
+      const fewest = counts.length ? Math.min(...counts) : 0;
+      document.getElementById('stat-most').textContent   = most;
+      document.getElementById('stat-fewest').textContent = fewest;
 
       // recent runs table (last 10)
       const { data: recent } = await sb
@@ -492,11 +507,9 @@
           </thead>
           <tbody>
             ${recent.map(r => `
-              <tr>
+              <tr style="cursor:pointer;" onclick="window.location.href='athlete_detail.html?id=${r.athlete_id}&run=${r.id}'">
                 <td>${formatDate(r.run_date)}</td>
-                <td>${r.athletes
-                  ? `<a href="athlete_detail.html?id=${r.athlete_id}" style="color:var(--black);text-decoration:none;border-bottom:1px dotted var(--silver);">${r.athletes.first_name} ${r.athletes.last_name}</a>`
-                  : '—'}</td>
+                <td>${r.athletes ? r.athletes.first_name + ' ' + r.athletes.last_name : '—'}</td>
                 <td><span class="type-pill type-${r.run_type}">${r.run_type.replace('_', ' ')}</span></td>
                 <td>${r.distance_miles ? Number(r.distance_miles).toFixed(2) : '—'}</td>
                 <td>${formatDuration(r.duration_seconds)}</td>

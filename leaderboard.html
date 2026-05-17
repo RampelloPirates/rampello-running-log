@@ -481,9 +481,11 @@
         : formatDuration(r.value);
     }
 
+    // Returns inline HTML for the change column. Coach-only.
+    // baselineMode = 'list' (used in rows) or 'podium' (smaller badge).
     function fmtChange(r) {
       if (!isCoach) return '';
-      if (r.changePct == null) return '<span style="color:var(--slate-2);">—</span>';
+      if (r.changePct == null) return '<span class="lb-change" style="color:var(--slate-2);font-style:italic;">new</span>';
       const pct = (r.changePct * 100).toFixed(0);
       const sign = r.changePct >= 0 ? '+' : '';
       let cls = '';
@@ -491,6 +493,20 @@
       else if (r.changePct > 0.20) cls = 'warn';
       const icon = cls === 'danger' ? ' 🚨' : cls === 'warn' ? ' ⚠' : '';
       return `<span class="lb-change ${cls}">${sign}${pct}%${icon}</span>`;
+    }
+
+    function podiumChangeBadge(r) {
+      if (!isCoach) return '';
+      if (r.changePct == null) {
+        return '<div style="margin-top:0.4rem;font-size:0.7rem;color:var(--slate-2);font-style:italic;">new this period</div>';
+      }
+      const pct = (r.changePct * 100).toFixed(0);
+      const sign = r.changePct >= 0 ? '+' : '';
+      let color = 'var(--slate-2)';
+      let icon = '';
+      if (r.changePct > 0.40) { color = 'var(--danger)'; icon = ' 🚨'; }
+      else if (r.changePct > 0.20) { color = 'var(--warn)'; icon = ' ⚠'; }
+      return `<div style="margin-top:0.4rem;font-size:0.8rem;font-weight:700;color:${color};">${sign}${pct}%${icon}</div>`;
     }
 
     function renderPodium(top3) {
@@ -511,6 +527,7 @@
             <div class="podium-rank">${rankLabel}</div>
             <div class="podium-name">${escapeHtml(athlete.name)}</div>
             <div class="podium-value">${fmtValue(athlete)}</div>
+            ${podiumChangeBadge(athlete)}
           </div>`;
       };
       wrap.innerHTML = `

@@ -22,7 +22,13 @@ random.seed(42)  # reproducible
 
 TODAY = date.today()
 WEEKS_BACK = 4
-START_DATE = TODAY - timedelta(days=WEEKS_BACK * 7)
+# Align week_start to Monday so seed weeks map cleanly onto calendar weeks --
+# without this, "Tue is workout day" in the seed lands on whatever weekday is
+# TODAY - 28, which silently breaks dashboard tiles that filter "this week
+# Mon-Sun" (e.g. workout-day count comes back 0 because the seeded Tuesday
+# workout fell on a Sunday last week).
+this_monday = TODAY - timedelta(days=TODAY.weekday())
+START_DATE = this_monday - timedelta(days=(WEEKS_BACK - 1) * 7)
 
 # -- Athlete roster ---------------------------------------------------------
 # (first, last, grade, gender, profile)

@@ -742,6 +742,22 @@
           if (detail) detail.classList.toggle('show');
         });
       });
+
+      // Optional ?run=<runId> URL param -- auto-expand + scroll to that row.
+      // Used by team_dashboard's Recent Runs table to deep-link into a
+      // specific run rather than just the athlete.
+      const focusRunId = params.get('run');
+      if (focusRunId) {
+        const focusRow = wrap.querySelector(`.run-row[data-id="${focusRunId}"]`);
+        const focusDetail = wrap.querySelector(`[data-segments-for="${focusRunId}"]`);
+        if (focusDetail) focusDetail.classList.add('show');
+        if (focusRow) {
+          focusRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const prev = focusRow.style.background;
+          focusRow.style.background = 'var(--bone)';
+          setTimeout(() => { focusRow.style.background = prev; }, 2500);
+        }
+      }
     }
 
     function renderSegmentDetail(segs, run) {

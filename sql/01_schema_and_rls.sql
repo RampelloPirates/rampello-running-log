@@ -23,7 +23,7 @@ create table athletes (
   first_name    text not null,
   last_name     text not null,
   email         text not null unique,
-  grade         smallint check (grade between 3 and 12),
+  grade         smallint check (grade between 3 and 8),
   gender        text check (gender in ('M','F','X')),
   joined_date   date not null default current_date,
   active        boolean not null default true,
