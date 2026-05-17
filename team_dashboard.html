@@ -307,6 +307,130 @@
       padding: 2rem;
       font-style: italic;
     }
+
+    /* Athletes-this-week table */
+    .athletes-week table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .athletes-week th {
+      text-align: left; font-size: 0.7rem;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--slate-2); font-weight: 700;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--silver-2);
+    }
+    .athletes-week th.num, .athletes-week td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .athletes-week td {
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--silver-2);
+      cursor: pointer;
+    }
+    .athletes-week tr:last-child td { border-bottom: none; }
+    .athletes-week tr:hover td { background: var(--bone); }
+    .athletes-week .ath-zero { color: var(--slate-2); }
+
+    .recent tr { cursor: pointer; }
+    .recent tr:hover td { background: var(--bone); }
+
+    /* Run details modal */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem;
+      z-index: 100;
+      overflow-y: auto;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: var(--paper);
+      max-width: 640px; width: 100%;
+      border-radius: 6px;
+      overflow: hidden;
+      border-top: 6px solid var(--red);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    }
+    .modal-hdr {
+      padding: 1rem 1.25rem;
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--silver-2);
+      background: var(--bone);
+    }
+    .modal-hdr h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+    .modal-close {
+      background: none; border: none;
+      font-size: 1.4rem; line-height: 1;
+      color: var(--slate-2); cursor: pointer;
+    }
+    .modal-body { padding: 1.25rem; }
+    .modal-footer {
+      padding: 0.85rem 1.25rem;
+      border-top: 1px solid var(--silver-2);
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--bone);
+    }
+    .modal-footer a {
+      color: var(--red); text-decoration: none; font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .modal-footer a:hover { text-decoration: underline; }
+    .modal-footer button {
+      background: var(--black); color: var(--paper); border: none;
+      padding: 0.5rem 1rem; border-radius: 3px;
+      font-size: 0.85rem; font-family: inherit; cursor: pointer;
+    }
+    .recap-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 0.85rem; margin-bottom: 1rem;
+    }
+    .recap-cell .recap-label {
+      font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--slate-2); font-weight: 700; margin-bottom: 0.25rem;
+    }
+    .recap-cell .recap-val {
+      font-size: 1.1rem; font-weight: 700; color: var(--black);
+    }
+    .seg-mini-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 0.85rem; margin-bottom: 1rem;
+      background: var(--bone); border-radius: 3px; overflow: hidden;
+    }
+    .seg-mini-table th, .seg-mini-table td {
+      padding: 0.45rem 0.65rem;
+      border-bottom: 1px solid var(--silver-2);
+      text-align: left;
+    }
+    .seg-mini-table th {
+      font-size: 0.65rem; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--slate-2); font-weight: 700;
+    }
+    .seg-mini-table tr:last-child td { border-bottom: none; }
+    .seg-mini-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .seg-pill {
+      display: inline-block; font-size: 0.65rem;
+      padding: 0.1rem 0.45rem; border-radius: 8px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      font-weight: 700; background: var(--silver-2); color: var(--slate);
+    }
+    .modal-section-title {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1.5px;
+      color: var(--slate); font-weight: 700; margin: 0.5rem 0 0.6rem 0;
+    }
+    .modal-notes {
+      padding: 0.75rem 1rem;
+      background: var(--bone);
+      border-left: 3px solid var(--silver);
+      border-radius: 0 3px 3px 0;
+      font-size: 0.9rem; color: var(--slate); font-style: italic;
+    }
+    .modal-extras {
+      font-size: 0.85rem; color: var(--slate);
+      margin-bottom: 0.85rem;
+    }
   </style>
 </head>
 <body>
@@ -348,10 +472,6 @@
         <div class="label">Fewest runs by athlete</div>
         <div class="value" id="stat-fewest">—</div>
       </div>
-      <div class="stat">
-        <div class="label">Workout days</div>
-        <div class="value" id="stat-workouts">—</div>
-      </div>
     </div>
 
     <h2>Manage</h2>
@@ -370,11 +490,33 @@
       </a>
     </div>
 
-    <h2>Recent runs</h2>
+    <h2>Athletes this week</h2>
+    <div class="recent athletes-week">
+      <div id="athletes-week-body" class="loading">Loading…</div>
+    </div>
+
+    <h2 style="margin-top:1.75rem;">Recent runs</h2>
     <div class="recent">
       <div id="recent-body" class="loading">Loading…</div>
     </div>
   </main>
+
+  <!-- Run details modal -->
+  <div class="modal-overlay" id="run-modal">
+    <div class="modal">
+      <div class="modal-hdr">
+        <h3 id="run-modal-title">Run details</h3>
+        <button class="modal-close" id="run-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="run-modal-body">
+        <div class="loading">Loading…</div>
+      </div>
+      <div class="modal-footer">
+        <a id="run-modal-athlete" href="#">View athlete summary →</a>
+        <button id="run-modal-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
@@ -437,7 +579,6 @@
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
-    function workoutType(t) { return ['tempo', 'intervals', 'race'].includes(t); }
 
     // ---- load dashboard data -----------------------------------------------
     async function load() {
@@ -448,12 +589,15 @@
 
       const weekStart = startOfWeekISO();
 
-      // Pull active athlete ids in one shot (also gives us the count).
+      // Pull active athlete ids + names in one shot.
       const { data: activeAthletes } = await sb
         .from('athletes')
-        .select('id')
-        .eq('active', true);
+        .select('id, first_name, last_name')
+        .eq('active', true)
+        .order('last_name');
       const activeIds = (activeAthletes || []).map(a => a.id);
+      const athletesById = {};
+      (activeAthletes || []).forEach(a => { athletesById[a.id] = a; });
       document.getElementById('stat-athletes').textContent = activeIds.length;
 
       // runs this week + workouts + per-athlete tallies
@@ -464,8 +608,6 @@
 
       const runs = weekRuns || [];
       document.getElementById('stat-runs').textContent = runs.length;
-      const workoutCount = runs.filter(r => workoutType(r.run_type)).length;
-      document.getElementById('stat-workouts').textContent = workoutCount;
 
       // Most/fewest runs per athlete (includes athletes with 0 so fewest
       // surfaces athletes who haven't logged this week).
@@ -479,6 +621,16 @@
       const fewest = counts.length ? Math.min(...counts) : 0;
       document.getElementById('stat-most').textContent   = most;
       document.getElementById('stat-fewest').textContent = fewest;
+
+      // Athletes-this-week table: per-athlete runs and miles
+      const milesByAthlete = {};
+      activeIds.forEach(id => milesByAthlete[id] = 0);
+      runs.forEach(r => {
+        if (r.distance_miles && milesByAthlete[r.athlete_id] != null) {
+          milesByAthlete[r.athlete_id] += Number(r.distance_miles);
+        }
+      });
+      renderAthletesWeek(activeAthletes || [], perAthlete, milesByAthlete);
 
       // recent runs table (last 10)
       const { data: recent } = await sb
@@ -507,7 +659,7 @@
           </thead>
           <tbody>
             ${recent.map(r => `
-              <tr style="cursor:pointer;" onclick="window.location.href='athlete_detail.html?id=${r.athlete_id}&run=${r.id}'">
+              <tr data-run-id="${r.id}" data-athlete-id="${r.athlete_id}">
                 <td>${formatDate(r.run_date)}</td>
                 <td>${r.athletes ? r.athletes.first_name + ' ' + r.athletes.last_name : '—'}</td>
                 <td><span class="type-pill type-${r.run_type}">${r.run_type.replace('_', ' ')}</span></td>
@@ -518,6 +670,181 @@
           </tbody>
         </table>
       `;
+      body.querySelectorAll('tr[data-run-id]').forEach(tr => {
+        tr.addEventListener('click', () => openRunModal(tr.dataset.runId, tr.dataset.athleteId));
+      });
+    }
+
+    // ---- Athletes this week ------------------------------------------------
+    function renderAthletesWeek(athletes, runsPerAthlete, milesPerAthlete) {
+      const wrap = document.getElementById('athletes-week-body');
+      if (!athletes.length) {
+        wrap.innerHTML = '<div class="empty">No active athletes yet.</div>';
+        return;
+      }
+      // Sort by runs desc, then by miles desc, then by name
+      const sorted = [...athletes].sort((a, b) => {
+        const ra = runsPerAthlete[a.id] || 0;
+        const rb = runsPerAthlete[b.id] || 0;
+        if (ra !== rb) return rb - ra;
+        const ma = milesPerAthlete[a.id] || 0;
+        const mb = milesPerAthlete[b.id] || 0;
+        if (ma !== mb) return mb - ma;
+        return a.last_name.localeCompare(b.last_name);
+      });
+      wrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Athlete</th>
+              <th class="num">Runs</th>
+              <th class="num">Miles</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sorted.map(a => {
+              const runCount = runsPerAthlete[a.id] || 0;
+              const miles = milesPerAthlete[a.id] || 0;
+              const zeroCls = runCount === 0 ? 'ath-zero' : '';
+              return `
+                <tr data-athlete-id="${a.id}">
+                  <td class="${zeroCls}">${a.last_name}, ${a.first_name}</td>
+                  <td class="num ${zeroCls}">${runCount}</td>
+                  <td class="num ${zeroCls}">${miles ? miles.toFixed(1) : '—'}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+      wrap.querySelectorAll('tr[data-athlete-id]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          window.location.href = 'athlete_detail.html?id=' + tr.dataset.athleteId;
+        });
+      });
+    }
+
+    // ---- Run details modal -------------------------------------------------
+    const runModal = document.getElementById('run-modal');
+    document.getElementById('run-modal-close').addEventListener('click', closeRunModal);
+    document.getElementById('run-modal-close-btn').addEventListener('click', closeRunModal);
+    runModal.addEventListener('click', (e) => { if (e.target === runModal) closeRunModal(); });
+
+    function closeRunModal() { runModal.classList.remove('show'); }
+
+    async function openRunModal(runId, athleteId) {
+      document.getElementById('run-modal-athlete').href = 'athlete_detail.html?id=' + athleteId;
+      document.getElementById('run-modal-body').innerHTML = '<div class="loading">Loading…</div>';
+      runModal.classList.add('show');
+
+      const [{ data: run, error }, { data: segs }, { data: race }] = await Promise.all([
+        sb.from('runs')
+          .select('id, run_date, run_type, distance_miles, duration_seconds, effort_rpe, avg_cadence, avg_hr, max_hr, route, shoes, conditions, temperature_f, dewpoint_f, humidity_percent, wind_mph, cross_train_activity, notes, athletes(first_name, last_name)')
+          .eq('id', runId)
+          .maybeSingle(),
+        sb.from('run_segments').select('*').eq('run_id', runId).order('segment_order'),
+        sb.from('race_results').select('*').eq('run_id', runId).maybeSingle(),
+      ]);
+      if (error || !run) {
+        document.getElementById('run-modal-body').innerHTML = '<div class="empty">Could not load this run.</div>';
+        return;
+      }
+      renderRunModal(run, segs || [], race && !race.error ? race : null);
+    }
+
+    function renderRunModal(run, segs, race) {
+      const athleteName = run.athletes ? run.athletes.first_name + ' ' + run.athletes.last_name : 'Athlete';
+      const d = new Date(run.run_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      document.getElementById('run-modal-title').innerHTML =
+        `${athleteName} <span style="color:var(--slate-2);font-weight:400;">· ${d}</span>`;
+
+      const dist = run.distance_miles ? Number(run.distance_miles) : 0;
+      const dur  = run.duration_seconds ? Number(run.duration_seconds) : 0;
+      const pace = (dist > 0 && dur > 0) ? dur / dist : null;
+      const pillType = run.run_type;
+
+      let html = '';
+      html += `<div style="margin-bottom:1rem;"><span class="type-pill type-${pillType}">${run.run_type.replace('_', ' ')}</span>`;
+      if (run.cross_train_activity) {
+        html += ` <span style="color:var(--slate);font-size:0.9rem;">· ${escapeHtml(run.cross_train_activity)}</span>`;
+      }
+      html += '</div>';
+
+      const cells = [];
+      if (dist > 0) cells.push(['Distance', dist.toFixed(2) + ' mi']);
+      if (dur > 0)  cells.push(['Time',     formatDuration(dur)]);
+      if (pace)     cells.push(['Pace',     fmtPace(pace)]);
+      if (run.effort_rpe) cells.push(['RPE', run.effort_rpe]);
+      if (run.avg_cadence) cells.push(['Cadence', run.avg_cadence + ' spm']);
+      if (run.avg_hr) cells.push(['Avg HR', run.avg_hr]);
+      if (cells.length) {
+        html += '<div class="recap-grid">' +
+          cells.map(([l, v]) => `<div class="recap-cell"><div class="recap-label">${l}</div><div class="recap-val">${v}</div></div>`).join('') +
+          '</div>';
+      }
+
+      if (segs.length) {
+        html += '<div class="modal-section-title">Segments</div>';
+        html += `<table class="seg-mini-table">
+          <thead><tr><th>#</th><th>Type</th><th class="num">Distance</th><th class="num">Time</th><th class="num">Pace</th></tr></thead>
+          <tbody>
+            ${segs.map((s, i) => {
+              const sd = s.distance_miles ? Number(s.distance_miles) : 0;
+              const st = s.duration_seconds ? Number(s.duration_seconds) : 0;
+              const sp = (sd > 0 && st > 0) ? st / sd : null;
+              return `<tr>
+                <td>${s.segment_order || i+1}</td>
+                <td><span class="seg-pill">${s.segment_type}</span></td>
+                <td class="num">${sd ? sd.toFixed(2) + ' mi' : '—'}</td>
+                <td class="num">${st ? formatDuration(st) : '—'}</td>
+                <td class="num">${fmtPace(sp)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+      }
+
+      if (race) {
+        html += '<div class="modal-section-title">Race result</div>';
+        const bits = [];
+        if (race.meet_name)            bits.push(`<strong>${escapeHtml(race.meet_name)}</strong>`);
+        if (race.course_name)          bits.push(escapeHtml(race.course_name));
+        if (race.course_type)          bits.push('(' + race.course_type + ')');
+        if (race.official_distance_meters) bits.push(race.official_distance_meters + 'm');
+        if (race.finish_place_overall) bits.push('Overall finish: ' + race.finish_place_overall);
+        if (race.finish_place_team)    bits.push('Team finish: ' + race.finish_place_team);
+        if (race.team_score_total)     bits.push('Team score: ' + race.team_score_total);
+        html += '<div class="modal-extras">' + bits.join(' · ') + '</div>';
+        if (race.opponents)        html += '<div class="modal-extras"><strong>Opponents:</strong> ' + escapeHtml(race.opponents) + '</div>';
+        if (race.conditions_notes) html += '<div class="modal-extras"><strong>Conditions:</strong> ' + escapeHtml(race.conditions_notes) + '</div>';
+      }
+
+      const extras = [];
+      if (run.route)               extras.push('Route: ' + escapeHtml(run.route));
+      if (run.shoes)               extras.push('Shoes: ' + escapeHtml(run.shoes));
+      if (run.temperature_f != null) extras.push(run.temperature_f + '°F');
+      if (run.dewpoint_f    != null) extras.push('Dew ' + run.dewpoint_f + '°F');
+      if (run.humidity_percent != null) extras.push(run.humidity_percent + '% hum');
+      if (run.wind_mph != null)    extras.push('Wind ' + run.wind_mph + ' mph');
+      if (run.conditions)          extras.push(escapeHtml(run.conditions));
+      if (extras.length) {
+        html += '<div class="modal-section-title">Conditions</div>';
+        html += '<div class="modal-extras">' + extras.join(' · ') + '</div>';
+      }
+
+      if (run.notes) html += '<div class="modal-notes">' + escapeHtml(run.notes) + '</div>';
+
+      document.getElementById('run-modal-body').innerHTML = html;
+    }
+
+    function fmtPace(secPerMile) {
+      if (!secPerMile || !isFinite(secPerMile) || secPerMile <= 0) return '—';
+      const m = Math.floor(secPerMile / 60);
+      const s = Math.round(secPerMile % 60);
+      return m + ':' + String(s).padStart(2, '0') + ' /mi';
+    }
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
     function formatDuration(sec) {

@@ -614,15 +614,23 @@
 
     function renderStats(runs) {
       let totalMiles = 0, totalSec = 0;
+      // Avg-pace blend uses ONLY runs that have both distance AND time; a
+      // distance-only run (no stopwatch) would otherwise add miles to the
+      // denominator with no matching seconds and skew the pace artificially fast.
+      let paceMiles = 0, paceSec = 0;
       runs.forEach(r => {
         if (r.distance_miles) totalMiles += Number(r.distance_miles);
         if (r.duration_seconds) totalSec += Number(r.duration_seconds);
+        if (r.distance_miles && r.duration_seconds) {
+          paceMiles += Number(r.distance_miles);
+          paceSec   += Number(r.duration_seconds);
+        }
       });
       document.getElementById('stat-runs').textContent = runs.length;
       document.getElementById('stat-miles').innerHTML = totalMiles ? formatMiles(totalMiles) + '<span class="unit">mi</span>' : '—';
       document.getElementById('stat-time').textContent = totalSec ? formatDuration(totalSec) : '—';
       document.getElementById('stat-pace').textContent =
-        (totalSec && totalMiles) ? formatPace(totalSec / totalMiles) : '—';
+        (paceSec && paceMiles) ? formatPace(paceSec / paceMiles) : '—';
     }
 
     function renderPaceByType(runs) {
