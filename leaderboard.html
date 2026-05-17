@@ -125,6 +125,25 @@
       color: var(--slate-2);
     }
 
+    .division-hdr {
+      font-size: 1.05rem;
+      font-weight: 800;
+      margin: 0 0 0.85rem 0;
+      letter-spacing: 0.5px;
+      color: var(--black);
+      border-bottom: 2px solid var(--red);
+      padding-bottom: 0.4rem;
+      display: inline-block;
+    }
+    .division-hdr .division-sub {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--slate-2);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-left: 0.5rem;
+    }
+
     /* podium */
     .podium {
       display: grid;
@@ -282,8 +301,17 @@
     </div>
     <p class="range-sub" id="range-sub"></p>
 
-    <div id="podium-wrap"><div class="loading">Loading…</div></div>
-    <div class="panel" id="rest-wrap"></div>
+    <section class="division-section">
+      <h3 class="division-hdr">Middle School <span class="division-sub">grades 6–8</span></h3>
+      <div id="ms-podium-wrap"><div class="loading">Loading…</div></div>
+      <div class="panel" id="ms-rest-wrap"></div>
+    </section>
+
+    <section class="division-section" style="margin-top:2rem;">
+      <h3 class="division-hdr">Elementary <span class="division-sub">grades 3–5</span></h3>
+      <div id="es-podium-wrap"><div class="loading">Loading…</div></div>
+      <div class="panel" id="es-rest-wrap"></div>
+    </section>
 
     <div class="coach-note" id="coach-note" style="display:none;">
       <strong>Coach view:</strong> the percentage next to each name is the change vs the same number of days in the prior period.
@@ -400,15 +428,19 @@
       const win = periodWindow(activePeriod);
       document.getElementById('range-sub').textContent = win.label;
 
-      const podiumWrap = document.getElementById('podium-wrap');
-      const restWrap   = document.getElementById('rest-wrap');
-      podiumWrap.innerHTML = '<div class="loading">Loading…</div>';
-      restWrap.innerHTML   = '';
+      // Set loading on both divisions
+      ['ms-podium-wrap', 'es-podium-wrap'].forEach(id => {
+        document.getElementById(id).innerHTML = '<div class="loading">Loading…</div>';
+      });
+      ['ms-rest-wrap', 'es-rest-wrap'].forEach(id => {
+        document.getElementById(id).innerHTML = '';
+      });
 
       // Pull two windows in parallel. Excludes cross_train per product call.
+      // Include athletes.grade so we can split into divisions client-side.
       const [thisRes, lastRes] = await Promise.all([
         sb.from('runs')
-          .select('athlete_id, distance_miles, duration_seconds, athletes!inner(first_name, last_name, active)')
+          .select('athlete_id, distance_miles, duration_seconds, athletes!inner(first_name, last_name, active, grade)')
           .neq('run_type', 'cross_train')
           .gte('run_date', win.thisStart)
           .lte('run_date', win.thisEnd),
@@ -420,41 +452,46 @@
       ]);
 
       if (thisRes.error) {
-        podiumWrap.innerHTML = `<div class="empty">Error loading: ${escapeHtml(thisRes.error.message)}</div>`;
+        document.getElementById('ms-podium-wrap').innerHTML =
+          `<div class="empty">Error loading: ${escapeHtml(thisRes.error.message)}</div>`;
         return;
       }
 
       const thisRuns = (thisRes.data || []).filter(r => r.athletes && r.athletes.active);
       const lastRuns = lastRes.data || [];
 
-      const byAthThis = aggregate(thisRuns, true);
+      const byAthThis = aggregate(thisRuns, true);  // includes name + grade
       const byAthLast = aggregate(lastRuns, false);
 
-      // Build leaderboard rows
-      const rows = Object.values(byAthThis)
+      // Build leaderboard rows with division tag (middle or elementary).
+      const allRows = Object.values(byAthThis)
         .map(r => {
           const baseline = byAthLast[r.athlete_id]?.[activeMetric] || 0;
           const value = r[activeMetric];
           let changePct = null;
-          // Only show change if prior baseline is meaningful (>=5 mi or >=30 min)
           const minBaseline = activeMetric === 'miles' ? 5 : 30 * 60;
-          if (baseline >= minBaseline) {
-            changePct = (value - baseline) / baseline;
-          }
-          return { ...r, value, changePct };
+          if (baseline >= minBaseline) changePct = (value - baseline) / baseline;
+          const division = (r.grade != null && r.grade >= 6) ? 'middle'
+                         : (r.grade != null && r.grade <= 5) ? 'elementary'
+                         : 'unknown';
+          return { ...r, value, changePct, division };
         })
-        .filter(r => r.value > 0)
-        .sort((a, b) => b.value - a.value);
+        .filter(r => r.value > 0);
 
+      renderDivision('middle',     allRows.filter(r => r.division === 'middle'),     'ms-podium-wrap', 'ms-rest-wrap');
+      renderDivision('elementary', allRows.filter(r => r.division === 'elementary'), 'es-podium-wrap', 'es-rest-wrap');
+    }
+
+    function renderDivision(name, rows, podiumWrapId, restWrapId) {
+      const sorted = rows.slice().sort((a, b) => b.value - a.value);
       // Tie-aware ranks
       let lastVal = null, lastRank = 0;
-      rows.forEach((r, i) => {
+      sorted.forEach((r, i) => {
         if (r.value !== lastVal) { lastRank = i + 1; lastVal = r.value; }
         r.rank = lastRank;
       });
-
-      renderPodium(rows.slice(0, 3));
-      renderRest(rows.slice(3));
+      renderPodium(sorted.slice(0, 3), podiumWrapId);
+      renderRest(sorted.slice(3), restWrapId);
     }
 
     function aggregate(runs, includeName) {
@@ -466,7 +503,8 @@
             athlete_id: id,
             miles: 0,
             time: 0,
-            name: includeName && r.athletes ? `${r.athletes.first_name} ${r.athletes.last_name}` : '',
+            name:  includeName && r.athletes ? `${r.athletes.first_name} ${r.athletes.last_name}` : '',
+            grade: includeName && r.athletes ? r.athletes.grade : null,
           };
         }
         if (r.distance_miles) out[id].miles += Number(r.distance_miles);
@@ -509,10 +547,10 @@
       return `<div style="margin-top:0.4rem;font-size:0.8rem;font-weight:700;color:${color};">${sign}${pct}%${icon}</div>`;
     }
 
-    function renderPodium(top3) {
-      const wrap = document.getElementById('podium-wrap');
+    function renderPodium(top3, wrapId) {
+      const wrap = document.getElementById(wrapId);
       if (top3.length === 0) {
-        wrap.innerHTML = '<div class="podium-card podium-empty">No runs logged in this period yet. Be the first to log!</div>';
+        wrap.innerHTML = '<div class="podium-card podium-empty">No runs logged in this period yet.</div>';
         return;
       }
       // Order: silver(2) | gold(1) | bronze(3)  on desktop. CSS handles mobile stacking.
@@ -539,8 +577,8 @@
       `;
     }
 
-    function renderRest(rest) {
-      const wrap = document.getElementById('rest-wrap');
+    function renderRest(rest, wrapId) {
+      const wrap = document.getElementById(wrapId);
       if (rest.length === 0) {
         wrap.innerHTML = '';
         return;

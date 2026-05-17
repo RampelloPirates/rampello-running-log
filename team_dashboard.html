@@ -431,6 +431,33 @@
       font-size: 0.85rem; color: var(--slate);
       margin-bottom: 0.85rem;
     }
+
+    /* Division toggle */
+    .division-toggle {
+      display: inline-flex;
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 3px;
+      border-radius: 4px;
+      margin-bottom: 1.25rem;
+    }
+    .division-toggle button {
+      background: transparent;
+      border: none;
+      padding: 0.5rem 0.9rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-family: inherit;
+      color: var(--slate);
+      border-radius: 3px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .division-toggle button.active {
+      background: var(--black);
+      color: var(--paper);
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -454,6 +481,12 @@
   <main>
     <h1 class="page-title">Coach dashboard</h1>
     <p class="page-sub">This week at a glance.</p>
+
+    <div class="division-toggle" role="tablist" aria-label="Division">
+      <button class="active" data-division="all"        role="tab">All</button>
+      <button             data-division="middle"     role="tab">Middle (6–8)</button>
+      <button             data-division="elementary" role="tab">Elementary (3–5)</button>
+    </div>
 
     <div class="stats" id="stats">
       <div class="stat">
@@ -490,14 +523,14 @@
       </a>
     </div>
 
-    <h2>Athletes this week</h2>
-    <div class="recent athletes-week">
-      <div id="athletes-week-body" class="loading">Loading…</div>
-    </div>
-
-    <h2 style="margin-top:1.75rem;">Recent runs</h2>
+    <h2>Recent runs</h2>
     <div class="recent">
       <div id="recent-body" class="loading">Loading…</div>
+    </div>
+
+    <h2 style="margin-top:1.75rem;">Athletes this week</h2>
+    <div class="recent athletes-week">
+      <div id="athletes-week-body" class="loading">Loading…</div>
     </div>
   </main>
 
@@ -580,6 +613,22 @@
     }
 
 
+    // ---- division filter ---------------------------------------------------
+    // 'all' | 'middle' | 'elementary'. Middle = grades 6-8, Elementary = 3-5.
+    let activeDivision = 'all';
+    function divisionGrades(div) {
+      if (div === 'middle')     return [6, 8];
+      if (div === 'elementary') return [3, 5];
+      return null;
+    }
+    document.querySelectorAll('.division-toggle button').forEach(b => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('.division-toggle button').forEach(x => x.classList.toggle('active', x === b));
+        activeDivision = b.dataset.division;
+        load();
+      });
+    });
+
     // ---- load dashboard data -----------------------------------------------
     async function load() {
       const coach = await requireCoach();
@@ -588,23 +637,29 @@
       document.getElementById('user-name').textContent = coach.first_name + ' ' + coach.last_name.charAt(0) + '.';
 
       const weekStart = startOfWeekISO();
+      const grades = divisionGrades(activeDivision);
 
-      // Pull active athlete ids + names in one shot.
-      const { data: activeAthletes } = await sb
-        .from('athletes')
-        .select('id, first_name, last_name')
+      // Pull active athletes filtered by division.
+      let athletesQ = sb.from('athletes')
+        .select('id, first_name, last_name, grade')
         .eq('active', true)
         .order('last_name');
+      if (grades) {
+        athletesQ = athletesQ.gte('grade', grades[0]).lte('grade', grades[1]);
+      }
+      const { data: activeAthletes } = await athletesQ;
       const activeIds = (activeAthletes || []).map(a => a.id);
       const athletesById = {};
       (activeAthletes || []).forEach(a => { athletesById[a.id] = a; });
       document.getElementById('stat-athletes').textContent = activeIds.length;
 
-      // runs this week + workouts + per-athlete tallies
-      const { data: weekRuns } = await sb
-        .from('runs')
+      // runs this week + workouts + per-athlete tallies (filtered to division)
+      let weekRunsQ = sb.from('runs')
         .select('id, run_type, distance_miles, athlete_id')
         .gte('run_date', weekStart);
+      if (activeIds.length) weekRunsQ = weekRunsQ.in('athlete_id', activeIds);
+      else weekRunsQ = weekRunsQ.eq('athlete_id', '00000000-0000-0000-0000-000000000000');  // empty result
+      const { data: weekRuns } = await weekRunsQ;
 
       const runs = weekRuns || [];
       document.getElementById('stat-runs').textContent = runs.length;
@@ -633,12 +688,14 @@
       renderAthletesWeek(activeAthletes || [], perAthlete, milesByAthlete);
 
       // recent runs table (last 10)
-      const { data: recent } = await sb
-        .from('runs')
+      let recentQ = sb.from('runs')
         .select('id, run_date, run_type, distance_miles, duration_seconds, athlete_id, athletes(first_name, last_name)')
         .order('run_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(10);
+      if (activeIds.length) recentQ = recentQ.in('athlete_id', activeIds);
+      else recentQ = recentQ.eq('athlete_id', '00000000-0000-0000-0000-000000000000');
+      const { data: recent } = await recentQ;
 
       const body = document.getElementById('recent-body');
       if (!recent || recent.length === 0) {
