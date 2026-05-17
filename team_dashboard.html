@@ -796,7 +796,7 @@
 
       const [{ data: run, error }, { data: segs }, { data: race }] = await Promise.all([
         sb.from('runs')
-          .select('id, run_date, run_type, distance_miles, duration_seconds, effort_rpe, avg_cadence, avg_hr, max_hr, route, shoes, conditions, temperature_f, dewpoint_f, humidity_percent, wind_mph, cross_train_activity, notes, athletes(first_name, last_name)')
+          .select('id, run_date, time_of_day, run_type, distance_miles, duration_seconds, effort_rpe, avg_cadence, avg_hr, max_hr, route, shoes, conditions, temperature_f, dewpoint_f, humidity_percent, wind_mph, cross_train_activity, notes, athletes(first_name, last_name)')
           .eq('id', runId)
           .maybeSingle(),
         sb.from('run_segments').select('*').eq('run_id', runId).order('segment_order'),
@@ -812,8 +812,9 @@
     function renderRunModal(run, segs, race) {
       const athleteName = run.athletes ? run.athletes.first_name + ' ' + run.athletes.last_name : 'Athlete';
       const d = new Date(run.run_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      const todLabel = run.time_of_day ? ' · ' + run.time_of_day.charAt(0).toUpperCase() + run.time_of_day.slice(1) : '';
       document.getElementById('run-modal-title').innerHTML =
-        `${athleteName} <span style="color:var(--slate-2);font-weight:400;">· ${d}</span>`;
+        `${athleteName} <span style="color:var(--slate-2);font-weight:400;">· ${d}${todLabel}</span>`;
 
       const dist = run.distance_miles ? Number(run.distance_miles) : 0;
       const dur  = run.duration_seconds ? Number(run.duration_seconds) : 0;

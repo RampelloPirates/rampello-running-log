@@ -548,6 +548,14 @@
             <label for="run-date">Date</label>
             <input type="date" id="run-date" required>
           </div>
+          <div>
+            <label>Time of day</label>
+            <div class="type-grid" id="tod-grid" style="grid-template-columns:repeat(3,1fr);">
+              <button type="button" class="type-btn" data-tod="morning">Morning</button>
+              <button type="button" class="type-btn" data-tod="afternoon">Afternoon</button>
+              <button type="button" class="type-btn" data-tod="evening">Evening</button>
+            </div>
+          </div>
         </div>
         <label style="margin-top:1rem;">Run type</label>
         <div class="type-grid" id="type-grid">
@@ -822,6 +830,23 @@
 
     // ---- run type selector ----
     let selectedType = null;
+    let selectedTod  = null;
+
+    // Default the Time-of-day pick to whichever bucket "now" falls into.
+    function defaultTimeOfDay() {
+      const h = new Date().getHours();
+      if (h < 12) return 'morning';
+      if (h < 17) return 'afternoon';
+      return 'evening';
+    }
+    function setTodSelection(tod) {
+      selectedTod = tod;
+      document.querySelectorAll('#tod-grid .type-btn').forEach(b => b.classList.toggle('selected', b.dataset.tod === tod));
+    }
+    document.querySelectorAll('#tod-grid .type-btn').forEach(btn => {
+      btn.addEventListener('click', () => setTodSelection(btn.dataset.tod));
+    });
+    setTodSelection(defaultTimeOfDay());
     document.querySelectorAll('.type-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         selectedType = btn.dataset.type;
@@ -1049,6 +1074,7 @@
       const runPayload = {
         athlete_id: auth.athlete.id,
         run_date: runDate,
+        time_of_day: selectedTod,
         run_type: selectedType,
         distance_miles: distance,
         duration_seconds: duration,
@@ -1073,7 +1099,7 @@
         runPayload.wind_mph == null
       );
       if (weatherUntouched && runPayload.run_type !== 'cross_train') {
-        const w = await fetchWeatherForDate(runPayload.run_date);
+        const w = await fetchWeatherForDate(runPayload.run_date, selectedTod);
         if (w) {
           runPayload.temperature_f    ??= w.temperature_f;
           runPayload.conditions       ??= w.conditions;
@@ -1156,6 +1182,7 @@
       document.getElementById('simple-distance-unit').value = lastUnit;
       selectedType = null;
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
+      setTodSelection(defaultTimeOfDay());
       mode = 'simple';
       document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'simple'));
       document.getElementById('simple-mode').classList.remove('hidden');
@@ -1186,16 +1213,30 @@
       return null;
     }
 
-    async function fetchWeatherForDate(dateISO) {
+    // Map a time-of-day bucket to a representative hour for the weather fetch.
+    function hourForTimeOfDay(tod) {
+      if (tod === 'morning')   return 7;
+      if (tod === 'afternoon') return 15;
+      if (tod === 'evening')   return 19;
+      return 17;  // fallback when no bucket was picked
+    }
+
+    async function fetchWeatherForDate(dateISO, timeOfDay) {
       const LAT = 27.95, LON = -82.46;  // Tampa, FL — change later if club expands locations
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&hourly=temperature_2m,relativehumidity_2m,dewpoint_2m,windspeed_10m,weathercode&temperature_unit=fahrenheit&windspeed_unit=mph&start_date=${dateISO}&end_date=${dateISO}`;
       try {
         const resp = await fetch(url);
         if (!resp.ok) return null;
         const data = await resp.json();
-        const today = new Date().toISOString().slice(0, 10);
-        // pick a representative hour: current if today, 5pm if past
-        const hour = dateISO === today ? new Date().getHours() : 17;
+        // Prefer the explicit time-of-day bucket the athlete chose; otherwise
+        // fall back to "now" for today's runs, 5pm for past runs.
+        let hour;
+        if (timeOfDay) {
+          hour = hourForTimeOfDay(timeOfDay);
+        } else {
+          const today = new Date().toISOString().slice(0, 10);
+          hour = dateISO === today ? new Date().getHours() : 17;
+        }
         const t = data.hourly?.temperature_2m?.[hour];
         const h = data.hourly?.relativehumidity_2m?.[hour];
         const d = data.hourly?.dewpoint_2m?.[hour];

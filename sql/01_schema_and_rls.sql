@@ -46,6 +46,7 @@ create table runs (
   id                    uuid primary key default gen_random_uuid(),
   athlete_id            uuid not null references athletes(id) on delete cascade,
   run_date              date not null,
+  time_of_day           text check (time_of_day in ('morning','afternoon','evening')),
   run_type              text not null check (run_type in (
                           'easy','long','tempo','intervals','race','cross_train'
                         )),
