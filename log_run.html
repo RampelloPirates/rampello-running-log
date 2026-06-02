@@ -280,6 +280,28 @@
       color: var(--slate);
     }
     .dist-input-group .unit-pick:focus { outline: none; border-color: var(--red); }
+
+    /* per-mile splits */
+    .splits-rows {
+      display: grid;
+      gap: 0.4rem;
+      margin-top: 0.5rem;
+    }
+    .splits-rows .split-row {
+      display: grid;
+      grid-template-columns: 6rem 1fr;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .splits-rows .split-label {
+      font-size: 0.85rem;
+      color: var(--slate);
+      font-weight: 600;
+    }
+    .splits-rows input {
+      padding: 0.5rem 0.6rem;
+      font-size: 0.95rem;
+    }
     .segment-row input, .segment-row select {
       padding: 0.4rem 0.5rem;
       font-size: 0.9rem;
@@ -545,12 +567,12 @@
             <input type="date" id="run-date" required>
           </div>
           <div>
-            <label>Time of day</label>
-            <div class="type-grid" id="tod-grid" style="grid-template-columns:repeat(3,1fr);">
-              <button type="button" class="type-btn" data-tod="morning">Morning</button>
-              <button type="button" class="type-btn" data-tod="afternoon">Afternoon</button>
-              <button type="button" class="type-btn" data-tod="evening">Evening</button>
-            </div>
+            <label for="tod-select">Time of day</label>
+            <select id="tod-select" required>
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
+            </select>
           </div>
         </div>
         <label style="margin-top:1rem;">Run type</label>
@@ -597,6 +619,12 @@
               <input type="text" id="simple-time" placeholder="32:15 or 1:05:30">
               <div class="helper" id="simple-pace"></div>
             </div>
+          </div>
+
+          <div id="splits-section" class="hidden" style="margin-top:1rem;">
+            <label>Mile splits (optional)</label>
+            <div class="helper">Leave blank if you didn't track per-mile splits.</div>
+            <div id="splits-rows" class="splits-rows"></div>
           </div>
         </div>
 
@@ -828,10 +856,10 @@
     }
     function setTodSelection(tod) {
       selectedTod = tod;
-      document.querySelectorAll('#tod-grid .type-btn').forEach(b => b.classList.toggle('selected', b.dataset.tod === tod));
+      document.getElementById('tod-select').value = tod;
     }
-    document.querySelectorAll('#tod-grid .type-btn').forEach(btn => {
-      btn.addEventListener('click', () => setTodSelection(btn.dataset.tod));
+    document.getElementById('tod-select').addEventListener('change', (e) => {
+      selectedTod = e.target.value;
     });
     setTodSelection(defaultTimeOfDay());
     document.querySelectorAll('.type-btn').forEach(btn => {
@@ -870,8 +898,48 @@
         el.textContent = 'Pace: ' + formatPace(time / miles);
       } else { el.textContent = ''; }
     }
-    document.getElementById('simple-distance').addEventListener('input', updateSimplePace);
+    document.getElementById('simple-distance').addEventListener('input', () => { updateSimplePace(); renderSplitRows(); });
     document.getElementById('simple-time').addEventListener('input', updateSimplePace);
+
+    // ---- simple-mode per-mile splits (optional) ----
+    function renderSplitRows() {
+      const unit  = document.getElementById('simple-distance-unit').value;
+      const miles = toMiles(document.getElementById('simple-distance').value, unit) || 0;
+      const section = document.getElementById('splits-section');
+      const wrap    = document.getElementById('splits-rows');
+
+      if (miles <= 0) {
+        section.classList.add('hidden');
+        wrap.innerHTML = '';
+        return;
+      }
+      section.classList.remove('hidden');
+
+      // Preserve existing values across re-renders
+      const existing = {};
+      wrap.querySelectorAll('input[data-split]').forEach(inp => {
+        existing[inp.dataset.split] = inp.value;
+      });
+
+      const fullMiles = Math.floor(miles);
+      const partial   = +(miles - fullMiles).toFixed(2);
+      const rows = [];
+      for (let i = 1; i <= fullMiles; i++) {
+        rows.push({ key: 'm' + i, label: 'Mile ' + i, dist: 1 });
+      }
+      if (partial > 0.05) {
+        rows.push({ key: 'last', label: 'Last ' + partial.toFixed(2) + ' mi', dist: partial });
+      }
+
+      wrap.innerHTML = rows.map(r => `
+        <div class="split-row">
+          <span class="split-label">${r.label}</span>
+          <input type="text" inputmode="numeric" placeholder="e.g. 9:30"
+                 data-split="${r.key}" data-miles="${r.dist}"
+                 value="${existing[r.key] || ''}">
+        </div>
+      `).join('');
+    }
 
     // ---- segments ----
     const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown'];
@@ -893,6 +961,7 @@
     document.getElementById('simple-distance-unit').addEventListener('change', (e) => {
       lastUnit = e.target.value;
       updateSimplePace();
+      renderSplitRows();
     });
 
     function renderSegments() {
@@ -1023,10 +1092,26 @@
         distance = toMiles(document.getElementById('simple-distance').value, simpleUnit);
         duration = parseDuration(document.getElementById('simple-time').value) || null;
         if (!distance && !duration) { showErr('Enter at least a distance or a time.'); return; }
-        // Create one segment matching the run type
         const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo' };
         const segType = segTypeMap[selectedType];
-        if (segType) {
+
+        // If the athlete filled in any per-mile splits, store those as the segments
+        // instead of one bulk segment. Blank rows are skipped.
+        const splitInputs = Array.from(document.querySelectorAll('#splits-rows input[data-split]'));
+        const filledSplits = splitInputs.filter(inp => inp.value.trim());
+        if (segType && filledSplits.length > 0) {
+          let order = 1;
+          for (const inp of splitInputs) {
+            const t = parseDuration(inp.value);
+            if (!t) continue;
+            segmentsToInsert.push({
+              segment_order: order++,
+              segment_type: segType,
+              distance_miles: parseFloat(inp.dataset.miles),
+              duration_seconds: t,
+            });
+          }
+        } else if (segType) {
           segmentsToInsert.push({
             segment_order: 1, segment_type: segType,
             distance_miles: distance, duration_seconds: duration,
@@ -1180,6 +1265,7 @@
       applyTypeChange();
       document.getElementById('form-error').classList.remove('show');
       document.getElementById('simple-pace').textContent = '';
+      renderSplitRows();
     }
 
     // ---- weather auto-fetch (Open-Meteo, free, no key) ----
