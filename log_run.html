@@ -251,6 +251,31 @@
       box-shadow: 0 1px 2px rgba(0,0,0,0.08);
     }
 
+    /* time-of-day pills */
+    .tod-pills {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.4rem;
+    }
+    .tod-pill {
+      padding: 0.55rem 0.4rem;
+      font-size: 0.85rem;
+      font-family: inherit;
+      font-weight: 600;
+      background: var(--paper);
+      color: var(--slate);
+      border: 1px solid var(--silver-2, var(--silver));
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .tod-pill:hover { border-color: var(--red); color: var(--red); }
+    .tod-pill.selected {
+      background: var(--black);
+      color: var(--paper);
+      border-color: var(--black);
+    }
+
     /* segments */
     .segment-row {
       display: grid;
@@ -263,6 +288,24 @@
       margin-bottom: 0.5rem;
     }
     .segment-row label { font-size: 0.65rem; margin-bottom: 0.15rem; }
+
+    /* On phones the per-segment Distance column gets squashed by the unit
+       picker (1fr minus 64px ≈ nothing). Stack into two rows instead:
+       row 1 = Type + ×, row 2 = Distance + Time. */
+    @media (max-width: 480px) {
+      .segment-row {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+          "type   x"
+          "dist   time";
+        column-gap: 0.5rem;
+        row-gap: 0.5rem;
+      }
+      .segment-row > div:nth-child(1) { grid-area: type; }
+      .segment-row > div:nth-child(2) { grid-area: dist; }
+      .segment-row > div:nth-child(3) { grid-area: time; }
+      .segment-row > button { grid-area: x; align-self: end; }
+    }
 
     /* distance + unit picker combo */
     .dist-input-group {
@@ -561,18 +604,16 @@
 
       <!-- Date + run type -->
       <div class="section">
-        <div class="row" style="grid-template-columns:160px 1fr;">
-          <div>
-            <label for="run-date">Date</label>
-            <input type="date" id="run-date" required>
-          </div>
-          <div>
-            <label for="tod-select">Time of day</label>
-            <select id="tod-select" required>
-              <option value="morning">Morning</option>
-              <option value="afternoon">Afternoon</option>
-              <option value="evening">Evening</option>
-            </select>
+        <div>
+          <label for="run-date">Date</label>
+          <input type="date" id="run-date" required>
+        </div>
+        <div style="margin-top:0.85rem;">
+          <label>Time of day</label>
+          <div class="tod-pills" id="tod-pills" role="radiogroup" aria-label="Time of day">
+            <button type="button" class="tod-pill" data-tod="morning">Morning</button>
+            <button type="button" class="tod-pill" data-tod="afternoon">Afternoon</button>
+            <button type="button" class="tod-pill" data-tod="evening">Evening</button>
           </div>
         </div>
         <label style="margin-top:1rem;">Run type</label>
@@ -856,10 +897,12 @@
     }
     function setTodSelection(tod) {
       selectedTod = tod;
-      document.getElementById('tod-select').value = tod;
+      document.querySelectorAll('#tod-pills .tod-pill').forEach(b => {
+        b.classList.toggle('selected', b.dataset.tod === tod);
+      });
     }
-    document.getElementById('tod-select').addEventListener('change', (e) => {
-      selectedTod = e.target.value;
+    document.querySelectorAll('#tod-pills .tod-pill').forEach(btn => {
+      btn.addEventListener('click', () => setTodSelection(btn.dataset.tod));
     });
     setTodSelection(defaultTimeOfDay());
     document.querySelectorAll('.type-btn').forEach(btn => {
