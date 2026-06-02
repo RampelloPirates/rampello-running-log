@@ -454,6 +454,44 @@
       color: var(--paper);
       font-weight: 700;
     }
+
+    /* ---------- week navigator ---------- */
+    .week-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .week-nav button {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 0.45rem 0.7rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-family: inherit;
+      color: var(--slate);
+      border-radius: 3px;
+      font-weight: 600;
+      min-width: 2.2rem;
+    }
+    .week-nav button:hover:not(:disabled) {
+      border-color: var(--red);
+      color: var(--red);
+    }
+    .week-nav button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .week-nav .week-label {
+      font-weight: 700;
+      color: var(--black);
+      padding: 0 0.5rem;
+      font-variant-numeric: tabular-nums;
+      flex: 1;
+      text-align: center;
+      min-width: 12rem;
+    }
   </style>
 </head>
 <body>
@@ -476,7 +514,14 @@
 
   <main>
     <h1 class="page-title">Coach dashboard</h1>
-    <p class="page-sub">This week at a glance.</p>
+    <p class="page-sub">Pick a week to drill in.</p>
+
+    <div class="week-nav">
+      <button id="week-prev" aria-label="Previous week">◀</button>
+      <span class="week-label" id="week-label">—</span>
+      <button id="week-next" aria-label="Next week">▶</button>
+      <button id="week-today">Today</button>
+    </div>
 
     <div class="division-toggle" role="tablist" aria-label="Division">
       <button class="active" data-division="all"        role="tab">All</button>
@@ -490,7 +535,7 @@
         <div class="value" id="stat-athletes">—</div>
       </div>
       <div class="stat">
-        <div class="label">Runs this week</div>
+        <div class="label">Runs in week</div>
         <div class="value" id="stat-runs">—</div>
       </div>
       <div class="stat">
@@ -524,7 +569,7 @@
       <div id="recent-body" class="loading">Loading…</div>
     </div>
 
-    <h2 style="margin-top:1.75rem;">Athletes this week</h2>
+    <h2 style="margin-top:1.75rem;">Athletes in week</h2>
     <div class="recent athletes-week">
       <div id="athletes-week-body" class="loading">Loading…</div>
     </div>
@@ -584,15 +629,32 @@
     });
 
     // ---- helpers ------------------------------------------------------------
-    function startOfWeekISO() {
-      // Monday as week start
+    function thisMonday() {
       const now = new Date();
       const day = now.getDay();              // 0=Sun..6=Sat
       const diff = (day + 6) % 7;            // days since Monday
       const monday = new Date(now);
       monday.setDate(now.getDate() - diff);
       monday.setHours(0, 0, 0, 0);
-      return monday.toISOString().slice(0, 10);
+      return monday;
+    }
+    function pad(n) { return String(n).padStart(2, '0'); }
+    function toLocalISO(d) {
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
+    function weekRangeISO(monday) {
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      return { start: toLocalISO(monday), end: toLocalISO(sunday) };
+    }
+    function formatWeekLabel(monday) {
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const yearBit = monday.getFullYear() === sunday.getFullYear()
+        ? sunday.getFullYear()
+        : monday.getFullYear() + '–' + sunday.getFullYear();
+      return 'Week of ' + fmt(monday) + ' – ' + fmt(sunday) + ', ' + yearBit;
     }
 
     function formatDate(iso) {
@@ -600,6 +662,23 @@
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
+
+    // ---- week navigator ----------------------------------------------------
+    let selectedMonday = thisMonday();
+    document.getElementById('week-prev').addEventListener('click', () => {
+      selectedMonday = new Date(selectedMonday);
+      selectedMonday.setDate(selectedMonday.getDate() - 7);
+      load();
+    });
+    document.getElementById('week-next').addEventListener('click', () => {
+      selectedMonday = new Date(selectedMonday);
+      selectedMonday.setDate(selectedMonday.getDate() + 7);
+      load();
+    });
+    document.getElementById('week-today').addEventListener('click', () => {
+      selectedMonday = thisMonday();
+      load();
+    });
 
     // ---- division filter ---------------------------------------------------
     // 'all' | 'middle' | 'elementary'. Middle = grades 6-8, Elementary = 3-5.
@@ -625,7 +704,12 @@
       const prefix = coach.kind === 'coach' ? 'Coach ' : '';
       document.getElementById('user-name').textContent = prefix + coach.first_name + ' ' + coach.last_name.charAt(0) + '.';
 
-      const weekStart = startOfWeekISO();
+      const { start: weekStart, end: weekEnd } = weekRangeISO(selectedMonday);
+      document.getElementById('week-label').textContent = formatWeekLabel(selectedMonday);
+      const isCurrentWeek = weekStart === toLocalISO(thisMonday());
+      document.getElementById('week-next').disabled  = isCurrentWeek;
+      document.getElementById('week-today').disabled = isCurrentWeek;
+
       const grades = divisionGrades(activeDivision);
 
       // Pull active athletes filtered by division.
@@ -642,10 +726,11 @@
       (activeAthletes || []).forEach(a => { athletesById[a.id] = a; });
       document.getElementById('stat-athletes').textContent = activeIds.length;
 
-      // runs this week + workouts + per-athlete tallies (filtered to division)
+      // runs in the selected week + workouts + per-athlete tallies (filtered to division)
       let weekRunsQ = sb.from('runs')
         .select('id, run_type, distance_miles, athlete_id')
-        .gte('run_date', weekStart);
+        .gte('run_date', weekStart)
+        .lte('run_date', weekEnd);
       if (activeIds.length) weekRunsQ = weekRunsQ.in('athlete_id', activeIds);
       else weekRunsQ = weekRunsQ.eq('athlete_id', '00000000-0000-0000-0000-000000000000');  // empty result
       const { data: weekRuns } = await weekRunsQ;
