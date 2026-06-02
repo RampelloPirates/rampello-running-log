@@ -623,18 +623,23 @@
         </div>
 
         <div style="margin-top:0.85rem;">
-          <label>Location</label>
-          <div class="loc-pills" id="loc-pills" role="radiogroup" aria-label="Location">
-            <button type="button" class="tod-pill loc-pill" data-loc="Dover Trails">Dover Trails</button>
-            <button type="button" class="tod-pill loc-pill" data-loc="Ballast Point">Ballast Point</button>
-            <button type="button" class="tod-pill loc-pill" data-loc="Rivercrest Park">Rivercrest Park</button>
-            <button type="button" class="tod-pill loc-pill" data-loc="__add__">+ Add</button>
-          </div>
-          <div id="loc-add-wrap" class="hidden" style="margin-top:0.6rem;">
-            <input type="text" id="route" list="routes-list" placeholder="Type a location" autocomplete="off">
-            <datalist id="routes-list"></datalist>
+          <label for="loc-select">Location</label>
+          <select id="loc-select">
+            <option value="">— pick a location —</option>
+            <optgroup label="Summer workouts">
+              <option value="Dover Trails">Dover Trails</option>
+              <option value="Ballast Point">Ballast Point</option>
+              <option value="Rivercrest Park">Rivercrest Park</option>
+            </optgroup>
+            <optgroup label="Previously used" id="loc-recent-group"></optgroup>
+            <option value="__add__">+ Add new location…</option>
+          </select>
+          <div id="loc-add-wrap" class="hidden" style="margin-top:0.5rem;">
+            <input type="text" id="route" placeholder="Type a location" autocomplete="off">
             <div class="helper">Type any location — it'll be available to your teammates next time.</div>
           </div>
+          <!-- Hidden when a named option is picked; the select drives the route value.
+               When + Add is selected, the visible input below takes over. -->
         </div>
         <label style="margin-top:1rem;">Run type</label>
         <div class="type-grid" id="type-grid">
@@ -919,28 +924,23 @@
     setTodSelection(defaultTimeOfDay());
 
     // ---- location picker ----
-    // Named pills set the route field directly; "+ Add" reveals the free-form
-    // input so the athlete can type any location (with team-wide autocomplete).
-    function setLocation(loc) {
-      const routeInp  = document.getElementById('route');
-      const addWrap   = document.getElementById('loc-add-wrap');
-      document.querySelectorAll('#loc-pills .loc-pill').forEach(b => {
-        b.classList.toggle('selected', b.dataset.loc === loc);
-      });
-      if (loc === '__add__') {
+    // The <select> drives the route value. Picking "+ Add new location…"
+    // reveals the free-form text input below. Any other choice copies the
+    // option value straight into the (hidden) #route input so the save
+    // logic just reads txt('route') as before.
+    const locSelect = document.getElementById('loc-select');
+    locSelect.addEventListener('change', () => {
+      const v = locSelect.value;
+      const routeInp = document.getElementById('route');
+      const addWrap  = document.getElementById('loc-add-wrap');
+      if (v === '__add__') {
         addWrap.classList.remove('hidden');
-        // Only clear when entering Add fresh — if the input already has a typed
-        // value (e.g. they re-clicked Add), keep it.
-        const namedSet = ['Dover Trails', 'Ballast Point', 'Rivercrest Park'];
-        if (namedSet.includes(routeInp.value)) routeInp.value = '';
+        routeInp.value = '';
         setTimeout(() => routeInp.focus(), 0);
       } else {
         addWrap.classList.add('hidden');
-        routeInp.value = loc;
+        routeInp.value = v;
       }
-    }
-    document.querySelectorAll('#loc-pills .loc-pill').forEach(btn => {
-      btn.addEventListener('click', () => setLocation(btn.dataset.loc));
     });
     document.querySelectorAll('.type-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1335,7 +1335,7 @@
       selectedType = null;
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
       setTodSelection(defaultTimeOfDay());
-      document.querySelectorAll('#loc-pills .loc-pill').forEach(b => b.classList.remove('selected'));
+      document.getElementById('loc-select').value = '';
       document.getElementById('loc-add-wrap').classList.add('hidden');
       mode = 'simple';
       document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'simple'));
@@ -1637,10 +1637,9 @@
     });
 
     // ---- route autocomplete ----
-    // Pull distinct routes athletes have used before (team-wide). Drops into a
-    // <datalist> so the route input is suggestion-backed but still accepts
-    // free-text entries -- the first time someone runs Bayshore it becomes
-    // available to everyone after.
+    // Pull distinct routes athletes have used before (team-wide) and append
+    // them to the "Previously used" optgroup in the Location <select>, skipping
+    // anything already in the pre-seeded Summer workouts list.
     async function loadRouteSuggestions() {
       try {
         const { data, error } = await sb
@@ -1649,12 +1648,16 @@
           .not('route', 'is', null)
           .limit(2000);
         if (error || !data) return;
-        const uniq = [...new Set(data.map(r => (r.route || '').trim()).filter(Boolean))];
-        uniq.sort((a, b) => a.localeCompare(b));
-        const dl = document.getElementById('routes-list');
-        if (dl) dl.innerHTML = uniq.map(r =>
-          `<option value="${r.replace(/"/g,'&quot;')}"></option>`
+        const seeded = new Set(['Dover Trails', 'Ballast Point', 'Rivercrest Park']);
+        const uniq = [...new Set(data.map(r => (r.route || '').trim()).filter(Boolean))]
+          .filter(r => !seeded.has(r))
+          .sort((a, b) => a.localeCompare(b));
+        const grp = document.getElementById('loc-recent-group');
+        if (!grp) return;
+        grp.innerHTML = uniq.map(r =>
+          `<option value="${r.replace(/"/g,'&quot;')}">${r.replace(/</g,'&lt;')}</option>`
         ).join('');
+        if (uniq.length === 0) grp.remove();  // hide the empty group
       } catch(_) { /* non-fatal */ }
     }
 
