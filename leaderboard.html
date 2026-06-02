@@ -121,6 +121,45 @@
       color: var(--slate-2);
     }
 
+    /* period navigator */
+    .period-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0 0 1rem 0;
+      flex-wrap: wrap;
+    }
+    .period-nav button {
+      background: var(--paper);
+      border: 1px solid var(--silver-2);
+      padding: 0.4rem 0.65rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+      font-family: inherit;
+      color: var(--slate);
+      border-radius: 3px;
+      font-weight: 600;
+      min-width: 2.1rem;
+    }
+    .period-nav button:hover:not(:disabled) {
+      border-color: var(--red);
+      color: var(--red);
+    }
+    .period-nav button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .period-nav .period-label {
+      font-weight: 700;
+      color: var(--black);
+      padding: 0 0.5rem;
+      font-variant-numeric: tabular-nums;
+      flex: 1;
+      text-align: center;
+      min-width: 12rem;
+      font-size: 0.9rem;
+    }
+
     .division-hdr {
       font-size: 1.05rem;
       font-weight: 800;
@@ -287,15 +326,20 @@
 
     <div class="toggles">
       <div class="toggle-group" role="tablist" aria-label="Period">
-        <button class="toggle-btn active" data-period="week"  role="tab">This week</button>
-        <button class="toggle-btn"        data-period="month" role="tab">This month</button>
+        <button class="toggle-btn active" data-period="week"  role="tab">Week</button>
+        <button class="toggle-btn"        data-period="month" role="tab">Month</button>
       </div>
       <div class="toggle-group" role="tablist" aria-label="Metric">
         <button class="toggle-btn active" data-metric="miles" role="tab">Miles</button>
         <button class="toggle-btn"        data-metric="time"  role="tab">Time</button>
       </div>
     </div>
-    <p class="range-sub" id="range-sub"></p>
+    <div class="period-nav">
+      <button id="period-prev" aria-label="Previous">◀</button>
+      <span class="period-label" id="range-sub">—</span>
+      <button id="period-next" aria-label="Next">▶</button>
+      <button id="period-today">Today</button>
+    </div>
 
     <section class="division-section">
       <h3 class="division-hdr">Middle School <span class="division-sub">grades 6–8</span></h3>
@@ -374,36 +418,54 @@
       return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
-    // Period math — returns { thisStart, thisEnd, lastStart, lastEnd, label, elapsedDays }
-    function periodWindow(period) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+    // Period math — returns { thisStart, thisEnd, lastStart, lastEnd, label, elapsedDays, isCurrent }
+    // `anchor` is any Date inside the window we want to view. For past windows we
+    // compare a full Mon–Sun (or full month) against the prior full period; for
+    // the current window we still do "to date" vs "prior period through same elapsed day"
+    // so percent-change isn't unfair to the current run that's only partway through.
+    function periodWindow(period, anchor) {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const a = new Date(anchor); a.setHours(0, 0, 0, 0);
+      const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
       if (period === 'week') {
-        const day = today.getDay();
-        const diff = (day + 6) % 7;             // days back to Monday
-        const thisStart = new Date(today); thisStart.setDate(today.getDate() - diff);
-        const thisEnd   = new Date(today);
-        const lastStart = new Date(thisStart); lastStart.setDate(thisStart.getDate() - 7);
-        const lastEnd   = new Date(lastStart); lastEnd.setDate(lastStart.getDate() + (today.getTime() - thisStart.getTime()) / 86400000);
-        const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const day = a.getDay();
+        const diff = (day + 6) % 7;
+        const thisStart = new Date(a); thisStart.setDate(a.getDate() - diff);
+        const sunday    = new Date(thisStart); sunday.setDate(thisStart.getDate() + 6);
+
+        const tDay = today.getDay();
+        const tDiff = (tDay + 6) % 7;
+        const currentMonday = new Date(today); currentMonday.setDate(today.getDate() - tDiff);
+        const isCurrent = thisStart.getTime() === currentMonday.getTime();
+
+        const thisEnd     = isCurrent ? new Date(today) : sunday;
+        const elapsedDays = isCurrent ? tDiff + 1 : 7;
+        const lastStart   = new Date(thisStart); lastStart.setDate(thisStart.getDate() - 7);
+        const lastEnd     = new Date(lastStart); lastEnd.setDate(lastStart.getDate() + elapsedDays - 1);
+        const suffix = (isCurrent && elapsedDays < 7) ? ' (to date)' : '';
         return {
           thisStart: iso(thisStart), thisEnd: iso(thisEnd),
           lastStart: iso(lastStart), lastEnd: iso(lastEnd),
-          label: `Week of ${fmt(thisStart)} (Mon–Sun)`,
-          elapsedDays: diff + 1,
+          label: `Week of ${fmt(thisStart)} – ${fmt(sunday)}` + suffix,
+          elapsedDays, isCurrent,
         };
       }
+
       // month
-      const thisStart = new Date(today.getFullYear(), today.getMonth(), 1);
-      const thisEnd   = new Date(today);
-      const elapsedDays = today.getDate();
-      const lastStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const thisStart = new Date(a.getFullYear(), a.getMonth(), 1);
+      const monthEnd  = new Date(a.getFullYear(), a.getMonth() + 1, 0);
+      const isCurrent = a.getMonth() === today.getMonth() && a.getFullYear() === today.getFullYear();
+      const thisEnd     = isCurrent ? new Date(today) : monthEnd;
+      const elapsedDays = isCurrent ? today.getDate() : monthEnd.getDate();
+      const lastStart = new Date(a.getFullYear(), a.getMonth() - 1, 1);
       const lastEnd   = new Date(lastStart); lastEnd.setDate(lastStart.getDate() + elapsedDays - 1);
+      const suffix = isCurrent ? ' (to date)' : '';
       return {
         thisStart: iso(thisStart), thisEnd: iso(thisEnd),
         lastStart: iso(lastStart), lastEnd: iso(lastEnd),
-        label: today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) + ' (to date)',
-        elapsedDays,
+        label: thisStart.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) + suffix,
+        elapsedDays, isCurrent,
       };
     }
 
@@ -411,11 +473,14 @@
     let activePeriod = 'week';
     let activeMetric = 'miles';
     let isCoach = false;
+    let selectedAnchor = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
 
     // ---- data load ----
     async function loadBoard() {
-      const win = periodWindow(activePeriod);
+      const win = periodWindow(activePeriod, selectedAnchor);
       document.getElementById('range-sub').textContent = win.label;
+      document.getElementById('period-next').disabled  = win.isCurrent;
+      document.getElementById('period-today').disabled = win.isCurrent;
 
       // Set loading on both divisions
       ['ms-podium-wrap', 'es-podium-wrap'].forEach(id => {
@@ -587,8 +652,26 @@
       b.addEventListener('click', () => {
         document.querySelectorAll('[data-period]').forEach(x => x.classList.toggle('active', x === b));
         activePeriod = b.dataset.period;
+        // Snap back to current when switching period — avoids weird carry-over
+        // (e.g. picking month while anchored to a past week jumps to that month).
+        selectedAnchor = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
         loadBoard();
       });
+    });
+
+    // ---- period navigator ----
+    function shiftAnchor(direction) {
+      const next = new Date(selectedAnchor);
+      if (activePeriod === 'week') next.setDate(next.getDate() + direction * 7);
+      else next.setMonth(next.getMonth() + direction);
+      selectedAnchor = next;
+      loadBoard();
+    }
+    document.getElementById('period-prev').addEventListener('click',  () => shiftAnchor(-1));
+    document.getElementById('period-next').addEventListener('click',  () => shiftAnchor(1));
+    document.getElementById('period-today').addEventListener('click', () => {
+      selectedAnchor = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+      loadBoard();
     });
     document.querySelectorAll('[data-metric]').forEach(b => {
       b.addEventListener('click', () => {
