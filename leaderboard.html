@@ -255,7 +255,7 @@
     }
     .lb-row {
       display: grid;
-      grid-template-columns: 36px 1fr auto auto;
+      grid-template-columns: 36px 1fr auto auto auto;
       gap: 0.75rem;
       align-items: center;
       padding: 0.85rem 1.25rem;
@@ -276,6 +276,13 @@
       font-variant-numeric: tabular-nums;
       min-width: 80px;
       text-align: right;
+    }
+    .lb-row .lb-days {
+      font-size: 0.8rem;
+      color: var(--slate-2);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      min-width: 3.5rem;
     }
     .lb-row .lb-change {
       font-size: 0.78rem;
@@ -492,9 +499,10 @@
 
       // Pull two windows in parallel. Excludes cross_train per product call.
       // Include athletes.grade so we can split into divisions client-side.
+      // run_date is selected so we can count distinct days each athlete logged.
       const [thisRes, lastRes] = await Promise.all([
         sb.from('runs')
-          .select('athlete_id, distance_miles, duration_seconds, athletes!inner(first_name, last_name, active, grade)')
+          .select('athlete_id, run_date, distance_miles, duration_seconds, athletes!inner(first_name, last_name, active, grade)')
           .neq('run_type', 'cross_train')
           .gte('run_date', win.thisStart)
           .lte('run_date', win.thisEnd),
@@ -550,6 +558,7 @@
 
     function aggregate(runs, includeName) {
       const out = {};
+      const dayBuckets = {};  // athlete_id -> Set of run_date strings
       for (const r of runs) {
         const id = r.athlete_id;
         if (!out[id]) {
@@ -557,13 +566,17 @@
             athlete_id: id,
             miles: 0,
             time: 0,
+            days: 0,
             name:  includeName && r.athletes ? `${r.athletes.first_name} ${r.athletes.last_name}` : '',
             grade: includeName && r.athletes ? r.athletes.grade : null,
           };
+          dayBuckets[id] = new Set();
         }
         if (r.distance_miles) out[id].miles += Number(r.distance_miles);
         if (r.duration_seconds) out[id].time += Number(r.duration_seconds);
+        if (r.run_date) dayBuckets[id].add(r.run_date);
       }
+      for (const id in dayBuckets) out[id].days = dayBuckets[id].size;
       return out;
     }
 
@@ -613,12 +626,16 @@
         if (!athlete) {
           return `<div class="podium-card ${cls} podium-empty">Spot open</div>`;
         }
+        const dayBit = athlete.days
+          ? `<div style="margin-top:0.2rem;font-size:0.75rem;color:var(--slate-2);">${athlete.days} day${athlete.days === 1 ? '' : 's'}</div>`
+          : '';
         return `
           <div class="podium-card ${cls}">
             <div class="podium-medal">${medal}</div>
             <div class="podium-rank">${rankLabel}</div>
             <div class="podium-name">${escapeHtml(athlete.name)}</div>
             <div class="podium-value">${fmtValue(athlete)}</div>
+            ${dayBit}
             ${podiumChangeBadge(athlete)}
           </div>`;
       };
@@ -641,8 +658,9 @@
         <div class="lb-row">
           <div class="lb-rank">${r.rank}.</div>
           <div class="lb-name">${escapeHtml(r.name)}</div>
+          <div class="lb-days">${r.days ? r.days + 'd' : ''}</div>
           <div class="lb-value">${fmtValue(r)}</div>
-          ${isCoach ? fmtChange(r) : ''}
+          ${isCoach ? fmtChange(r) : '<span></span>'}
         </div>
       `).join('');
     }
