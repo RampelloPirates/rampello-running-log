@@ -1394,20 +1394,6 @@
       return base;
     }
 
-    function stepComparison(steps) {
-      // Conversion: ~2000 running steps per mile for a kid's stride. Bayshore
-      // Blvd is 4.5 mi of continuous sidewalk (~9,000 steps one way).
-      if (steps >= 52000) return "That's a marathon's worth of steps — wow!";
-      if (steps >= 26000) return 'A half marathon on foot (13.1 mi).';
-      if (steps >= 18000) return 'Bayshore Boulevard out-and-back (9 miles of sidewalk).';
-      if (steps >= 12000) return 'A 10K (6.2 mi) worth of steps.';
-      if (steps >= 9000)  return "About the full length of Bayshore Boulevard (4.5 mi — longest continuous sidewalk in the world).";
-      if (steps >= 6500)  return 'More than a 5K worth of steps.';
-      if (steps >= 4500)  return 'Over two miles on foot — solid.';
-      if (steps >= 2500)  return 'About a mile — four laps around a track.';
-      if (steps >= 1500)  return 'Roughly three-quarters of a mile.';
-      return 'Every step counts!';
-    }
 
     function weekDistanceComparison(miles) {
       // Driving distances from Tampa (approx, one-way):
@@ -1458,14 +1444,6 @@
         label: typeLabel(runPayload.run_type),
         text: runTypeFlavor(runPayload.run_type, runPayload.effort_rpe)
       });
-
-      if (runPayload.avg_cadence && runPayload.duration_seconds) {
-        const steps = Math.round(runPayload.avg_cadence * runPayload.duration_seconds / 60);
-        facts.push({
-          label: 'Steps today',
-          text: `About ${steps.toLocaleString()} steps. ${stepComparison(steps)}`
-        });
-      }
 
       const weekStart = startOfWeekISO();
       const { data: weekRuns } = await sb.from('runs')
