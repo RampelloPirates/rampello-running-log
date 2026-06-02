@@ -170,12 +170,22 @@
     select,
     textarea {
       width: 100%;
+      max-width: 100%;
+      min-width: 0;
       padding: 0.65rem 0.75rem;
       font-size: 1rem;
       border: 1px solid var(--silver);
       border-radius: 3px;
       font-family: var(--font-body);
       background: var(--paper);
+    }
+    /* iOS Safari sometimes lets <input type="date"> compute its intrinsic
+       width from the formatted value and shoves it past the parent. Pin it
+       to a sensible size — full date "Jun 30, 2026" fits inside ~220px. */
+    input[type="date"] {
+      width: auto;
+      max-width: 100%;
+      display: block;
     }
     input:focus, select:focus, textarea:focus {
       outline: none; border-color: var(--red);
