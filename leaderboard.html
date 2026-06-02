@@ -276,7 +276,7 @@
       <div class="menu" id="menu" role="menu">
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" id="menu-home" href="#" role="menuitem">Home</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
       </div>
     </div>
   </div>
@@ -329,36 +329,29 @@
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
     });
-    document.getElementById('signout-btn').addEventListener('click', async () => {
-      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
-      await sb.auth.signOut();
+    const IDENTITY_KEY = 'pirates_identity';
+    function readIdentity() {
+      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
+    }
+    document.getElementById('signout-btn').addEventListener('click', () => {
+      if (!confirm("Switch user? You'll go back to the picker.")) return;
+      localStorage.removeItem(IDENTITY_KEY);
       window.location.href = 'index.html';
     });
 
-    // ---- auth: needs to know whether the viewer is a coach (for safety col) ----
-    async function requireSession() {
-      const { data: { session } } = await sb.auth.getSession();
-      if (!session) { window.location.href = 'index.html'; return null; }
-      const [coachRes, athleteRes] = await Promise.all([
-        sb.from('coaches').select('id, first_name, last_name').eq('auth_user_id', session.user.id).eq('active', true).maybeSingle(),
-        sb.from('athletes').select('id, first_name, last_name').eq('auth_user_id', session.user.id).eq('active', true).maybeSingle(),
-      ]);
-      const coach = coachRes.data;
-      const athlete = athleteRes.data;
-      if (!coach && !athlete) {
-        await sb.auth.signOut();
-        window.location.href = 'index.html';
-        return null;
-      }
-      const isCoach = !!coach;
-      const me = coach || athlete;
+    // ---- identity (open-demo mode). isCoach controls the safety col. ----
+    function requireSession() {
+      const id = readIdentity();
+      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
+      const isCoach = id.kind === 'coach';
       const homeHref = isCoach ? 'team_dashboard.html' : 'log_run.html';
       document.getElementById('home-brand').href = homeHref;
       document.getElementById('menu-home').href = homeHref;
       document.getElementById('menu-home').textContent = isCoach ? 'Dashboard' : 'Log a run';
-      document.getElementById('user-name').textContent = me.first_name + ' ' + me.last_name.charAt(0) + '.';
+      const prefix = isCoach ? 'Coach ' : '';
+      document.getElementById('user-name').textContent = prefix + id.first_name + ' ' + id.last_name.charAt(0) + '.';
       if (isCoach) document.getElementById('coach-note').style.display = '';
-      return { isCoach, me, session };
+      return { isCoach, me: id };
     }
 
     // ---- helpers ----
@@ -605,8 +598,8 @@
       });
     });
 
-    (async () => {
-      const auth = await requireSession();
+    (() => {
+      const auth = requireSession();
       if (!auth) return;
       isCoach = auth.isCoach;
       loadBoard();

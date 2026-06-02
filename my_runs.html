@@ -302,7 +302,7 @@
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="log_run.html" role="menuitem">Log a run</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
       </div>
     </div>
   </div>
@@ -365,27 +365,29 @@
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
     });
-    document.getElementById('signout-btn').addEventListener('click', async () => {
-      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
-      await sb.auth.signOut();
+    const IDENTITY_KEY = 'pirates_identity';
+    function readIdentity() {
+      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
+    }
+    document.getElementById('signout-btn').addEventListener('click', () => {
+      if (!confirm("Switch user? You'll go back to the picker.")) return;
+      localStorage.removeItem(IDENTITY_KEY);
       window.location.href = 'index.html';
     });
 
-    // ---- auth ----
+    // ---- identity (open-demo mode) ----
     async function requireAthlete() {
-      const { data: { session } } = await sb.auth.getSession();
-      if (!session) { window.location.href = 'index.html'; return null; }
+      const id = readIdentity();
+      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
+      if (id.kind === 'coach') { window.location.href = 'team_dashboard.html'; return null; }
       const { data: athlete } = await sb
         .from('athletes')
         .select('id, first_name, last_name')
-        .eq('auth_user_id', session.user.id)
+        .eq('id', id.id)
         .eq('active', true)
         .maybeSingle();
       if (!athlete) {
-        // Maybe a coach landed here — bounce to dashboard
-        const { data: coach } = await sb.from('coaches').select('id').eq('auth_user_id', session.user.id).eq('active', true).maybeSingle();
-        if (coach) { window.location.href = 'team_dashboard.html'; return null; }
-        await sb.auth.signOut();
+        localStorage.removeItem(IDENTITY_KEY);
         window.location.href = 'index.html';
         return null;
       }

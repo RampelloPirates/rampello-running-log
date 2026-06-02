@@ -526,7 +526,7 @@
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="my_runs.html" role="menuitem">My runs</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
       </div>
     </div>
   </div>
@@ -746,37 +746,28 @@
 
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // ---- auth guard ----
+    // ---- identity (open-demo mode: read from localStorage) ----
+    const IDENTITY_KEY = 'pirates_identity';
+    function readIdentity() {
+      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
+    }
     async function requireAthlete() {
-      const { data: { session } } = await sb.auth.getSession();
-      if (!session) { window.location.href = 'index.html'; return null; }
-
-      const { data: coach } = await sb
-        .from('coaches')
-        .select('id')
-        .eq('auth_user_id', session.user.id)
-        .eq('active', true)
-        .maybeSingle();
-      if (coach) {
-        // Coaches log via bulk page (future). For now, allow them through but flag.
-        // Could redirect to dashboard, but log_run is fine for self-logging too.
-      }
-
+      const id = readIdentity();
+      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
+      // Coaches log via the bulk page, not the per-athlete form.
+      if (id.kind === 'coach') { window.location.href = 'coach_bulk_log.html'; return null; }
       const { data: athlete } = await sb
         .from('athletes')
         .select('id, first_name, last_name')
-        .eq('auth_user_id', session.user.id)
+        .eq('id', id.id)
         .eq('active', true)
         .maybeSingle();
-
-      if (!athlete && !coach) {
-        // Authenticated but on no roster — bounce to login with msg
-        await sb.auth.signOut();
+      if (!athlete) {
+        localStorage.removeItem(IDENTITY_KEY);
         window.location.href = 'index.html';
         return null;
       }
-
-      return { session, athlete, isCoach: !!coach };
+      return { athlete, isCoach: false };
     }
 
     // menu toggle
@@ -790,9 +781,9 @@
       if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
     });
 
-    document.getElementById('signout-btn').addEventListener('click', async () => {
-      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
-      await sb.auth.signOut();
+    document.getElementById('signout-btn').addEventListener('click', () => {
+      if (!confirm("Switch user? You'll go back to the picker.")) return;
+      localStorage.removeItem(IDENTITY_KEY);
       window.location.href = 'index.html';
     });
 
@@ -1081,7 +1072,7 @@
         route: txt('route'),
         cross_train_activity: selectedType === 'cross_train' ? txt('xtrain-activity') : null,
         notes: txt('notes'),
-        created_by: auth.session.user.id,
+        created_by: null,
       };
 
       const saveBtn = document.getElementById('save-btn');

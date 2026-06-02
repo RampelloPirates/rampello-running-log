@@ -47,11 +47,7 @@
       border-top: 6px solid var(--red);
     }
 
-    .logo {
-      text-align: center;
-      margin-bottom: 1.5rem;
-    }
-
+    .logo { text-align: center; margin-bottom: 1.5rem; }
     .logo .script {
       font-family: var(--font-display);
       font-style: italic;
@@ -61,7 +57,6 @@
       margin: 0;
       font-weight: 400;
     }
-
     .logo .name {
       font-family: var(--font-body);
       color: var(--black);
@@ -71,7 +66,6 @@
       margin: -0.15rem 0 0 0;
       text-transform: uppercase;
     }
-
     .logo .division {
       display: inline-block;
       margin-top: 0.4rem;
@@ -91,7 +85,6 @@
       font-size: 0.95rem;
       font-style: italic;
     }
-
     .tagline strong {
       color: var(--red);
       font-style: normal;
@@ -108,7 +101,7 @@
       font-weight: 700;
     }
 
-    input[type="email"] {
+    select {
       width: 100%;
       padding: 0.85rem 1rem;
       font-size: 1rem;
@@ -118,11 +111,7 @@
       background: var(--white);
       transition: border-color 0.15s;
     }
-
-    input[type="email"]:focus {
-      outline: none;
-      border-color: var(--red);
-    }
+    select:focus { outline: none; border-color: var(--red); }
 
     button {
       width: 100%;
@@ -140,7 +129,6 @@
       cursor: pointer;
       transition: background 0.15s;
     }
-
     button:hover { background: var(--red-dark); }
     button:disabled { background: var(--silver); cursor: wait; }
 
@@ -152,14 +140,6 @@
       display: none;
       line-height: 1.4;
     }
-
-    #message.success {
-      display: block;
-      background: #e8f5e9;
-      color: #1b5e20;
-      border: 1px solid #a5d6a7;
-    }
-
     #message.error {
       display: block;
       background: #ffebee;
@@ -172,6 +152,17 @@
       margin-top: 1.75rem;
       font-size: 0.8rem;
       color: var(--slate);
+    }
+
+    .demo-banner {
+      margin: 0 0 1.25rem 0;
+      padding: 0.7rem 0.9rem;
+      background: #fff8e1;
+      border-left: 3px solid #b45309;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      border-radius: 0 3px 3px 0;
+      color: var(--black);
     }
 
     .install-link {
@@ -189,71 +180,46 @@
       width: 100%;
       letter-spacing: 0.3px;
     }
-    .install-link:hover {
-      border-color: var(--red);
-      color: var(--red);
-    }
+    .install-link:hover { border-color: var(--red); color: var(--red); }
 
     .install-modal {
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background: rgba(0,0,0,0.7);
       display: none;
-      align-items: flex-start;
-      justify-content: center;
-      z-index: 200;
-      padding: 1.5rem 1rem;
-      overflow-y: auto;
+      align-items: flex-start; justify-content: center;
+      z-index: 200; padding: 1.5rem 1rem; overflow-y: auto;
     }
     .install-modal.show { display: flex; }
     .install-card {
       background: var(--bone);
       border-radius: 6px;
-      width: 100%;
-      max-width: 480px;
+      width: 100%; max-width: 480px;
       border-top: 6px solid var(--red);
       color: var(--black);
     }
     .install-header {
       padding: 1rem 1.25rem;
       border-bottom: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      display: flex; justify-content: space-between; align-items: center;
     }
     .install-header h2 {
-      margin: 0;
-      font-size: 1rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
+      margin: 0; font-size: 1rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.5px;
     }
     .install-close {
-      background: none;
-      border: none;
-      font-size: 1.6rem;
-      color: var(--slate);
-      cursor: pointer;
-      line-height: 1;
-      padding: 0;
+      background: none; border: none;
+      font-size: 1.6rem; color: var(--slate); cursor: pointer;
+      line-height: 1; padding: 0;
     }
     .install-body {
-      padding: 1.25rem;
-      font-size: 0.95rem;
-      line-height: 1.5;
-      color: #1a1a1a;
+      padding: 1.25rem; font-size: 0.95rem; line-height: 1.5; color: #1a1a1a;
     }
     .install-intro {
-      margin: 0 0 1.25rem 0;
-      font-style: italic;
-      color: var(--slate);
+      margin: 0 0 1.25rem 0; font-style: italic; color: var(--slate);
     }
     .install-platform { margin-bottom: 1.5rem; }
     .install-platform h3 {
-      font-size: 0.95rem;
-      font-weight: 700;
-      margin: 0 0 0.6rem 0;
-      color: var(--red);
+      font-size: 0.95rem; font-weight: 700; margin: 0 0 0.6rem 0; color: var(--red);
     }
     .install-platform ol { margin: 0; padding-left: 1.4rem; }
     .install-platform li { margin-bottom: 0.5rem; }
@@ -276,42 +242,21 @@
       <span class="division">Cross Country</span>
     </div>
 
-    <p class="tagline"><strong>Finish Line Mentality.</strong><br>Sign in to log your runs.</p>
+    <p class="tagline"><strong>Finish Line Mentality.</strong><br>Pick who you are to get started.</p>
 
-    <form id="login-form">
-      <label for="email">Team email</label>
-      <input
-        type="email"
-        id="email"
-        placeholder="you@example.com"
-        required
-        autocomplete="email"
-        autofocus
-      >
-      <button type="submit" id="submit-btn">Send sign-in link</button>
-    </form>
+    <div class="demo-banner">
+      Open demo mode — no password needed. Anyone can pick any identity.
+    </div>
 
-    <form id="code-form" style="display:none;margin-top:0.85rem;">
-      <label for="code">Or paste the 6-digit code from the email</label>
-      <input
-        type="text"
-        id="code"
-        inputmode="numeric"
-        autocomplete="one-time-code"
-        pattern="\d{6}"
-        maxlength="6"
-        placeholder="123456"
-        style="letter-spacing:6px;font-family:monospace;text-align:center;font-size:1.4rem;"
-      >
-      <button type="submit" id="code-btn">Sign in with code</button>
+    <form id="pick-form">
+      <label for="identity">Continue as</label>
+      <select id="identity" required>
+        <option value="">Loading roster…</option>
+      </select>
+      <button type="submit" id="submit-btn" disabled>Continue</button>
     </form>
 
     <div id="message"></div>
-
-    <div class="footer">
-      New to the team? <a href="signup.html" style="color:var(--red);font-weight:700;text-decoration:none">Sign up here</a><br>
-      On the roster but stuck? Ask Coach Sowell.
-    </div>
 
     <button type="button" class="install-link" id="install-link">
       Install on your phone — one-tap access
@@ -326,7 +271,7 @@
         <button type="button" class="install-close" id="install-close" aria-label="Close">×</button>
       </div>
       <div class="install-body">
-        <p class="install-intro">Once installed, just tap the icon — no need to type your email every time.</p>
+        <p class="install-intro">Once installed, just tap the icon to jump back in.</p>
 
         <div class="install-platform">
           <h3>iPhone or iPad (Safari)</h3>
@@ -347,7 +292,7 @@
         </div>
 
         <p class="install-note">
-          After installing, open the app from your home screen and sign in once. You'll stay signed in from then on — no more emails.
+          After installing, open the app from your home screen. Your last pick is remembered until you tap "Switch user."
         </p>
       </div>
     </div>
@@ -359,132 +304,103 @@
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
 
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const IDENTITY_KEY = 'pirates_identity';
 
     // ---- install modal ----
     const installLink = document.getElementById('install-link');
     const installModal = document.getElementById('install-modal');
     const installClose = document.getElementById('install-close');
-
-    // Hide install prompt if already running as installed app
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
       installLink.style.display = 'none';
     }
-
     installLink.addEventListener('click', () => installModal.classList.add('show'));
     installClose.addEventListener('click', () => installModal.classList.remove('show'));
     installModal.addEventListener('click', (e) => {
       if (e.target === installModal) installModal.classList.remove('show');
     });
 
-    const form = document.getElementById('login-form');
-    const emailInput = document.getElementById('email');
-    const submitBtn = document.getElementById('submit-btn');
-    const messageEl = document.getElementById('message');
+    // ---- picker ----
+    const select   = document.getElementById('identity');
+    const submitBtn= document.getElementById('submit-btn');
+    const messageEl= document.getElementById('message');
+    const form     = document.getElementById('pick-form');
 
-    function showMessage(text, type) {
+    function showError(text) {
       messageEl.textContent = text;
-      messageEl.className = type || '';
+      messageEl.className = 'error';
     }
 
-    async function redirectByRole(user) {
-      const { data: coach } = await sb
-        .from('coaches')
-        .select('id')
-        .eq('auth_user_id', user.id)
-        .eq('active', true)
-        .maybeSingle();
-
-      if (coach) {
-        window.location.href = 'team_dashboard.html';
-        return;
-      }
-
-      const { data: athlete } = await sb
-        .from('athletes')
-        .select('id')
-        .eq('auth_user_id', user.id)
-        .eq('active', true)
-        .maybeSingle();
-
-      if (athlete) {
-        window.location.href = 'log_run.html';
-        return;
-      }
-
-      showMessage(
-        "Your email isn't on the roster yet. Ask a coach to add you, then try again.",
-        'error'
-      );
-      await sb.auth.signOut();
+    // If they've already picked, skip straight to their home page.
+    const existing = (() => { try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; } })();
+    if (existing && existing.kind && existing.id) {
+      window.location.href = existing.kind === 'coach' ? 'team_dashboard.html' : 'my_runs.html';
     }
 
     (async () => {
-      const { data: { session } } = await sb.auth.getSession();
-      if (session) await redirectByRole(session.user);
-    })();
+      const [coachRes, athleteRes] = await Promise.all([
+        sb.from('coaches').select('id, first_name, last_name').eq('active', true).order('last_name'),
+        sb.from('athletes').select('id, first_name, last_name, grade').eq('active', true).order('last_name'),
+      ]);
 
-    sb.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        await redirectByRole(session.user);
+      if (coachRes.error || athleteRes.error) {
+        showError('Could not load roster: ' + (coachRes.error?.message || athleteRes.error?.message));
+        return;
       }
-    });
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const email = emailInput.value.trim();
-      if (!email) return;
+      select.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '— pick a name —';
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      select.appendChild(placeholder);
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Sending…';
-      showMessage('', '');
-
-      const { error } = await sb.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: window.location.origin + window.location.pathname,
-          shouldCreateUser: true
+      if (coachRes.data && coachRes.data.length) {
+        const grp = document.createElement('optgroup');
+        grp.label = 'Coaches';
+        for (const c of coachRes.data) {
+          const opt = document.createElement('option');
+          opt.value = 'coach:' + c.id;
+          opt.textContent = 'Coach ' + c.first_name + ' ' + c.last_name;
+          opt.dataset.first = c.first_name;
+          opt.dataset.last  = c.last_name;
+          grp.appendChild(opt);
         }
-      });
+        select.appendChild(grp);
+      }
+
+      if (athleteRes.data && athleteRes.data.length) {
+        const grp = document.createElement('optgroup');
+        grp.label = 'Athletes';
+        for (const a of athleteRes.data) {
+          const opt = document.createElement('option');
+          opt.value = 'athlete:' + a.id;
+          const gradeBit = a.grade ? ' (G' + a.grade + ')' : '';
+          opt.textContent = a.first_name + ' ' + a.last_name + gradeBit;
+          opt.dataset.first = a.first_name;
+          opt.dataset.last  = a.last_name;
+          grp.appendChild(opt);
+        }
+        select.appendChild(grp);
+      }
 
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Send sign-in link';
+    })();
 
-      if (error) {
-        showMessage('Error: ' + error.message, 'error');
-      } else {
-        showMessage(
-          'Check your email — tap the link OR paste the 6-digit code below.',
-          'success'
-        );
-        // Reveal the code-entry form. We keep the email value in state so
-        // verifyOtp can use it.
-        document.getElementById('code-form').style.display = '';
-        setTimeout(() => document.getElementById('code').focus(), 100);
-      }
-    });
-
-    // Code-based sign-in: works even when the magic link opens in a browser
-    // that's isolated from this app (e.g. iOS Safari vs. the standalone PWA).
-    document.getElementById('code-form').addEventListener('submit', async (e) => {
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const email = emailInput.value.trim();
-      const code  = document.getElementById('code').value.trim();
-      if (!email || !code) return;
-
-      const codeBtn = document.getElementById('code-btn');
-      codeBtn.disabled = true;
-      codeBtn.textContent = 'Signing in…';
-      showMessage('', '');
-
-      const { error } = await sb.auth.verifyOtp({ email, token: code, type: 'email' });
-
-      codeBtn.disabled = false;
-      codeBtn.textContent = 'Sign in with code';
-
-      if (error) {
-        showMessage("That code didn't work. Double-check it or request a new one.", 'error');
-      }
-      // On success the onAuthStateChange listener above takes care of the redirect.
+      const val = select.value;
+      if (!val) return;
+      const [kind, id] = val.split(':');
+      const opt = select.options[select.selectedIndex];
+      const identity = {
+        kind,
+        id,
+        first_name: opt.dataset.first,
+        last_name:  opt.dataset.last,
+      };
+      localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
+      window.location.href = kind === 'coach' ? 'team_dashboard.html' : 'my_runs.html';
     });
   </script>
 </body>

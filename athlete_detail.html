@@ -345,7 +345,7 @@
         <a class="menu-item" href="team_dashboard.html" role="menuitem">Dashboard</a>
         <a class="menu-item" href="roster.html" role="menuitem">Roster</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
       </div>
     </div>
   </div>
@@ -418,24 +418,21 @@
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
     });
-    document.getElementById('signout-btn').addEventListener('click', async () => {
-      if (!confirm("Sign out? You'll need to sign in again with a magic link.")) return;
-      await sb.auth.signOut();
+    const IDENTITY_KEY = 'pirates_identity';
+    function readIdentity() {
+      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
+    }
+    document.getElementById('signout-btn').addEventListener('click', () => {
+      if (!confirm("Switch user? You'll go back to the picker.")) return;
+      localStorage.removeItem(IDENTITY_KEY);
       window.location.href = 'index.html';
     });
 
-    // ---- auth (coach only) ----
-    async function requireCoach() {
-      const { data: { session } } = await sb.auth.getSession();
-      if (!session) { window.location.href = 'index.html'; return null; }
-      const { data: coach } = await sb
-        .from('coaches')
-        .select('id, first_name, last_name')
-        .eq('auth_user_id', session.user.id)
-        .eq('active', true)
-        .maybeSingle();
-      if (!coach) { window.location.href = 'log_run.html'; return null; }
-      return coach;
+    // ---- identity (open-demo mode) ----
+    function requireCoach() {
+      const id = readIdentity();
+      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
+      return { id: id.id, first_name: id.first_name, last_name: id.last_name, kind: id.kind };
     }
 
     // ---- helpers ----
@@ -907,9 +904,10 @@
     });
 
     (async () => {
-      const coach = await requireCoach();
+      const coach = requireCoach();
       if (!coach) return;
-      document.getElementById('user-name').textContent = coach.first_name + ' ' + coach.last_name.charAt(0) + '.';
+      const prefix = coach.kind === 'coach' ? 'Coach ' : '';
+      document.getElementById('user-name').textContent = prefix + coach.first_name + ' ' + coach.last_name.charAt(0) + '.';
       const ath = await loadAthlete();
       if (!ath) return;
       loadRuns();
