@@ -257,6 +257,11 @@
       grid-template-columns: 1fr 1fr 1fr;
       gap: 0.4rem;
     }
+    .loc-pills {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+    }
     .tod-pill {
       padding: 0.55rem 0.4rem;
       font-size: 0.85rem;
@@ -616,6 +621,21 @@
             <button type="button" class="tod-pill" data-tod="evening">Evening</button>
           </div>
         </div>
+
+        <div style="margin-top:0.85rem;">
+          <label>Location</label>
+          <div class="loc-pills" id="loc-pills" role="radiogroup" aria-label="Location">
+            <button type="button" class="tod-pill loc-pill" data-loc="Dover Trails">Dover Trails</button>
+            <button type="button" class="tod-pill loc-pill" data-loc="Ballast Point">Ballast Point</button>
+            <button type="button" class="tod-pill loc-pill" data-loc="Rivercrest Park">Rivercrest Park</button>
+            <button type="button" class="tod-pill loc-pill" data-loc="__add__">+ Add</button>
+          </div>
+          <div id="loc-add-wrap" class="hidden" style="margin-top:0.6rem;">
+            <input type="text" id="route" list="routes-list" placeholder="Type a location" autocomplete="off">
+            <datalist id="routes-list"></datalist>
+            <div class="helper">Type any location — it'll be available to your teammates next time.</div>
+          </div>
+        </div>
         <label style="margin-top:1rem;">Run type</label>
         <div class="type-grid" id="type-grid">
           <button type="button" class="type-btn" data-type="easy">Easy</button>
@@ -752,7 +772,7 @@
 
       <!-- Optional more detail -->
       <details>
-        <summary>More detail (cadence, HR, route)</summary>
+        <summary>More detail (cadence, HR)</summary>
         <div class="section-body">
           <div class="row three">
             <div>
@@ -766,14 +786,6 @@
             <div>
               <label for="max-hr">Max HR</label>
               <input type="number" id="max-hr" min="30" max="240">
-            </div>
-          </div>
-          <div class="row">
-            <div class="full">
-              <label for="route">Route</label>
-              <input type="text" id="route" list="routes-list" placeholder="Bayshore loop" autocomplete="off">
-              <datalist id="routes-list"></datalist>
-              <div class="helper">Pick from a previous route or type a new one — it'll be available to your teammates next time.</div>
             </div>
           </div>
         </div>
@@ -905,6 +917,31 @@
       btn.addEventListener('click', () => setTodSelection(btn.dataset.tod));
     });
     setTodSelection(defaultTimeOfDay());
+
+    // ---- location picker ----
+    // Named pills set the route field directly; "+ Add" reveals the free-form
+    // input so the athlete can type any location (with team-wide autocomplete).
+    function setLocation(loc) {
+      const routeInp  = document.getElementById('route');
+      const addWrap   = document.getElementById('loc-add-wrap');
+      document.querySelectorAll('#loc-pills .loc-pill').forEach(b => {
+        b.classList.toggle('selected', b.dataset.loc === loc);
+      });
+      if (loc === '__add__') {
+        addWrap.classList.remove('hidden');
+        // Only clear when entering Add fresh — if the input already has a typed
+        // value (e.g. they re-clicked Add), keep it.
+        const namedSet = ['Dover Trails', 'Ballast Point', 'Rivercrest Park'];
+        if (namedSet.includes(routeInp.value)) routeInp.value = '';
+        setTimeout(() => routeInp.focus(), 0);
+      } else {
+        addWrap.classList.add('hidden');
+        routeInp.value = loc;
+      }
+    }
+    document.querySelectorAll('#loc-pills .loc-pill').forEach(btn => {
+      btn.addEventListener('click', () => setLocation(btn.dataset.loc));
+    });
     document.querySelectorAll('.type-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         selectedType = btn.dataset.type;
@@ -1298,6 +1335,8 @@
       selectedType = null;
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
       setTodSelection(defaultTimeOfDay());
+      document.querySelectorAll('#loc-pills .loc-pill').forEach(b => b.classList.remove('selected'));
+      document.getElementById('loc-add-wrap').classList.add('hidden');
       mode = 'simple';
       document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === 'simple'));
       document.getElementById('simple-mode').classList.remove('hidden');
