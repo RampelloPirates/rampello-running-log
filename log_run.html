@@ -1024,7 +1024,7 @@
       wrap.innerHTML = rows.map(r => `
         <div class="split-row">
           <span class="split-label">${r.label}</span>
-          <input type="text" inputmode="numeric" placeholder="e.g. 9:30"
+          <input type="text" placeholder="e.g. 9:30"
                  data-split="${r.key}" data-miles="${r.dist}"
                  value="${existing[r.key] || ''}">
         </div>
