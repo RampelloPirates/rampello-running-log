@@ -316,6 +316,20 @@
     }
     .grade-status { font-size: 0.8rem; font-weight: 700; }
 
+    .lb-teaser {
+      display: flex; align-items: center; gap: 0.85rem;
+      background: var(--black); color: var(--paper);
+      border-left: 4px solid var(--red);
+      border-radius: 4px; padding: 0.9rem 1.1rem;
+      text-decoration: none; margin-bottom: 1.5rem;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .lb-teaser:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.28); }
+    .lb-teaser-emoji { font-size: 1.7rem; line-height: 1; }
+    .lb-teaser-copy { display: flex; flex-direction: column; gap: 0.12rem; }
+    .lb-teaser-copy strong { font-size: 0.98rem; font-weight: 700; }
+    .lb-teaser-sub { font-size: 0.82rem; color: var(--silver); }
+
     @media (max-width: 600px) {
       .run-row { grid-template-columns: 80px 1fr; }
       .run-row .pace { grid-column: 1 / -1; text-align: left; }
@@ -359,6 +373,14 @@
     </div>
 
     <a href="log_run.html" class="log-cta">+ Log a new run</a>
+
+    <a href="leaderboard.html" class="lb-teaser">
+      <span class="lb-teaser-emoji">🏆</span>
+      <span class="lb-teaser-copy">
+        <strong>How are your teammates doing this week?</strong>
+        <span class="lb-teaser-sub">See where you stack up on the leaderboard →</span>
+      </span>
+    </a>
 
     <div class="range-filter" role="tablist" aria-label="Date range">
       <button class="range-btn active" data-range="week" role="tab">This week</button>
