@@ -222,7 +222,7 @@
         <a class="menu-item" href="team_dashboard.html" role="menuitem">Dashboard</a>
         <a class="menu-item" href="roster.html" role="menuitem">Roster</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
   </div>
@@ -330,32 +330,17 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
   <script>
-    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
     // ---- menu ----
     const menuBtn = document.getElementById('menu-btn');
     const menu = document.getElementById('menu');
     menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('show'); });
     document.addEventListener('click', (e) => { if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show'); });
-    const IDENTITY_KEY = 'pirates_identity';
-    function readIdentity() {
-      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
-    }
     document.getElementById('signout-btn').addEventListener('click', () => {
-      if (!confirm("Switch user? You'll go back to the picker.")) return;
-      localStorage.removeItem(IDENTITY_KEY);
-      window.location.href = 'index.html';
+      if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+      signOut();
     });
-
-    function requireCoach() {
-      const id = readIdentity();
-      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
-      const coach = { id: id.id, first_name: id.first_name, last_name: id.last_name, kind: id.kind };
-      return { coach };
-    }
 
     // ---- duration parse/format ----
     function parseDuration(text) {
@@ -502,8 +487,8 @@
       const errEl = document.getElementById('form-error');
       errEl.classList.remove('show');
 
-      const { coach } = requireCoach() || {};
-      if (!coach) return;
+      const me = await requireCoach();
+      if (!me) return;
 
       if (!selectedType) { showErr('Pick a run type.'); return; }
       const runDate = document.getElementById('run-date').value;
@@ -572,7 +557,7 @@
           humidity_percent: weather?.humidity_percent ?? null,
           dewpoint_f:       weather?.dewpoint_f ?? null,
           notes: notes,
-          created_by: null,
+          created_by: me.user.id,
         };
         const { data: runRow, error: runErr } = await sb
           .from('runs').insert(payload).select('id').single();
@@ -647,11 +632,10 @@
 
     document.getElementById('reset-btn').addEventListener('click', () => setTimeout(resetForm, 0));
 
-    (() => {
-      const auth = requireCoach();
-      if (!auth) return;
-      const prefix = auth.coach.kind === 'coach' ? 'Coach ' : '';
-      document.getElementById('user-name').textContent = prefix + auth.coach.first_name + ' ' + auth.coach.last_name.charAt(0) + '.';
+    (async () => {
+      const me = await requireCoach();
+      if (!me) return;
+      document.getElementById('user-name').textContent = displayName(me);
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
       loadAthletes();
     })();

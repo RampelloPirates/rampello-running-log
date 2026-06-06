@@ -322,7 +322,7 @@
       <div class="menu" id="menu" role="menu">
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" id="menu-home" href="#" role="menuitem">Home</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
   </div>
@@ -368,11 +368,8 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
   <script>
-    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
     // ---- menu ----
     const menuBtn = document.getElementById('menu-btn');
     const menu = document.getElementById('menu');
@@ -380,29 +377,24 @@
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
     });
-    const IDENTITY_KEY = 'pirates_identity';
-    function readIdentity() {
-      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
-    }
     document.getElementById('signout-btn').addEventListener('click', () => {
-      if (!confirm("Switch user? You'll go back to the picker.")) return;
-      localStorage.removeItem(IDENTITY_KEY);
-      window.location.href = 'index.html';
+      if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+      signOut();
     });
 
-    // ---- identity (open-demo mode). isCoach controls the safety col. ----
-    function requireSession() {
-      const id = readIdentity();
-      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
-      const isCoach = id.kind === 'coach';
-      const homeHref = isCoach ? 'team_dashboard.html' : 'log_run.html';
+    // Gate the page on a real session and wire role-dependent chrome.
+    // isCoach controls the coach-only change/safety column.
+    async function initSession() {
+      const p = await requireSession();        // from auth.js
+      if (!p) return null;
+      const isC = p.kind === 'coach';
+      const homeHref = isC ? 'team_dashboard.html' : 'log_run.html';
       document.getElementById('home-brand').href = homeHref;
       document.getElementById('menu-home').href = homeHref;
-      document.getElementById('menu-home').textContent = isCoach ? 'Dashboard' : 'Log a run';
-      const prefix = isCoach ? 'Coach ' : '';
-      document.getElementById('user-name').textContent = prefix + id.first_name + ' ' + id.last_name.charAt(0) + '.';
-      if (isCoach) document.getElementById('coach-note').style.display = '';
-      return { isCoach, me: id };
+      document.getElementById('menu-home').textContent = isC ? 'Dashboard' : 'Log a run';
+      document.getElementById('user-name').textContent = displayName(p);
+      if (isC) document.getElementById('coach-note').style.display = '';
+      return { isCoach: isC, me: p };
     }
 
     // ---- helpers ----
@@ -497,33 +489,24 @@
         document.getElementById(id).innerHTML = '';
       });
 
-      // Pull two windows in parallel. Excludes cross_train per product call.
-      // Include athletes.grade so we can split into divisions client-side.
-      // run_date is selected so we can count distinct days each athlete logged.
-      const [thisRes, lastRes] = await Promise.all([
-        sb.from('runs')
-          .select('athlete_id, run_date, distance_miles, duration_seconds, athletes!inner(first_name, last_name, active, grade)')
-          .neq('run_type', 'cross_train')
-          .gte('run_date', win.thisStart)
-          .lte('run_date', win.thisEnd),
-        sb.from('runs')
-          .select('athlete_id, distance_miles, duration_seconds')
-          .neq('run_type', 'cross_train')
-          .gte('run_date', win.lastStart)
-          .lte('run_date', win.lastEnd),
-      ]);
-
+      // The team_leaderboard RPC (security definer) returns per-athlete
+      // aggregates for a window — name, grade, miles, seconds, days — excluding
+      // cross_train. It's needed because RLS only lets an athlete SELECT their
+      // own runs, so a client-side aggregate would show only themselves.
+      // The prior window is only used for the coach-only change column.
+      const thisRes = await sb.rpc('team_leaderboard', { p_start: win.thisStart, p_end: win.thisEnd });
       if (thisRes.error) {
         document.getElementById('ms-podium-wrap').innerHTML =
           `<div class="empty">Error loading: ${escapeHtml(thisRes.error.message)}</div>`;
         return;
       }
+      const byAthThis = indexRpcRows(thisRes.data);
 
-      const thisRuns = (thisRes.data || []).filter(r => r.athletes && r.athletes.active);
-      const lastRuns = lastRes.data || [];
-
-      const byAthThis = aggregate(thisRuns, true);  // includes name + grade
-      const byAthLast = aggregate(lastRuns, false);
+      let byAthLast = {};
+      if (isCoach) {
+        const lastRes = await sb.rpc('team_leaderboard', { p_start: win.lastStart, p_end: win.lastEnd });
+        byAthLast = indexRpcRows(lastRes.data || []);
+      }
 
       // Build leaderboard rows with division tag (middle or elementary).
       const allRows = Object.values(byAthThis)
@@ -556,27 +539,20 @@
       renderRest(sorted.slice(3), restWrapId);
     }
 
-    function aggregate(runs, includeName) {
+    // Index team_leaderboard RPC rows by athlete_id into the shape the render
+    // code expects: { athlete_id, miles, time, days, name, grade }.
+    function indexRpcRows(rows) {
       const out = {};
-      const dayBuckets = {};  // athlete_id -> Set of run_date strings
-      for (const r of runs) {
-        const id = r.athlete_id;
-        if (!out[id]) {
-          out[id] = {
-            athlete_id: id,
-            miles: 0,
-            time: 0,
-            days: 0,
-            name:  includeName && r.athletes ? `${r.athletes.first_name} ${r.athletes.last_name}` : '',
-            grade: includeName && r.athletes ? r.athletes.grade : null,
-          };
-          dayBuckets[id] = new Set();
-        }
-        if (r.distance_miles) out[id].miles += Number(r.distance_miles);
-        if (r.duration_seconds) out[id].time += Number(r.duration_seconds);
-        if (r.run_date) dayBuckets[id].add(r.run_date);
+      for (const r of rows || []) {
+        out[r.athlete_id] = {
+          athlete_id: r.athlete_id,
+          miles: Number(r.total_miles) || 0,
+          time:  Number(r.total_seconds) || 0,
+          days:  Number(r.days_logged) || 0,
+          name:  `${r.first_name} ${r.last_name}`,
+          grade: r.grade,
+        };
       }
-      for (const id in dayBuckets) out[id].days = dayBuckets[id].size;
       return out;
     }
 
@@ -699,8 +675,8 @@
       });
     });
 
-    (() => {
-      const auth = requireSession();
+    (async () => {
+      const auth = await initSession();
       if (!auth) return;
       isCoach = auth.isCoach;
       loadBoard();

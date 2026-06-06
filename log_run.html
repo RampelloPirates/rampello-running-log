@@ -606,7 +606,7 @@
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="my_runs.html" role="menuitem">My runs</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
   </div>
@@ -836,35 +836,16 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
   <script>
-    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
-
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    // ---- identity (open-demo mode: read from localStorage) ----
-    const IDENTITY_KEY = 'pirates_identity';
-    function readIdentity() {
-      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
-    }
-    async function requireAthlete() {
-      const id = readIdentity();
-      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
-      // Coaches log via the bulk page, not the per-athlete form.
-      if (id.kind === 'coach') { window.location.href = 'coach_bulk_log.html'; return null; }
-      const { data: athlete } = await sb
-        .from('athletes')
-        .select('id, first_name, last_name')
-        .eq('id', id.id)
-        .eq('active', true)
-        .maybeSingle();
-      if (!athlete) {
-        localStorage.removeItem(IDENTITY_KEY);
-        window.location.href = 'index.html';
-        return null;
-      }
-      return { athlete, isCoach: false };
-    }
+    // ---- edit mode ----
+    // log_run.html?edit=<runId> turns this page into an editor for an existing
+    // run. Athletes can edit their own runs; coaches can edit anyone's. When
+    // not present, the page behaves as the normal "log a new run" form.
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get('edit');
+    let editAthleteId = null;            // athlete the edited run belongs to
+    const SAVE_LABEL = editId ? 'Save changes' : 'Save run';
 
     // menu toggle
     const menuBtn = document.getElementById('menu-btn');
@@ -878,9 +859,8 @@
     });
 
     document.getElementById('signout-btn').addEventListener('click', () => {
-      if (!confirm("Switch user? You'll go back to the picker.")) return;
-      localStorage.removeItem(IDENTITY_KEY);
-      window.location.href = 'index.html';
+      if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+      signOut();
     });
 
     // ---- duration parse/format ----
@@ -1141,8 +1121,32 @@
     }
 
     // ---- save ----
+    let submitting = false; // guards against rapid double-submits
+
+    // Exact-match duplicate check. Returns true if an identical run already
+    // exists for this athlete: same date, time-of-day, type, distance, and
+    // duration. Doubles that differ in any of those still go through.
+    async function isDuplicateRun(p, excludeId) {
+      let q = sb.from('runs')
+        .select('id, time_of_day, distance_miles, duration_seconds')
+        .eq('athlete_id', p.athlete_id)
+        .eq('run_date', p.run_date)
+        .eq('run_type', p.run_type);
+      if (excludeId) q = q.neq('id', excludeId); // editing a run shouldn't match itself
+      const { data, error } = await q;
+      if (error || !data) return false; // never block on a lookup failure
+      const round2 = (v) => v == null ? null : Math.round(parseFloat(v) * 100) / 100;
+      const dist = round2(p.distance_miles);
+      const dur = p.duration_seconds == null ? null : Math.round(p.duration_seconds);
+      return data.some(r =>
+        (r.time_of_day ?? null) === (p.time_of_day ?? null) &&
+        round2(r.distance_miles) === dist &&
+        (r.duration_seconds == null ? null : Math.round(r.duration_seconds)) === dur
+      );
+    }
     document.getElementById('run-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (submitting) return; // a save is already in flight
       const errEl = document.getElementById('form-error');
       errEl.classList.remove('show');
       errEl.textContent = '';
@@ -1159,12 +1163,15 @@
         return;
       }
 
-      const auth = await requireAthlete();
-      if (!auth) return;
-      if (!auth.athlete) {
-        errEl.textContent = 'You need to be on the roster as an athlete to log a run. (Coaches: use bulk log when ready.)';
-        errEl.classList.add('show');
-        return;
+      // Whose run is this? In edit mode the athlete is fixed to whoever owns
+      // the run; in create mode it's the signed-in athlete.
+      let runAthleteId;
+      if (editId) {
+        runAthleteId = editAthleteId;
+      } else {
+        const auth = await requireAthlete();
+        if (!auth) return; // requireAthlete redirects non-athletes
+        runAthleteId = auth.row.id;
       }
 
       // Build payload
@@ -1234,7 +1241,7 @@
       const int = (id) => { const v = parseInt(document.getElementById(id).value, 10); return isNaN(v) ? null : v; };
 
       const runPayload = {
-        athlete_id: auth.athlete.id,
+        athlete_id: runAthleteId,
         run_date: runDate,
         time_of_day: selectedTod,
         run_type: selectedType,
@@ -1247,20 +1254,37 @@
         route: txt('route'),
         cross_train_activity: selectedType === 'cross_train' ? txt('xtrain-activity') : null,
         notes: txt('notes'),
-        created_by: null,
       };
 
+      // Stamp who logged it (the signed-in user). On edit we leave the original
+      // created_by untouched.
+      if (!editId) {
+        const { data: { user } } = await sb.auth.getUser();
+        runPayload.created_by = user ? user.id : null;
+      }
+
       const saveBtn = document.getElementById('save-btn');
+      submitting = true;
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving…';
 
-      // Auto-fetch weather if user didn't enter any of the weather fields
+      // Bail if this exact run is already on record (athlete double-tapped Save
+      // or re-logged because they weren't sure it went through). In edit mode
+      // the run must not match itself.
+      if (await isDuplicateRun(runPayload, editId)) {
+        showErr('Looks like this run is already logged — same date, time of day, type, distance, and time. Check My Runs.');
+        return;
+      }
+
+      // Auto-fetch weather if user didn't enter any of the weather fields.
+      // Skipped in edit mode: the run keeps its existing weather (there's no
+      // weather input to change), and the update leaves those columns alone.
       const weatherUntouched = (
         runPayload.temperature_f == null &&
         runPayload.conditions == null &&
         runPayload.wind_mph == null
       );
-      if (weatherUntouched && runPayload.run_type !== 'cross_train') {
+      if (!editId && weatherUntouched && runPayload.run_type !== 'cross_train') {
         const w = await fetchWeatherForDate(runPayload.run_date, selectedTod);
         if (w) {
           runPayload.temperature_f    ??= w.temperature_f;
@@ -1271,31 +1295,51 @@
         }
       }
 
-      // Insert run
-      const { data: runRow, error: runErr } = await sb
-        .from('runs').insert(runPayload).select('id').single();
-
-      if (runErr) {
-        saveBtn.disabled = false; saveBtn.textContent = 'Save run';
-        showErr('Error saving run: ' + runErr.message);
-        return;
+      // Save the run — update in edit mode, insert otherwise.
+      let runId;
+      if (editId) {
+        const { error: runErr } = await sb.from('runs').update(runPayload).eq('id', editId);
+        if (runErr) {
+          showErr('Error saving changes: ' + runErr.message);
+          return;
+        }
+        runId = editId;
+      } else {
+        const { data: runRow, error: runErr } = await sb
+          .from('runs').insert(runPayload).select('id').single();
+        if (runErr) {
+          showErr('Error saving run: ' + runErr.message);
+          return;
+        }
+        runId = runRow.id;
       }
 
-      // Insert segments
+      // Segments: in edit mode we replace them wholesale (delete then re-insert)
+      // so removed/renamed segments don't linger.
+      if (editId) {
+        const { error: delErr } = await sb.from('run_segments').delete().eq('run_id', runId);
+        if (delErr) {
+          showErr('Couldn’t update segments: ' + delErr.message);
+          return;
+        }
+      }
       if (segmentsToInsert.length) {
-        const segRows = segmentsToInsert.map(s => ({ ...s, run_id: runRow.id }));
+        const segRows = segmentsToInsert.map(s => ({ ...s, run_id: runId }));
         const { error: segErr } = await sb.from('run_segments').insert(segRows);
         if (segErr) {
-          saveBtn.disabled = false; saveBtn.textContent = 'Save run';
-          showErr('Run saved but segments failed: ' + segErr.message);
+          showErr((editId ? 'Run updated but segments failed: ' : 'Run saved but segments failed: ') + segErr.message);
           return;
         }
       }
 
-      // Insert race_results if race
+      // Race results: clear any existing row first (handles a type change away
+      // from race), then insert if this is a race with a meet name.
+      if (editId) {
+        await sb.from('race_results').delete().eq('run_id', runId);
+      }
       if (selectedType === 'race') {
         const racePayload = {
-          run_id: runRow.id,
+          run_id: runId,
           meet_name: txt('race-meet'),
           course_name: txt('race-course-name'),
           course_type: txt('race-course-type'),
@@ -1307,20 +1351,31 @@
           conditions_notes: txt('race-conditions'),
         };
         if (!racePayload.meet_name) {
-          showErr('Run saved but meet name was missing. Add it from My Runs once that page exists.');
+          showErr('Saved, but the meet name was missing — add it and save again to record race details.');
         } else {
           const { error: raceErr } = await sb.from('race_results').insert(racePayload);
           if (raceErr) {
-            showErr('Run saved but race details failed: ' + raceErr.message);
+            showErr((editId ? 'Run updated but race details failed: ' : 'Run saved but race details failed: ') + raceErr.message);
           }
         }
       }
 
-      saveBtn.disabled = false; saveBtn.textContent = 'Save run';
-      await showCelebration(runPayload, segmentsToInsert, auth.athlete.id);
+      // Edit mode: hop back to where the run is shown. Otherwise celebrate.
+      if (editId) {
+        const me = await getProfile();
+        window.location.href = (me && me.kind === 'coach')
+          ? `athlete_detail.html?id=${editAthleteId}&run=${editId}`
+          : 'my_runs.html';
+        return;
+      }
+
+      saveBtn.disabled = false; saveBtn.textContent = SAVE_LABEL;
+      submitting = false;
+      await showCelebration(runPayload, segmentsToInsert, runAthleteId);
 
       function showErr(msg) {
-        saveBtn.disabled = false; saveBtn.textContent = 'Save run';
+        submitting = false;
+        saveBtn.disabled = false; saveBtn.textContent = SAVE_LABEL;
         errEl.textContent = msg;
         errEl.classList.add('show');
       }
@@ -1671,16 +1726,153 @@
       } catch(_) { /* non-fatal */ }
     }
 
+    // ---- edit-mode prefill ----
+    function setVal(id, v) {
+      const el = document.getElementById(id);
+      if (el) el.value = (v == null ? '' : v);
+    }
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+      document.getElementById('simple-mode').classList.toggle('hidden', m !== 'simple');
+      document.getElementById('detailed-mode').classList.toggle('hidden', m !== 'detailed');
+    }
+
+    async function loadRunForEdit(id) {
+      const { data, error } = await sb.from('runs').select(`
+        id, athlete_id, run_date, time_of_day, run_type, distance_miles, duration_seconds,
+        effort_rpe, avg_cadence, avg_hr, max_hr, route, notes, cross_train_activity,
+        run_segments(segment_order, segment_type, distance_miles, duration_seconds),
+        race_results(meet_name, course_name, course_type, official_distance_meters,
+          finish_place_overall, finish_place_team, team_score_total, opponents, conditions_notes)
+      `).eq('id', id).maybeSingle();
+      if (error) return null;
+      return data;
+    }
+
+    function enterEditMode(run) {
+      editAthleteId = run.athlete_id;
+
+      document.querySelector('.page-title').textContent = 'Edit run';
+      document.querySelector('.page-sub').textContent = 'Update what you tracked, then save.';
+      document.getElementById('save-btn').textContent = SAVE_LABEL;
+      const resetBtn = document.getElementById('reset-btn');
+      if (resetBtn) resetBtn.style.display = 'none'; // "Clear" makes no sense mid-edit
+
+      // Date / time-of-day
+      setVal('run-date', run.run_date);
+      if (run.time_of_day) setTodSelection(run.time_of_day);
+
+      // Location: drive the hidden #route input the save logic reads; reflect it
+      // in the dropdown when it's a known option, else reveal the free-text box.
+      setVal('route', run.route);
+      if (run.route) {
+        const match = Array.from(locSelect.options).find(o => o.value === run.route);
+        if (match) {
+          locSelect.value = run.route;
+        } else {
+          locSelect.value = '__add__';
+          document.getElementById('loc-add-wrap').classList.remove('hidden');
+        }
+      }
+
+      // Run type
+      selectedType = run.run_type;
+      document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('selected', b.dataset.type === run.run_type));
+      applyTypeChange();
+
+      // Effort + optional detail + notes
+      setVal('rpe', run.effort_rpe);
+      setVal('cadence', run.avg_cadence);
+      setVal('avg-hr', run.avg_hr);
+      setVal('max-hr', run.max_hr);
+      setVal('notes', run.notes);
+      if (run.run_type === 'cross_train') setVal('xtrain-activity', run.cross_train_activity);
+
+      // Distance / duration / segments. The simple fields are always filled
+      // (cross-train and simple modes read them); segments decide the mode.
+      const segs = (run.run_segments || []).slice().sort((a, b) => (a.segment_order || 0) - (b.segment_order || 0));
+      const distMi = run.distance_miles != null ? Number(run.distance_miles) : null;
+      const durSec = run.duration_seconds != null ? Number(run.duration_seconds) : null;
+      setVal('simple-distance-unit', 'mi');
+      setVal('simple-distance', distMi != null ? distMi : '');
+      setVal('simple-time', durSec != null ? formatDuration(durSec) : '');
+
+      // Match the entry shape: a simple run is 0 segments, 1 segment, or a set
+      // of ~1-mile splits, all of the run-type's segment kind. Anything else
+      // (mixed efforts) opens in detailed mode, which round-trips losslessly.
+      const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo' };
+      const expected = segTypeMap[run.run_type];
+      const allExpected = segs.length > 0 && expected && segs.every(s => s.segment_type === expected);
+      const looksLikeSplits = allExpected && segs.length > 1 && segs.every((s, i) => {
+        const d = s.distance_miles != null ? Number(s.distance_miles) : 0;
+        return i === segs.length - 1 ? (d > 0 && d <= 1.05) : Math.abs(d - 1) < 0.06;
+      });
+
+      if (run.run_type === 'cross_train' || segs.length === 0 || (allExpected && segs.length === 1)) {
+        setMode('simple');
+        renderSplitRows();
+      } else if (looksLikeSplits) {
+        setMode('simple');
+        renderSplitRows();
+        const inputs = Array.from(document.querySelectorAll('#splits-rows input[data-split]'));
+        segs.forEach((s, i) => {
+          if (inputs[i] && s.duration_seconds != null) inputs[i].value = formatDuration(s.duration_seconds);
+        });
+      } else {
+        segments = segs.map(s => ({
+          type: s.segment_type,
+          distance: s.distance_miles != null ? String(Number(s.distance_miles)) : '',
+          time: s.duration_seconds != null ? formatDuration(s.duration_seconds) : '',
+          unit: 'mi',
+        }));
+        setMode('detailed');
+        renderSegments();
+        updateSegmentTotals();
+      }
+      updateSimplePace();
+
+      // Race details
+      const race = run.race_results && run.race_results[0];
+      if (race) {
+        setVal('race-meet', race.meet_name);
+        setVal('race-course-type', race.course_type);
+        setVal('race-distance-m', race.official_distance_meters);
+        setVal('race-course-name', race.course_name);
+        setVal('race-place-overall', race.finish_place_overall);
+        setVal('race-place-team', race.finish_place_team);
+        setVal('race-team-score', race.team_score_total);
+        setVal('race-opponents', race.opponents);
+        setVal('race-conditions', race.conditions_notes);
+      }
+
+      window.scrollTo({ top: 0 });
+    }
+
     // ---- boot ----
     (async () => {
+      if (editId) {
+        // Edit mode: athletes may edit their own runs, coaches may edit any.
+        const profile = await requireSession();
+        if (!profile) return;
+        const run = await loadRunForEdit(editId);
+        // RLS also blocks a kid from loading someone else's run (returns null).
+        if (!run) { showErr('Could not load that run to edit — it may have been deleted, or it isn’t yours to edit.'); return; }
+        if (profile.kind !== 'coach' && String(profile.row.id) !== String(run.athlete_id)) {
+          document.getElementById('run-form').style.display = 'none';
+          showErr('You can only edit your own runs.');
+          return;
+        }
+        document.getElementById('user-name').textContent = displayName(profile);
+        await loadRouteSuggestions(); // so a saved location matches a dropdown option
+        enterEditMode(run);
+        return;
+      }
+
+      // Create mode (normal "log a run").
       const auth = await requireAthlete();
-      if (!auth) return;
-
-      const name = auth.athlete
-        ? auth.athlete.first_name + ' ' + auth.athlete.last_name.charAt(0) + '.'
-        : 'Coach';
-      document.getElementById('user-name').textContent = name;
-
+      if (!auth) return; // requireAthlete redirects non-athletes
+      document.getElementById('user-name').textContent = displayName(auth);
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
       loadRouteSuggestions();
     })();

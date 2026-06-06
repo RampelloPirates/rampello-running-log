@@ -280,6 +280,30 @@
       font-style: italic;
     }
 
+    .run-actions { margin-top: 0.85rem; text-align: right; display: flex; gap: 0.5rem; justify-content: flex-end; }
+    .edit-run-btn {
+      background: var(--paper); color: var(--slate);
+      border: 1px solid var(--silver);
+      padding: 0.45rem 0.85rem;
+      font-size: 0.8rem; font-weight: 700;
+      border-radius: 3px; cursor: pointer;
+      font-family: var(--font-body);
+      letter-spacing: 0.5px;
+      text-decoration: none; display: inline-block;
+    }
+    .edit-run-btn:hover { background: var(--bone); border-color: var(--slate-2); color: var(--black); }
+    .del-run-btn {
+      background: var(--paper); color: var(--red);
+      border: 1px solid var(--red);
+      padding: 0.45rem 0.85rem;
+      font-size: 0.8rem; font-weight: 700;
+      border-radius: 3px; cursor: pointer;
+      font-family: var(--font-body);
+      letter-spacing: 0.5px;
+    }
+    .del-run-btn:hover { background: var(--red); color: var(--paper); }
+    .del-run-btn:disabled { opacity: 0.6; cursor: default; }
+
     .empty { padding: 2.5rem 1.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
     .loading { padding: 2.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
 
@@ -302,7 +326,7 @@
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="log_run.html" role="menuitem">Log a run</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
   </div>
@@ -353,11 +377,8 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
   <script>
-    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
     // ---- menu ----
     const menuBtn = document.getElementById('menu-btn');
     const menu = document.getElementById('menu');
@@ -365,34 +386,10 @@
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
     });
-    const IDENTITY_KEY = 'pirates_identity';
-    function readIdentity() {
-      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
-    }
     document.getElementById('signout-btn').addEventListener('click', () => {
-      if (!confirm("Switch user? You'll go back to the picker.")) return;
-      localStorage.removeItem(IDENTITY_KEY);
-      window.location.href = 'index.html';
+      if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+      signOut();
     });
-
-    // ---- identity (open-demo mode) ----
-    async function requireAthlete() {
-      const id = readIdentity();
-      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
-      if (id.kind === 'coach') { window.location.href = 'team_dashboard.html'; return null; }
-      const { data: athlete } = await sb
-        .from('athletes')
-        .select('id, first_name, last_name')
-        .eq('id', id.id)
-        .eq('active', true)
-        .maybeSingle();
-      if (!athlete) {
-        localStorage.removeItem(IDENTITY_KEY);
-        window.location.href = 'index.html';
-        return null;
-      }
-      return athlete;
-    }
 
     // ---- helpers ----
     function pad(n) { return String(n).padStart(2, '0'); }
@@ -613,6 +610,35 @@
           if (detail) detail.classList.toggle('show');
         });
       });
+
+      // delete (stopPropagation so it doesn't toggle the row it lives in)
+      wrap.querySelectorAll('.del-run-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteRun(btn.dataset.delId, btn);
+        });
+      });
+    }
+
+    async function deleteRun(runId, btn) {
+      if (!confirm('Delete this run? This can’t be undone.')) return;
+      btn.disabled = true;
+      btn.textContent = 'Deleting…';
+      // Scope to this athlete as a safety net even though RLS is open. Segments
+      // and race_results cascade-delete with the run.
+      const { error } = await sb.from('runs')
+        .delete()
+        .eq('id', runId)
+        .eq('athlete_id', athlete.id);
+      if (error) {
+        btn.disabled = false;
+        btn.textContent = 'Delete run';
+        alert('Could not delete the run: ' + error.message);
+        return;
+      }
+      // Drop it from the cache and re-render stats/paces/list from what's left.
+      allRunsInRange = allRunsInRange.filter(r => r.id !== runId);
+      rerenderWithFilter();
     }
 
     function segMap(runType) {
@@ -668,6 +694,11 @@
       if (run.notes) {
         body += `<div class="run-notes">${escapeHtml(run.notes)}</div>`;
       }
+
+      body += `<div class="run-actions">
+        <a class="edit-run-btn" href="log_run.html?edit=${run.id}">Edit run</a>
+        <button class="del-run-btn" data-del-id="${run.id}">Delete run</button>
+      </div>`;
       return body;
     }
 
@@ -690,9 +721,10 @@
 
     // ---- boot ----
     (async () => {
-      athlete = await requireAthlete();
-      if (!athlete) return;
-      document.getElementById('user-name').textContent = athlete.first_name + ' ' + athlete.last_name.charAt(0) + '.';
+      const profile = await requireAthlete();
+      if (!profile) return;
+      athlete = profile.row;
+      document.getElementById('user-name').textContent = displayName(profile);
       loadAll();
     })();
   </script>

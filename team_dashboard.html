@@ -507,7 +507,7 @@
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="roster.html" role="menuitem">Roster</a>
         <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
-        <button class="menu-item danger" id="signout-btn" role="menuitem">Switch user</button>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
   </div>
@@ -593,24 +593,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
   <script>
-    const SUPABASE_URL = 'https://dprmpgjgjppvdlyxlubr.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwcm1wZ2pnanBwdmRseXhsdWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NTI5MTgsImV4cCI6MjA5NDUyODkxOH0.lyhPhWYE8EqSRAIzwn0yQ36d6Ue2TZjZodZlQqfnDfI';
-
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-    // ---- identity (open-demo mode) -----------------------------------------
-    const IDENTITY_KEY = 'pirates_identity';
-    function readIdentity() {
-      try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; }
-    }
-    function requireCoach() {
-      const id = readIdentity();
-      if (!id || !id.kind || !id.id) { window.location.href = 'index.html'; return null; }
-      // Page is open to everyone in demo mode; just return the identity.
-      return { id: id.id, first_name: id.first_name, last_name: id.last_name, kind: id.kind };
-    }
-
     // menu toggle
     const menuBtn = document.getElementById('menu-btn');
     const menu = document.getElementById('menu');
@@ -623,9 +607,8 @@
     });
 
     document.getElementById('signout-btn').addEventListener('click', () => {
-      if (!confirm("Switch user? You'll go back to the picker.")) return;
-      localStorage.removeItem(IDENTITY_KEY);
-      window.location.href = 'index.html';
+      if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+      signOut();
     });
 
     // ---- helpers ------------------------------------------------------------
@@ -698,11 +681,10 @@
 
     // ---- load dashboard data -----------------------------------------------
     async function load() {
-      const coach = requireCoach();
+      const coach = await requireCoach();
       if (!coach) return;
 
-      const prefix = coach.kind === 'coach' ? 'Coach ' : '';
-      document.getElementById('user-name').textContent = prefix + coach.first_name + ' ' + coach.last_name.charAt(0) + '.';
+      document.getElementById('user-name').textContent = displayName(coach);
 
       const { start: weekStart, end: weekEnd } = weekRangeISO(selectedMonday);
       document.getElementById('week-label').textContent = formatWeekLabel(selectedMonday);
