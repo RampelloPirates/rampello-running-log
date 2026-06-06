@@ -367,8 +367,20 @@
       padding: 0.85rem 1.25rem;
       border-top: 1px solid var(--silver-2);
       display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 0.5rem;
       background: var(--bone);
     }
+    .modal-footer-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .modal-footer a.mf-edit {
+      color: var(--slate); background: var(--paper); border: 1px solid var(--silver);
+      padding: 0.5rem 0.9rem; border-radius: 3px; font-size: 0.85rem; font-weight: 700;
+    }
+    .modal-footer a.mf-edit:hover { background: var(--bone); border-color: var(--slate-2); text-decoration: none; }
+    .modal-footer button.mf-delete {
+      background: var(--paper); color: var(--red); border: 1px solid var(--red);
+    }
+    .modal-footer button.mf-delete:hover { background: var(--red); color: var(--paper); }
+    .modal-footer button.mf-delete:disabled { opacity: 0.6; cursor: default; }
     .modal-footer a {
       color: var(--red); text-decoration: none; font-weight: 700;
       font-size: 0.9rem;
@@ -588,7 +600,11 @@
       </div>
       <div class="modal-footer">
         <a id="run-modal-athlete" href="#">View athlete summary →</a>
-        <button id="run-modal-close-btn">Close</button>
+        <div class="modal-footer-actions">
+          <a id="run-modal-edit" class="mf-edit" href="#">Edit</a>
+          <button id="run-modal-delete" class="mf-delete">Delete</button>
+          <button id="run-modal-close-btn">Close</button>
+        </div>
       </div>
     </div>
   </div>
@@ -840,14 +856,31 @@
 
     // ---- Run details modal -------------------------------------------------
     const runModal = document.getElementById('run-modal');
+    let modalRunId = null; // the run currently shown in the modal
     document.getElementById('run-modal-close').addEventListener('click', closeRunModal);
     document.getElementById('run-modal-close-btn').addEventListener('click', closeRunModal);
     runModal.addEventListener('click', (e) => { if (e.target === runModal) closeRunModal(); });
 
     function closeRunModal() { runModal.classList.remove('show'); }
 
+    // Coach delete straight from the run pop-up. "coach manages runs" RLS allows
+    // deleting any run; segments + race_results cascade.
+    document.getElementById('run-modal-delete').addEventListener('click', async () => {
+      if (!modalRunId) return;
+      if (!confirm('Delete this run? This can’t be undone.')) return;
+      const btn = document.getElementById('run-modal-delete');
+      btn.disabled = true; btn.textContent = 'Deleting…';
+      const { error } = await sb.from('runs').delete().eq('id', modalRunId);
+      btn.disabled = false; btn.textContent = 'Delete';
+      if (error) { alert('Could not delete the run: ' + error.message); return; }
+      closeRunModal();
+      load(); // refresh dashboard stats + recent runs
+    });
+
     async function openRunModal(runId, athleteId) {
+      modalRunId = runId;
       document.getElementById('run-modal-athlete').href = 'athlete_detail.html?id=' + athleteId;
+      document.getElementById('run-modal-edit').href = 'log_run.html?edit=' + runId;
       document.getElementById('run-modal-body').innerHTML = '<div class="loading">Loading…</div>';
       runModal.classList.add('show');
 
