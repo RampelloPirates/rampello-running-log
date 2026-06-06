@@ -582,6 +582,22 @@
       margin-bottom: 0.25rem;
     }
     .celebration .btn-primary { width: 100%; }
+    .celebration-card { position: relative; }
+    .celebration-close {
+      position: absolute; top: 0.5rem; right: 0.65rem;
+      background: none; border: none; color: var(--slate-2);
+      font-size: 1.9rem; line-height: 1; cursor: pointer;
+      padding: 0; width: auto; margin: 0;
+    }
+    .celebration-close:hover { color: var(--black); background: none; }
+    .celebration-secondary {
+      display: block; width: 100%; margin-top: 0.6rem; box-sizing: border-box;
+      text-align: center; text-decoration: none;
+      padding: 0.85rem; border-radius: 4px;
+      border: 1px solid var(--silver); color: var(--slate);
+      font-weight: 700; letter-spacing: 1px; text-transform: uppercase; font-size: 0.85rem;
+    }
+    .celebration-secondary:hover { background: var(--bone); border-color: var(--slate-2); color: var(--black); }
 
     .form-error {
       color: #b71c1c;
@@ -827,12 +843,14 @@
   <!-- Celebration overlay -->
   <div class="celebration" id="celebration">
     <div class="celebration-card">
+      <button type="button" class="celebration-close" id="celebration-close" aria-label="Close">×</button>
       <div class="check">✓</div>
       <h2>Run logged!</h2>
       <p class="recap" id="celebration-recap"></p>
       <div class="facts" id="celebration-facts"></div>
       <div class="paces-mini" id="celebration-paces" style="display:none"></div>
       <button type="button" class="btn-primary" id="log-another-btn">Log another run</button>
+      <a href="my_runs.html" class="celebration-secondary" id="view-runs-link">View my runs</a>
     </div>
   </div>
 
@@ -1198,6 +1216,16 @@
         const splitInputs = Array.from(document.querySelectorAll('#splits-rows input[data-split]'));
         const filledSplits = splitInputs.filter(inp => inp.value.trim());
         if (segType && filledSplits.length > 0) {
+          // Mile splits must roughly add up to the total time (within ~5%).
+          if (!duration) {
+            showErr('Enter the total time too — your mile splits should add up to it.');
+            return;
+          }
+          const splitsSum = filledSplits.reduce((s, inp) => s + (parseDuration(inp.value) || 0), 0);
+          if (Math.abs(splitsSum - duration) > 0.05 * duration) {
+            showErr(`Your mile splits add up to ${formatDuration(splitsSum)}, but the total time is ${formatDuration(duration)} — they should be within 5%. Fix the splits or the total, or clear the splits (they're optional).`);
+            return;
+          }
           let order = 1;
           for (const inp of splitInputs) {
             const t = parseDuration(inp.value);
@@ -1696,10 +1724,16 @@
       `).join('');
     }
 
-    document.getElementById('log-another-btn').addEventListener('click', () => {
+    function closeCelebration() {
       document.getElementById('celebration').classList.remove('show');
       resetForm();
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    document.getElementById('log-another-btn').addEventListener('click', closeCelebration);
+    document.getElementById('celebration-close').addEventListener('click', closeCelebration);
+    // Click the dark backdrop (outside the card) to dismiss.
+    document.getElementById('celebration').addEventListener('click', (e) => {
+      if (e.target.id === 'celebration') closeCelebration();
     });
 
     // ---- route autocomplete ----
