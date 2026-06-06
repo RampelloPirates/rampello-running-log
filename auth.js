@@ -83,11 +83,18 @@ async function signOut() {
   window.location.href = 'index.html';
 }
 
-// Convenience: a short display name like "Jeff S." or "Coach Sowell".
+// Runner display convention: "Porter Smith" -> "Porter S." Used everywhere a
+// runner is shown to people (leaderboard, dashboards, run lists). Coach-only
+// management screens (roster editor, bulk-log picker) keep full names.
+function shortName(first, last) {
+  const f = (first || '').trim();
+  const l = (last || '').trim();
+  return f + (l ? ' ' + l.charAt(0) + '.' : '');
+}
+
+// Convenience for the signed-in user: "Jeff S." or "Coach Sowell".
 function displayName(profile) {
   if (!profile || !profile.row) return '';
-  const f = profile.row.first_name || '';
-  const l = profile.row.last_name || '';
-  const short = f + (l ? ' ' + l.charAt(0) + '.' : '');
+  const short = shortName(profile.row.first_name, profile.row.last_name);
   return profile.kind === 'coach' ? 'Coach ' + short : short;
 }

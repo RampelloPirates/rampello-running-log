@@ -791,7 +791,7 @@
             ${recent.map(r => `
               <tr data-run-id="${r.id}" data-athlete-id="${r.athlete_id}">
                 <td>${formatDate(r.run_date)}</td>
-                <td>${r.athletes ? r.athletes.first_name + ' ' + r.athletes.last_name : '—'}</td>
+                <td>${r.athletes ? shortName(r.athletes.first_name, r.athletes.last_name) : '—'}</td>
                 <td><span class="type-pill type-${r.run_type}">${r.run_type.replace('_', ' ')}</span></td>
                 <td>${r.distance_miles ? Number(r.distance_miles).toFixed(2) : '—'}</td>
                 <td>${formatDuration(r.duration_seconds)}</td>
@@ -838,7 +838,7 @@
               const zeroCls = runCount === 0 ? 'ath-zero' : '';
               return `
                 <tr data-athlete-id="${a.id}">
-                  <td class="${zeroCls}">${a.last_name}, ${a.first_name}</td>
+                  <td class="${zeroCls}">${shortName(a.first_name, a.last_name)}</td>
                   <td class="num ${zeroCls}">${runCount}</td>
                   <td class="num ${zeroCls}">${miles ? miles.toFixed(1) : '—'}</td>
                 </tr>
@@ -900,7 +900,7 @@
     }
 
     function renderRunModal(run, segs, race) {
-      const athleteName = run.athletes ? run.athletes.first_name + ' ' + run.athletes.last_name : 'Athlete';
+      const athleteName = run.athletes ? shortName(run.athletes.first_name, run.athletes.last_name) : 'Athlete';
       const d = new Date(run.run_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
       const todLabel = run.time_of_day ? ' · ' + run.time_of_day.charAt(0).toUpperCase() + run.time_of_day.slice(1) : '';
       document.getElementById('run-modal-title').innerHTML =

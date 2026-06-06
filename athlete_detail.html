@@ -532,7 +532,7 @@
         return null;
       }
       athlete = data;
-      document.getElementById('athlete-name').textContent = data.first_name + ' ' + data.last_name;
+      document.getElementById('athlete-name').textContent = shortName(data.first_name, data.last_name);
       const metaBits = [];
       if (data.grade) metaBits.push('Grade ' + data.grade);
       if (data.email) metaBits.push(escapeHtml(data.email));

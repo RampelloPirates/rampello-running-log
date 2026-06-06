@@ -550,7 +550,7 @@
           miles: Number(r.total_miles) || 0,
           time:  Number(r.total_seconds) || 0,
           days:  Number(r.days_logged) || 0,
-          name:  `${r.first_name} ${r.last_name}`,
+          name:  shortName(r.first_name, r.last_name),
           grade: r.grade,
         };
       }
