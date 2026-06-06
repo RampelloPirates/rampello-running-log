@@ -308,6 +308,14 @@
     .empty { padding: 2.5rem 1.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
     .loading { padding: 2.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
 
+    .grade-row { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 1.25rem 0; }
+    .grade-row label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--slate-2); font-weight: 700; }
+    .grade-row select {
+      padding: 0.4rem 0.6rem; border: 1px solid var(--silver-2); border-radius: 4px;
+      font-family: var(--font-body); font-size: 0.9rem; background: var(--paper); color: var(--black);
+    }
+    .grade-status { font-size: 0.8rem; font-weight: 700; }
+
     @media (max-width: 600px) {
       .run-row { grid-template-columns: 80px 1fr; }
       .run-row .pace { grid-column: 1 / -1; text-align: left; }
@@ -335,6 +343,20 @@
   <main>
     <h1 class="page-title">My runs</h1>
     <p class="page-sub">Your log, paces, and trends.</p>
+
+    <div class="grade-row">
+      <label for="grade-select">Grade</label>
+      <select id="grade-select" aria-label="Your grade">
+        <option value="">—</option>
+        <option value="3">3rd</option>
+        <option value="4">4th</option>
+        <option value="5">5th</option>
+        <option value="6">6th</option>
+        <option value="7">7th</option>
+        <option value="8">8th</option>
+      </select>
+      <span id="grade-status" class="grade-status"></span>
+    </div>
 
     <a href="log_run.html" class="log-cta">+ Log a new run</a>
 
@@ -720,12 +742,32 @@
       });
     });
 
+    // ---- grade self-edit ----
+    // Kids set their own grade (it rolls over each year). RLS "athlete updates
+    // self" allows updating one's own athletes row. Grade drives the
+    // leaderboard's middle/elementary split, so keeping it current matters.
+    const gradeSelect = document.getElementById('grade-select');
+    gradeSelect.addEventListener('change', async () => {
+      const status = document.getElementById('grade-status');
+      const val = gradeSelect.value ? parseInt(gradeSelect.value, 10) : null;
+      status.textContent = 'Saving…'; status.style.color = 'var(--slate-2)';
+      const { error } = await sb.from('athletes').update({ grade: val }).eq('id', athlete.id);
+      if (error) {
+        status.textContent = "Couldn't save"; status.style.color = 'var(--red)';
+        return;
+      }
+      athlete.grade = val;
+      status.textContent = 'Saved ✓'; status.style.color = 'var(--green)';
+      setTimeout(() => { status.textContent = ''; }, 2000);
+    });
+
     // ---- boot ----
     (async () => {
       const profile = await requireAthlete();
       if (!profile) return;
       athlete = profile.row;
       document.getElementById('user-name').textContent = displayName(profile);
+      gradeSelect.value = athlete.grade != null ? String(athlete.grade) : '';
       loadAll();
     })();
   </script>
