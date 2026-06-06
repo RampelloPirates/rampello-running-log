@@ -599,6 +599,18 @@
     }
     .celebration-secondary:hover { background: var(--bone); border-color: var(--slate-2); color: var(--black); }
 
+    .pace-target-hint {
+      margin-top: 0.85rem; padding: 0.6rem 0.85rem;
+      background: #fff8e1; border-left: 3px solid var(--amber, #b45309);
+      border-radius: 0 4px 4px 0; font-size: 0.9rem; color: var(--black);
+    }
+    .pace-target-hint strong { color: var(--amber, #b45309); }
+    .seg-pace-target {
+      grid-column: 1 / -1; font-size: 0.78rem; color: var(--amber, #b45309);
+      margin-top: -0.3rem;
+    }
+    .seg-pace-target:empty { display: none; }
+
     .form-error {
       color: #b71c1c;
       font-size: 0.85rem;
@@ -677,6 +689,7 @@
           <button type="button" class="type-btn" data-type="race">Race</button>
           <button type="button" class="type-btn" data-type="cross_train">Cross-train</button>
         </div>
+        <div id="pace-target-hint" class="pace-target-hint hidden"></div>
       </div>
 
       <!-- Cross-train activity (cross_train only) -->
@@ -963,6 +976,39 @@
       document.getElementById('xtrain-section').classList.toggle('hidden', selectedType !== 'cross_train');
       document.getElementById('race-section').classList.toggle('hidden', selectedType !== 'race');
       document.getElementById('mode-section').classList.toggle('hidden', selectedType === 'cross_train');
+      updateRunTypeTarget();
+    }
+
+    // ---- coach target paces (read-only here; set on the dashboard) ----
+    let paceTargets = { easy: null, tempo: null, race: null };
+    const RUN_TYPE_CATEGORY = { easy: 'easy', long: 'easy', tempo: 'tempo', race: 'race' };
+    const SEG_TYPE_CATEGORY = { warmup: 'easy', easy: 'easy', cooldown: 'easy', rest: 'easy', tempo: 'tempo', threshold: 'tempo' };
+
+    async function loadPaceTargets() {
+      const { data } = await sb.from('pace_targets').select('category, target_seconds');
+      (data || []).forEach(r => { paceTargets[r.category] = r.target_seconds; });
+      updateRunTypeTarget();
+      renderSegments(); // refresh any segment hints once targets arrive
+    }
+    function targetPaceFor(category) {
+      const s = category && paceTargets[category];
+      return s ? formatPace(s) : null;
+    }
+    function segTargetText(type) {
+      const cat = SEG_TYPE_CATEGORY[type];
+      const pace = targetPaceFor(cat);
+      return pace ? `🎯 Target ${cat} pace: ${pace}` : '';
+    }
+    function updateRunTypeTarget() {
+      const hint = document.getElementById('pace-target-hint');
+      const cat = RUN_TYPE_CATEGORY[selectedType];
+      const pace = targetPaceFor(cat);
+      if (pace) {
+        hint.innerHTML = `🎯 Coach's target ${cat} pace: <strong>${pace}</strong>`;
+        hint.classList.remove('hidden');
+      } else {
+        hint.classList.add('hidden');
+      }
     }
 
     // ---- mode toggle ----
@@ -1083,6 +1129,7 @@
             <input type="text" data-i="${i}" data-field="time" value="${seg.time ?? ''}" placeholder="MM:SS">
           </div>
           <button type="button" class="remove-seg" data-i="${i}" aria-label="Remove">×</button>
+          <div class="seg-pace-target">${segTargetText(seg.type)}</div>
         `;
         wrap.appendChild(row);
       });
@@ -1093,6 +1140,10 @@
           const f = e.target.dataset.field;
           segments[i][f] = e.target.value;
           if (f === 'unit') lastUnit = e.target.value;
+          if (f === 'type') {
+            const tEl = e.target.closest('.segment-row').querySelector('.seg-pace-target');
+            if (tEl) tEl.innerHTML = segTargetText(e.target.value);
+          }
           updateSegmentTotals();
         };
         el.addEventListener('input', handler);
@@ -1925,6 +1976,7 @@
         document.getElementById('user-name').textContent = displayName(profile);
         await loadRouteSuggestions(); // so a saved location matches a dropdown option
         enterEditMode(run);
+        loadPaceTargets();
         return;
       }
 
@@ -1934,6 +1986,7 @@
       document.getElementById('user-name').textContent = displayName(auth);
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
       loadRouteSuggestions();
+      loadPaceTargets();
     })();
   </script>
 </body>
