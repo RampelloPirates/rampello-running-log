@@ -1234,14 +1234,21 @@
         const splitInputs = Array.from(document.querySelectorAll('#splits-rows input[data-split]'));
         const filledSplits = splitInputs.filter(inp => inp.value.trim());
         if (segType && filledSplits.length > 0) {
-          // Mile splits must roughly add up to the total time (within ~5%).
+          // Splits tile the whole run, so if you log them, log EVERY row —
+          // including the final partial mile — otherwise that segment's time is
+          // missing and the total won't reconcile.
+          if (filledSplits.length < splitInputs.length) {
+            showErr('Fill in every mile split, including the last partial mile — or clear them all (splits are optional).');
+            return;
+          }
           if (!duration) {
             showErr('Enter the total time too — your mile splits should add up to it.');
             return;
           }
+          // All splits filled: their times should total the run time (within ~5%).
           const splitsSum = filledSplits.reduce((s, inp) => s + (parseDuration(inp.value) || 0), 0);
           if (Math.abs(splitsSum - duration) > 0.05 * duration) {
-            showErr(`Your mile splits add up to ${formatDuration(splitsSum)}, but the total time is ${formatDuration(duration)} — they should be within 5%. Fix the splits or the total, or clear the splits (they're optional).`);
+            showErr(`Your mile splits add up to ${formatDuration(splitsSum)}, but the total time is ${formatDuration(duration)} — they should be within 5%. Check the splits or the total time.`);
             return;
           }
           let order = 1;
