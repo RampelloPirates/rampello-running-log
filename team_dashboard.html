@@ -381,33 +381,6 @@
     }
     .modal-footer button.mf-delete:hover { background: var(--red); color: var(--paper); }
     .modal-footer button.mf-delete:disabled { opacity: 0.6; cursor: default; }
-
-    .pace-card {
-      background: var(--paper); border: 1px solid var(--silver-2);
-      border-left: 4px solid var(--red); border-radius: 4px;
-      padding: 1rem 1.25rem; margin-bottom: 1.5rem;
-      display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem;
-    }
-    .pace-field { display: flex; flex-direction: column; gap: 0.3rem; }
-    .pace-field label {
-      font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;
-      color: var(--slate-2); font-weight: 700;
-    }
-    .pace-input { display: flex; align-items: center; gap: 0.35rem; }
-    .pace-input input {
-      width: 80px; padding: 0.45rem 0.55rem; font-size: 0.95rem;
-      border: 1px solid var(--silver-2); border-radius: 4px; font-family: var(--font-body);
-      text-align: center; font-variant-numeric: tabular-nums;
-    }
-    .pace-input span { font-size: 0.8rem; color: var(--slate-2); }
-    .pace-actions { display: flex; align-items: center; gap: 0.6rem; }
-    .pace-actions button {
-      background: var(--black); color: var(--paper); border: none;
-      padding: 0.55rem 1.1rem; border-radius: 3px; font-size: 0.85rem;
-      font-weight: 700; cursor: pointer; font-family: var(--font-body);
-    }
-    .pace-actions button:hover { background: var(--red); }
-    .pace-status { font-size: 0.8rem; font-weight: 700; }
     .modal-footer a {
       color: var(--red); text-decoration: none; font-weight: 700;
       font-size: 0.9rem;
@@ -602,27 +575,6 @@
         <div class="nav-title">Leaderboard 🏃‍♂️</div>
         <div class="nav-desc">Top miles + time by week or month. Safety flags surface athletes ramping too fast.</div>
       </a>
-    </div>
-
-    <h2>Target paces</h2>
-    <p class="page-sub" style="margin-top:-0.4rem;">Your pace sheet — shown to runners when they log a matching run. One set for the whole team.</p>
-    <div class="pace-card">
-      <div class="pace-field">
-        <label for="pace-easy">Easy / Long</label>
-        <div class="pace-input"><input type="text" id="pace-easy" inputmode="numeric" placeholder="m:ss"><span>/mi</span></div>
-      </div>
-      <div class="pace-field">
-        <label for="pace-tempo">Tempo</label>
-        <div class="pace-input"><input type="text" id="pace-tempo" inputmode="numeric" placeholder="m:ss"><span>/mi</span></div>
-      </div>
-      <div class="pace-field">
-        <label for="pace-race">Race</label>
-        <div class="pace-input"><input type="text" id="pace-race" inputmode="numeric" placeholder="m:ss"><span>/mi</span></div>
-      </div>
-      <div class="pace-actions">
-        <button type="button" id="pace-save-btn">Save paces</button>
-        <span id="pace-save-status" class="pace-status"></span>
-      </div>
     </div>
 
     <h2>Recent runs</h2>
@@ -1052,50 +1004,7 @@
       return `${m}:${String(s).padStart(2,'0')}`;
     }
 
-    // ---- target paces (coach-set, shown to runners on the log screen) ----
-    function paceToSeconds(t) {
-      t = (t || '').trim();
-      if (!t) return null;
-      const p = t.split(':').map(n => parseInt(n, 10));
-      if (p.some(isNaN)) return null;
-      const sec = p.length === 2 ? p[0] * 60 + p[1] : p[0];
-      return (sec >= 120 && sec <= 1800) ? sec : null;
-    }
-    function secondsToPace(sec) {
-      return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
-    }
-    async function loadPaceTargets() {
-      const { data } = await sb.from('pace_targets').select('category, target_seconds');
-      const map = {};
-      (data || []).forEach(r => { map[r.category] = r.target_seconds; });
-      const set = (id, sec) => { document.getElementById(id).value = sec ? secondsToPace(sec) : ''; };
-      set('pace-easy', map.easy);
-      set('pace-tempo', map.tempo);
-      set('pace-race', map.race);
-    }
-    document.getElementById('pace-save-btn').addEventListener('click', async () => {
-      const status = document.getElementById('pace-save-status');
-      const fields = [['easy', 'pace-easy'], ['tempo', 'pace-tempo'], ['race', 'pace-race']];
-      const rows = [];
-      for (const [cat, id] of fields) {
-        const raw = document.getElementById(id).value.trim();
-        const sec = raw ? paceToSeconds(raw) : null;
-        if (raw && sec === null) {
-          status.textContent = `“${raw}” isn’t a valid pace — use m:ss (e.g. 9:00)`;
-          status.style.color = 'var(--red)';
-          return;
-        }
-        rows.push({ category: cat, target_seconds: sec });
-      }
-      status.textContent = 'Saving…'; status.style.color = 'var(--slate-2)';
-      const { error } = await sb.from('pace_targets').upsert(rows, { onConflict: 'category' });
-      if (error) { status.textContent = 'Could not save: ' + error.message; status.style.color = 'var(--red)'; return; }
-      status.textContent = 'Saved ✓'; status.style.color = 'var(--green)';
-      setTimeout(() => { status.textContent = ''; }, 2000);
-    });
-
     load();
-    loadPaceTargets();
   </script>
 </body>
 </html>

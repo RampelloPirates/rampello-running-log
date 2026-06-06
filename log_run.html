@@ -984,8 +984,11 @@
     const RUN_TYPE_CATEGORY = { easy: 'easy', long: 'easy', tempo: 'tempo', race: 'race' };
     const SEG_TYPE_CATEGORY = { warmup: 'easy', easy: 'easy', cooldown: 'easy', rest: 'easy', tempo: 'tempo', threshold: 'tempo' };
 
-    async function loadPaceTargets() {
-      const { data } = await sb.from('pace_targets').select('category, target_seconds');
+    async function loadPaceTargets(athleteId) {
+      if (!athleteId) return;
+      const { data } = await sb.from('pace_targets')
+        .select('category, target_seconds')
+        .eq('athlete_id', athleteId);
       (data || []).forEach(r => { paceTargets[r.category] = r.target_seconds; });
       updateRunTypeTarget();
       renderSegments(); // refresh any segment hints once targets arrive
@@ -1976,7 +1979,7 @@
         document.getElementById('user-name').textContent = displayName(profile);
         await loadRouteSuggestions(); // so a saved location matches a dropdown option
         enterEditMode(run);
-        loadPaceTargets();
+        loadPaceTargets(editAthleteId);
         return;
       }
 
@@ -1986,7 +1989,7 @@
       document.getElementById('user-name').textContent = displayName(auth);
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
       loadRouteSuggestions();
-      loadPaceTargets();
+      loadPaceTargets(auth.row.id);
     })();
   </script>
 </body>
