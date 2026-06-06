@@ -363,7 +363,7 @@
 
     <div class="coach-note" id="coach-note" style="display:none;">
       <strong>Coach view:</strong> the percentage next to each name is the change vs the same number of days in the prior period.
-      <span style="color:var(--warn);">⚠ yellow</span> = +20–40% jump · <span style="color:var(--danger);">🚨 red</span> = more than +40%.
+      <span style="color:var(--warn);">⚠ yellow</span> = +15–25% jump · <span style="color:var(--danger);">🚨 red</span> = more than +25%.
       Suppressed when prior baseline is under 5 miles.
     </div>
   </main>
@@ -571,8 +571,8 @@
       const pct = (r.changePct * 100).toFixed(0);
       const sign = r.changePct >= 0 ? '+' : '';
       let cls = '';
-      if (r.changePct > 0.40) cls = 'danger';
-      else if (r.changePct > 0.20) cls = 'warn';
+      if (r.changePct > 0.25) cls = 'danger';
+      else if (r.changePct >= 0.15) cls = 'warn';
       const icon = cls === 'danger' ? ' 🚨' : cls === 'warn' ? ' ⚠' : '';
       return `<span class="lb-change ${cls}">${sign}${pct}%${icon}</span>`;
     }
@@ -586,8 +586,8 @@
       const sign = r.changePct >= 0 ? '+' : '';
       let color = 'var(--slate-2)';
       let icon = '';
-      if (r.changePct > 0.40) { color = 'var(--danger)'; icon = ' 🚨'; }
-      else if (r.changePct > 0.20) { color = 'var(--warn)'; icon = ' ⚠'; }
+      if (r.changePct > 0.25) { color = 'var(--danger)'; icon = ' 🚨'; }
+      else if (r.changePct >= 0.15) { color = 'var(--warn)'; icon = ' ⚠'; }
       return `<div style="margin-top:0.4rem;font-size:0.8rem;font-weight:700;color:${color};">${sign}${pct}%${icon}</div>`;
     }
 
