@@ -1182,6 +1182,23 @@
         return;
       }
 
+      // Only the active entry mode is saved. If the OTHER mode also has data,
+      // warn before silently dropping it.
+      if (selectedType !== 'cross_train') {
+        const splitFilled = Array.from(document.querySelectorAll('#splits-rows input[data-split]')).some(i => i.value.trim());
+        const simpleHasData = !!(document.getElementById('simple-distance').value.trim()
+          || document.getElementById('simple-time').value.trim() || splitFilled);
+        const segHasData = segments.some(s => String(s.distance || '').trim() || String(s.time || '').trim());
+        const otherHasData = (mode === 'simple') ? segHasData : simpleHasData;
+        if (otherHasData) {
+          const active = mode === 'simple' ? 'Simple' : 'By segment';
+          const other  = mode === 'simple' ? 'By segment' : 'Simple';
+          if (!confirm(`You've entered data in both tabs. Only your "${active}" entries will be saved — the "${other}" tab will be ignored. Save anyway?`)) {
+            return;
+          }
+        }
+      }
+
       // Whose run is this? In edit mode the athlete is fixed to whoever owns
       // the run; in create mode it's the signed-in athlete.
       let runAthleteId;
