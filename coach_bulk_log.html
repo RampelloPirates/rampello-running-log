@@ -135,20 +135,28 @@
     }
     .athlete-row {
       display: grid;
-      grid-template-columns: 36px 1fr 110px;
+      grid-template-columns: 36px 1fr 64px 84px;
       align-items: center;
       gap: 0.5rem;
       padding: 0.55rem 0.75rem;
       border-bottom: 1px solid var(--silver-2);
       font-size: 0.92rem;
     }
+    .athlete-rows-head {
+      display: grid;
+      grid-template-columns: 36px 1fr 64px 84px;
+      gap: 0.5rem;
+      padding: 0 0.75rem 0.4rem 0.75rem;
+      font-size: 0.62rem; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--slate-2); font-weight: 700;
+    }
     .athlete-row:last-child { border-bottom: none; }
     .athlete-row:hover { background: var(--bone); }
     .athlete-row.disabled { opacity: 0.55; }
     .athlete-row label { display: flex; align-items: center; cursor: pointer; margin: 0; text-transform: none; letter-spacing: 0; font-size: 0.92rem; font-weight: 400; color: var(--black); }
     .athlete-row input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; margin: 0; }
-    .athlete-row input[type="text"] {
-      padding: 0.35rem 0.5rem; font-size: 0.85rem;
+    .athlete-row input[type="text"], .athlete-row input[type="number"] {
+      padding: 0.35rem 0.5rem; font-size: 0.85rem; width: 100%;
     }
     .athlete-row .athlete-name { display: block; }
     .athlete-row .athlete-meta { display: block; font-size: 0.7rem; color: var(--slate-2); }
@@ -298,10 +306,16 @@
           <button type="button" id="select-all-btn">Select all</button>
           <button type="button" id="select-none-btn">None</button>
         </div>
+        <div class="athlete-rows-head">
+          <span></span>
+          <span>Runner</span>
+          <span>Miles</span>
+          <span>Time</span>
+        </div>
         <div class="athlete-rows" id="athlete-rows">
           <div style="padding:1.5rem;text-align:center;color:var(--slate-2);font-style:italic;">Loading roster…</div>
         </div>
-        <p class="helper" style="margin-top:0.6rem;">Leave a time blank to use the default above. Type a per-athlete time to override (helpful on workout days where times differ).</p>
+        <p class="helper" style="margin-top:0.6rem;">Leave a field blank to use the defaults above. Enter a per-athlete distance or time to override (handy on workout days where each runner differs).</p>
       </div>
 
       <!-- Notes -->
@@ -457,7 +471,8 @@
             <span class="athlete-name">${escapeHtml(a.last_name)}, ${escapeHtml(a.first_name)}</span>
             ${a.grade ? `<span class="athlete-meta">Grade ${a.grade}</span>` : ''}
           </label>
-          <input type="text" data-i-time placeholder="default" aria-label="Override time for ${escapeHtml(a.first_name)}">
+          <input type="number" data-i-dist step="0.01" min="0" inputmode="decimal" placeholder="mi" aria-label="Miles for ${escapeHtml(a.first_name)}">
+          <input type="text" data-i-time placeholder="time" aria-label="Time for ${escapeHtml(a.first_name)}">
         </div>
       `).join('');
       wrap.querySelectorAll('[data-i-check]').forEach(c => c.addEventListener('change', updateCount));
@@ -506,25 +521,25 @@
         showErr('For cross-train, fill in the activity (swimming, biking, etc.).');
         return;
       }
-      if (selectedType !== 'cross_train' && !defDistance && !defDuration) {
-        showErr('Enter at least a default distance or time. (You can still override per athlete.)');
-        return;
-      }
-
-      // gather selected athletes
+      // gather selected athletes, with per-athlete distance/time overrides
       const selected = [];
       document.querySelectorAll('.athlete-row').forEach(row => {
         const chk = row.querySelector('[data-i-check]');
         if (!chk.checked) return;
-        const id = row.dataset.id;
-        const override = row.querySelector('[data-i-time]').value;
-        const overrideSec = parseDuration(override);
+        const overrideSec = parseDuration(row.querySelector('[data-i-time]').value);
+        const dv = parseFloat(row.querySelector('[data-i-dist]').value);
+        const overrideDist = (!isNaN(dv) && dv > 0) ? dv : null;
         selected.push({
-          id,
+          id: row.dataset.id,
           duration: overrideSec || defDuration,
+          distance: overrideDist != null ? overrideDist : defDistance,
         });
       });
       if (selected.length === 0) { showErr('Select at least one athlete.'); return; }
+      if (selectedType !== 'cross_train' && selected.every(a => !a.distance && !a.duration)) {
+        showErr('Enter a distance or time — as a default above, or per athlete.');
+        return;
+      }
 
       const saveBtn = document.getElementById('save-btn');
       saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
@@ -548,7 +563,7 @@
           run_date: runDate,
           time_of_day: bulkTod,
           run_type: selectedType,
-          distance_miles: defDistance,
+          distance_miles: a.distance,
           duration_seconds: a.duration || null,
           effort_rpe: isNaN(defRpe) ? null : defRpe,
           cross_train_activity: selectedType === 'cross_train' ? xtrainActivity : null,
@@ -567,12 +582,12 @@
           failures.push(athleteName(a.id) + ': ' + runErr.message);
           continue;
         }
-        if (segType && (defDistance || a.duration)) {
+        if (segType && (a.distance || a.duration)) {
           const { error: segErr } = await sb.from('run_segments').insert({
             run_id: runRow.id,
             segment_order: 1,
             segment_type: segType,
-            distance_miles: defDistance,
+            distance_miles: a.distance,
             duration_seconds: a.duration || null,
           });
           if (segErr) {
