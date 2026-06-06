@@ -323,6 +323,7 @@
       <div class="menu" id="menu" role="menu">
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" id="menu-home" href="#" role="menuitem">Home</a>
+        <a class="menu-item" id="menu-myruns" href="my_runs.html" role="menuitem">My runs</a>
         <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
@@ -393,6 +394,8 @@
       document.getElementById('home-brand').href = homeHref;
       document.getElementById('menu-home').href = homeHref;
       document.getElementById('menu-home').textContent = isC ? 'Dashboard' : 'Log a run';
+      // "My runs" is athlete-only (coaches don't have a personal run log).
+      document.getElementById('menu-myruns').style.display = isC ? 'none' : '';
       document.getElementById('user-name').textContent = displayName(p);
       if (isC) document.getElementById('coach-note').style.display = '';
       return { isCoach: isC, me: p };
