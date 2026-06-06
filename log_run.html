@@ -1167,6 +1167,7 @@
       e.preventDefault();
       if (submitting) return; // a save is already in flight
       const errEl = document.getElementById('form-error');
+      const saveBtn = document.getElementById('save-btn'); // declared up top so showErr() can use it
       errEl.classList.remove('show');
       errEl.textContent = '';
 
@@ -1309,7 +1310,6 @@
         runPayload.created_by = user ? user.id : null;
       }
 
-      const saveBtn = document.getElementById('save-btn');
       submitting = true;
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving…';
