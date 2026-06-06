@@ -715,7 +715,7 @@
       let athletesQ = sb.from('athletes')
         .select('id, first_name, last_name, grade')
         .eq('active', true)
-        .order('last_name');
+        .order('first_name');
       if (grades) {
         athletesQ = athletesQ.gte('grade', grades[0]).lte('grade', grades[1]);
       }
@@ -812,16 +812,11 @@
         wrap.innerHTML = '<div class="empty">No active athletes yet.</div>';
         return;
       }
-      // Sort by runs desc, then by miles desc, then by name
-      const sorted = [...athletes].sort((a, b) => {
-        const ra = runsPerAthlete[a.id] || 0;
-        const rb = runsPerAthlete[b.id] || 0;
-        if (ra !== rb) return rb - ra;
-        const ma = milesPerAthlete[a.id] || 0;
-        const mb = milesPerAthlete[b.id] || 0;
-        if (ma !== mb) return mb - ma;
-        return a.last_name.localeCompare(b.last_name);
-      });
+      // Alphabetical by first name (last name as tiebreaker).
+      const sorted = [...athletes].sort((a, b) =>
+        (a.first_name || '').localeCompare(b.first_name || '') ||
+        (a.last_name || '').localeCompare(b.last_name || '')
+      );
       wrap.innerHTML = `
         <table>
           <thead>

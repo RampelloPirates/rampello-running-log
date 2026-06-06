@@ -457,7 +457,7 @@
         .from('athletes')
         .select('id, first_name, last_name, grade')
         .eq('active', true)
-        .order('last_name', { ascending: true });
+        .order('first_name', { ascending: true });
       const wrap = document.getElementById('athlete-rows');
       if (error || !data || data.length === 0) {
         wrap.innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--slate-2);font-style:italic;">No active athletes. Add some from the roster first.</div>';
