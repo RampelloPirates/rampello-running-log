@@ -812,11 +812,16 @@
         wrap.innerHTML = '<div class="empty">No active athletes yet.</div>';
         return;
       }
-      // Alphabetical by first name (last name as tiebreaker).
-      const sorted = [...athletes].sort((a, b) =>
-        (a.first_name || '').localeCompare(b.first_name || '') ||
-        (a.last_name || '').localeCompare(b.last_name || '')
-      );
+      // Sort by runs desc, then by miles desc, then by first name.
+      const sorted = [...athletes].sort((a, b) => {
+        const ra = runsPerAthlete[a.id] || 0;
+        const rb = runsPerAthlete[b.id] || 0;
+        if (ra !== rb) return rb - ra;
+        const ma = milesPerAthlete[a.id] || 0;
+        const mb = milesPerAthlete[b.id] || 0;
+        if (ma !== mb) return mb - ma;
+        return (a.first_name || '').localeCompare(b.first_name || '');
+      });
       wrap.innerHTML = `
         <table>
           <thead>
