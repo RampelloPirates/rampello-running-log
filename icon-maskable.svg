@@ -1,6 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#1a1a1a"/>
-  <rect y="412" width="512" height="100" fill="#c8102e"/>
-  <text x="256" y="280" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="240" font-weight="900" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">P</text>
-  <text x="256" y="478" font-family="Helvetica, Arial, sans-serif" font-size="48" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="5">XC</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Tally">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A5A40"/>
+      <stop offset="1" stop-color="#2C4530"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="translate(256 256) scale(0.86) translate(-256 -256)">
+    <g fill="#F4F1E9">
+      <rect x="123" y="143" width="36" height="226" rx="18"/>
+      <rect x="200" y="143" width="36" height="226" rx="18"/>
+      <rect x="277" y="143" width="36" height="226" rx="18"/>
+      <rect x="354" y="143" width="36" height="226" rx="18"/>
+    </g>
+    <line x1="100" y1="392" x2="413" y2="120" stroke="#BE722A" stroke-width="40" stroke-linecap="round"/>
+  </g>
 </svg>
