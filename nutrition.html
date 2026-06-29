@@ -29,6 +29,8 @@
     ::placeholder{color:var(--muted);opacity:.7;}
     .wrap{max-width:520px;margin:0 auto;padding:0 16px 48px;}
     header{padding:22px 0 14px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
     .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
     .logo span{color:var(--amber);}
     .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
@@ -451,7 +453,7 @@
     var app = el('app');
     if(!S.loaded){ app.innerHTML='<div class="loading">Loading your log…</div>'; return; }
     var tabs = ['today','recipes','usuals','history'];
-    var h = '<header><a href="home.html" style="text-decoration:none;color:inherit"><h1 class="logo">Tally<span>.</span><small>Nutrition · personal log</small></h1></a>'+
+    var h = '<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Nutrition · personal log</small></h1>'+
       '<nav class="tabs">'+tabs.map(function(v){return '<button class="tab'+(S.view===v?' active':'')+'" onclick="setView(\''+v+'\')">'+v+'</button>';}).join('')+'</nav></header>';
 
     if(S.view==='today') h += viewToday();
