@@ -126,6 +126,15 @@
     button:hover { background: var(--red-dark); }
     button:disabled { background: var(--silver); cursor: wait; }
 
+    .link-btn {
+      display: block; width: auto; margin: 0.85rem auto 0; padding: 0;
+      background: none; border: none; color: var(--slate);
+      font-family: var(--font-body); font-size: 0.85rem; font-weight: 500;
+      text-transform: none; letter-spacing: normal; text-decoration: underline;
+      cursor: pointer;
+    }
+    .link-btn:hover { background: none; color: var(--red); }
+
     #message {
       margin-top: 1.25rem;
       padding: 0.85rem 1rem;
@@ -266,6 +275,20 @@
       <button type="submit" id="submit-btn">Sign in</button>
     </form>
 
+    <button type="button" class="link-btn" id="forgot-btn">Forgot password?</button>
+
+    <form id="reset-form" style="display:none;">
+      <label for="new-password">New password</label>
+      <input
+        type="password"
+        id="new-password"
+        placeholder="••••••••"
+        required
+        autocomplete="new-password"
+      >
+      <button type="submit" id="reset-btn">Set new password</button>
+    </form>
+
     <div id="message"></div>
 
     <button type="button" class="install-link" id="install-link">
@@ -347,11 +370,28 @@
       return true;
     }
 
-    // Already signed in? Skip straight to the app.
-    (async () => { await routeByProfile(); })();
+    // Password-recovery links land here with #type=recovery — show the
+    // "set new password" form instead of auto-routing into the app.
+    const forgotBtn = document.getElementById('forgot-btn');
+    const resetForm = document.getElementById('reset-form');
+    let recoveryMode = new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery';
+
+    function enterRecoveryMode() {
+      recoveryMode = true;
+      form.style.display = 'none';
+      forgotBtn.style.display = 'none';
+      resetForm.style.display = '';
+      showMessage('Enter a new password to finish resetting it.', 'success');
+      setTimeout(() => document.getElementById('new-password').focus(), 80);
+    }
+
+    // Already signed in? Skip straight to the app (unless mid password reset).
+    if (recoveryMode) enterRecoveryMode();
+    else (async () => { await routeByProfile(); })();
 
     sb.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) await routeByProfile();
+      if (event === 'PASSWORD_RECOVERY') { enterRecoveryMode(); return; }
+      if (event === 'SIGNED_IN' && session && !recoveryMode) await routeByProfile();
     });
 
     // Email + password sign-in. No email delivery involved — accounts are
@@ -377,6 +417,38 @@
       if (error) {
         showMessage('Sign-in failed: ' + error.message, 'error');
       }
+    });
+
+    // Forgot password → email a reset link. (Depends on email delivery, which
+    // is Supabase's rate-limited default sender unless custom SMTP is set up.)
+    forgotBtn.addEventListener('click', async () => {
+      const email = emailInput.value.trim();
+      if (!email) { showMessage('Enter your email above first, then tap "Forgot password?".', 'error'); return; }
+      forgotBtn.disabled = true;
+      const { error } = await sb.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + window.location.pathname,
+      });
+      forgotBtn.disabled = false;
+      showMessage(
+        error ? ('Error: ' + error.message)
+              : 'If that email has an account, a reset link is on its way — check your inbox (and spam).',
+        error ? 'error' : 'success'
+      );
+    });
+
+    // Set a new password during a recovery session.
+    resetForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById('new-password').value;
+      if (pw.length < 6) { showMessage('Use at least 6 characters.', 'error'); return; }
+      const resetBtn = document.getElementById('reset-btn');
+      resetBtn.disabled = true; resetBtn.textContent = 'Saving…';
+      const { error } = await sb.auth.updateUser({ password: pw });
+      resetBtn.disabled = false; resetBtn.textContent = 'Set new password';
+      if (error) { showMessage('Error: ' + error.message, 'error'); return; }
+      recoveryMode = false;
+      showMessage('Password updated — signing you in…', 'success');
+      setTimeout(() => routeByProfile(), 700);
     });
   </script>
 </body>
