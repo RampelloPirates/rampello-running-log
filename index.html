@@ -357,16 +357,13 @@
       messageEl.className = type || '';
     }
 
-    // Send a signed-in user to their home, or sign out + warn if their email
-    // isn't on the roster. Uses getProfile() from auth.js.
+    // Send a signed-in user to their home. getProfile() (auth.js) creates the
+    // runner profile on first sign-in, so any signed-in user has a home.
     async function routeByProfile() {
       const p = await getProfile();
       if (!p) return false;
-      if (p.kind === 'coach')   { window.location.href = 'team_dashboard.html'; return true; }
-      if (p.kind === 'athlete') { window.location.href = 'my_runs.html';        return true; }
-      showMessage("Your email isn't on the team roster yet. Ask Coach Sowell to add you, then try again.", 'error');
-      await sb.auth.signOut();
-      return false;
+      window.location.href = 'my_runs.html';
+      return true;
     }
 
     // Already signed in? Skip straight to the app.

@@ -18,63 +18,45 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // Single shared client. Pages reference `sb` directly.
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+function goToSignIn() { window.location.href = 'index.html'; }
+
 // ---------------------------------------------------------------------------
-// Profile lookup. Returns the signed-in user's roster identity:
-//   { user, kind: 'coach' | 'athlete', row }   — row is the coach/athlete record
-//   { user, kind: null, row: null }             — signed in but NOT on the roster
-//   null                                         — not signed in
-// Coaches are checked first so a person listed as both reads as a coach.
+// Profile lookup. The app is individual-use: every signed-in user is a single
+// runner with their own row in `athletes`. There is no coach role or roster.
+// The row is auto-created on first sign-in (self-provisioning).
+//   { user, row }   — signed in (row created if it didn't exist)
+//   null            — not signed in
 // ---------------------------------------------------------------------------
 async function getProfile() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return null;
   const uid = session.user.id;
 
-  const { data: coach } = await sb
-    .from('coaches')
-    .select('id, first_name, last_name, role')
-    .eq('auth_user_id', uid)
-    .eq('active', true)
-    .maybeSingle();
-  if (coach) return { user: session.user, kind: 'coach', row: coach };
-
-  const { data: athlete } = await sb
+  let { data: row } = await sb
     .from('athletes')
     .select('id, first_name, last_name, grade')
     .eq('auth_user_id', uid)
-    .eq('active', true)
     .maybeSingle();
-  if (athlete) return { user: session.user, kind: 'athlete', row: athlete };
 
-  return { user: session.user, kind: null, row: null };
+  if (!row) {
+    const email = session.user.email || '';
+    const first = email.split('@')[0] || 'Runner';
+    const { data: created } = await sb
+      .from('athletes')
+      .insert({ auth_user_id: uid, email: email, first_name: first, last_name: '' })
+      .select('id, first_name, last_name, grade')
+      .single();
+    row = created;
+  }
+  return { user: session.user, row: row };
 }
 
-function goToSignIn() { window.location.href = 'index.html'; }
-
-// Require any signed-in roster member. A signed-in user who isn't on the roster
-// (or whose account was deactivated) is signed out and bounced to the picker.
-// Returns the profile, or null after redirecting.
-async function requireSession() {
-  const p = await getProfile();
-  if (!p) { goToSignIn(); return null; }
-  if (!p.kind) { await sb.auth.signOut(); goToSignIn(); return null; }
-  return p;
-}
-
-// Athlete-only pages. Coaches are sent to their dashboard.
-async function requireAthlete(coachDest = 'team_dashboard.html') {
-  const p = await requireSession();
-  if (!p) return null;
-  if (p.kind === 'coach') { window.location.href = coachDest; return null; }
-  return p; // { user, kind:'athlete', row }
-}
-
-// Coach-only pages. Athletes are sent to their own runs.
-async function requireCoach(athleteDest = 'my_runs.html') {
-  const p = await requireSession();
-  if (!p) return null;
-  if (p.kind !== 'coach') { window.location.href = athleteDest; return null; }
-  return p; // { user, kind:'coach', row }
+// Page gate: requires a signed-in user and returns their profile (creating it
+// on first visit), or null after redirecting to sign-in.
+async function requireProfile() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { goToSignIn(); return null; }
+  return await getProfile();
 }
 
 // Personal-app gate (nutrition + future personal-health pages). Unlike the
@@ -93,18 +75,16 @@ async function signOut() {
   window.location.href = 'index.html';
 }
 
-// Runner display convention: "Porter Smith" -> "Porter S." Used everywhere a
-// runner is shown to people (leaderboard, dashboards, run lists). Coach-only
-// management screens (roster editor, bulk-log picker) keep full names.
+// Runner display convention: "Porter Smith" -> "Porter S." Used wherever a
+// runner's name is shown (the menu, run lists).
 function shortName(first, last) {
   const f = (first || '').trim();
   const l = (last || '').trim();
   return f + (l ? ' ' + l.charAt(0) + '.' : '');
 }
 
-// Convenience for the signed-in user: "Jeff S." or "Coach Sowell".
+// Convenience for the signed-in user: "Jeff S."
 function displayName(profile) {
   if (!profile || !profile.row) return '';
-  const short = shortName(profile.row.first_name, profile.row.last_name);
-  return profile.kind === 'coach' ? 'Coach ' + short : short;
+  return shortName(profile.row.first_name, profile.row.last_name);
 }

@@ -348,7 +348,7 @@
       <div class="menu" id="menu" role="menu">
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="log_run.html" role="menuitem">Log a run</a>
-        <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
+        <a class="menu-item" href="nutrition.html" role="menuitem">Nutrition</a>
         <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
@@ -373,14 +373,6 @@
     </div>
 
     <a href="log_run.html" class="log-cta">+ Log a new run</a>
-
-    <a href="leaderboard.html" class="lb-teaser">
-      <span class="lb-teaser-emoji">🏆</span>
-      <span class="lb-teaser-copy">
-        <strong>How are your teammates doing this week?</strong>
-        <span class="lb-teaser-sub">See where you stack up on the leaderboard →</span>
-      </span>
-    </a>
 
     <div class="range-filter" role="tablist" aria-label="Date range">
       <button class="range-btn active" data-range="week" role="tab">This week</button>
@@ -785,7 +777,7 @@
 
     // ---- boot ----
     (async () => {
-      const profile = await requireAthlete();
+      const profile = await requireProfile();
       if (!profile) return;
       athlete = profile.row;
       document.getElementById('user-name').textContent = displayName(profile);

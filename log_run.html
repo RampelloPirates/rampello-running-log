@@ -634,7 +634,7 @@
       <div class="menu" id="menu" role="menu">
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="my_runs.html" role="menuitem">My runs</a>
-        <a class="menu-item" href="leaderboard.html" role="menuitem">Leaderboard 🏃‍♂️</a>
+        <a class="menu-item" href="nutrition.html" role="menuitem">Nutrition</a>
         <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
     </div>
@@ -872,8 +872,8 @@
   <script>
     // ---- edit mode ----
     // log_run.html?edit=<runId> turns this page into an editor for an existing
-    // run. Athletes can edit their own runs; coaches can edit anyone's. When
-    // not present, the page behaves as the normal "log a new run" form.
+    // run. You can edit your own runs. When not present, the page behaves as
+    // the normal "log a new run" form.
     const params = new URLSearchParams(window.location.search);
     const editId = params.get('edit');
     let editAthleteId = null;            // athlete the edited run belongs to
@@ -1260,8 +1260,8 @@
       if (editId) {
         runAthleteId = editAthleteId;
       } else {
-        const auth = await requireAthlete();
-        if (!auth) return; // requireAthlete redirects non-athletes
+        const auth = await requireProfile();
+        if (!auth) return;
         runAthleteId = auth.row.id;
       }
 
@@ -1469,10 +1469,7 @@
 
       // Edit mode: hop back to where the run is shown. Otherwise celebrate.
       if (editId) {
-        const me = await getProfile();
-        window.location.href = (me && me.kind === 'coach')
-          ? `athlete_detail.html?id=${editAthleteId}&run=${editId}`
-          : 'my_runs.html';
+        window.location.href = 'my_runs.html';
         return;
       }
 
@@ -1965,13 +1962,13 @@
     // ---- boot ----
     (async () => {
       if (editId) {
-        // Edit mode: athletes may edit their own runs, coaches may edit any.
-        const profile = await requireSession();
+        // Edit mode: you may edit your own runs.
+        const profile = await requireProfile();
         if (!profile) return;
         const run = await loadRunForEdit(editId);
-        // RLS also blocks a kid from loading someone else's run (returns null).
+        // RLS also blocks loading someone else's run (returns null).
         if (!run) { showErr('Could not load that run to edit — it may have been deleted, or it isn’t yours to edit.'); return; }
-        if (profile.kind !== 'coach' && String(profile.row.id) !== String(run.athlete_id)) {
+        if (String(profile.row.id) !== String(run.athlete_id)) {
           document.getElementById('run-form').style.display = 'none';
           showErr('You can only edit your own runs.');
           return;
@@ -1984,8 +1981,8 @@
       }
 
       // Create mode (normal "log a run").
-      const auth = await requireAthlete();
-      if (!auth) return; // requireAthlete redirects non-athletes
+      const auth = await requireProfile();
+      if (!auth) return;
       document.getElementById('user-name').textContent = displayName(auth);
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
       loadRouteSuggestions();
