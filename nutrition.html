@@ -433,7 +433,7 @@
     var app = el('app');
     if(!S.loaded){ app.innerHTML='<div class="loading">Loading your log…</div>'; return; }
     var tabs = ['today','recipes','usuals','history'];
-    var h = '<header><h1 class="logo">Tally<span>.</span><small>Nutrition · personal log</small></h1>'+
+    var h = '<header><a href="home.html" style="text-decoration:none;color:inherit"><h1 class="logo">Tally<span>.</span><small>Nutrition · personal log</small></h1></a>'+
       '<nav class="tabs">'+tabs.map(function(v){return '<button class="tab'+(S.view===v?' active':'')+'" onclick="setView(\''+v+'\')">'+v+'</button>';}).join('')+'</nav></header>';
 
     if(S.view==='today') h += viewToday();

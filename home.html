@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Tally</title>
+  <meta name="theme-color" content="#2C4530">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #3A5A40; --green-deep: #2C4530; --amber: #BE722A;
+      --ink: #1E241C; --bone: #F4F1E9; --paper: #FFFFFF; --surface-warm: #FBF9F3;
+      --muted: #71776B; --silver: #E2DCCF; --green-tint: #EBF0E8; --danger: #A8443A;
+      --f-display: 'Space Grotesk', system-ui, sans-serif;
+      --f-body: 'Inter', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; font-family: var(--f-body); background: var(--bone); color: var(--ink); min-height: 100vh; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+    .topbar { background: var(--green-deep); color: var(--paper); padding: 0.85rem 1.25rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid var(--amber); }
+    .brand { display: flex; align-items: baseline; gap: 0.5rem; text-decoration: none; color: inherit; }
+    .brand .name { font-family: var(--f-display); font-weight: 700; font-size: 1.15rem; }
+    .brand .name .dot { color: var(--amber); }
+    .user-area { position: relative; }
+    .menu-btn { background: transparent; color: var(--paper); border: 1px solid rgba(255,255,255,.35); width: 38px; height: 38px; border-radius: 8px; cursor: pointer; font-size: 1.3rem; line-height: 1; }
+    .menu-btn:hover { background: var(--green); border-color: var(--green); }
+    .menu { position: absolute; top: calc(100% + 8px); right: 0; background: var(--paper); color: var(--ink); border: 1px solid var(--silver); border-radius: 10px; min-width: 220px; box-shadow: 0 10px 30px rgba(44,69,48,.22); display: none; z-index: 50; overflow: hidden; }
+    .menu.show { display: block; }
+    .menu-user { padding: 0.85rem 1rem; font-size: 0.85rem; color: var(--muted); border-bottom: 1px solid var(--silver); background: var(--surface-warm); }
+    .menu-item { display: block; width: 100%; text-align: left; background: none; border: none; padding: 0.8rem 1rem; font-size: 0.92rem; cursor: pointer; font-family: var(--f-body); color: var(--ink); }
+    .menu-item:hover { background: var(--green-tint); }
+    .menu-item.danger { color: var(--danger); }
+
+    main { max-width: 640px; margin: 0 auto; padding: 1.75rem 1.1rem 3rem; }
+    .greeting { font-family: var(--f-display); font-size: 1.5rem; font-weight: 600; color: var(--green-deep); margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 1.5rem; }
+
+    .cards { display: grid; grid-template-columns: 1fr; gap: 0.9rem; }
+    @media (min-width: 540px) { .cards { grid-template-columns: 1fr 1fr; } }
+
+    .feature { display: flex; align-items: center; gap: 1rem; text-decoration: none; background: var(--paper); border: 1px solid var(--silver); border-radius: 16px; padding: 1.25rem; color: var(--ink); transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+    .feature:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(44,69,48,.12); border-color: var(--green); }
+    .feature .icon { flex-shrink: 0; width: 52px; height: 52px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; background: var(--green-tint); }
+    .feature.nutrition .icon { background: #F1E6D2; }
+    .feature .copy { min-width: 0; }
+    .feature .title { font-family: var(--f-display); font-weight: 600; font-size: 1.15rem; margin: 0 0 0.15rem; }
+    .feature .desc { color: var(--muted); font-size: 0.85rem; line-height: 1.35; }
+    .feature .chev { margin-left: auto; color: var(--silver); font-size: 1.4rem; align-self: center; }
+    .feature:hover .chev { color: var(--green); }
+
+    .footnote { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="home.html" class="brand"><span class="name">Tally<span class="dot">.</span></span></a>
+    <div class="user-area">
+      <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
+      <div class="menu" id="menu" role="menu">
+        <div class="menu-user" id="user-name">…</div>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <h1 class="greeting" id="greeting">Welcome</h1>
+    <p class="sub">What would you like to do?</p>
+
+    <div class="cards">
+      <a class="feature run" href="my_runs.html">
+        <span class="icon">🏃</span>
+        <span class="copy">
+          <span class="title">Run Log</span>
+          <span class="desc">Log runs, see your week and trends</span>
+        </span>
+        <span class="chev">›</span>
+      </a>
+
+      <a class="feature nutrition" href="nutrition.html">
+        <span class="icon">🍽️</span>
+        <span class="copy">
+          <span class="title">Nutrition</span>
+          <span class="desc">Calories, macros, recipes</span>
+        </span>
+        <span class="chev">›</span>
+      </a>
+    </div>
+
+    <p class="footnote">More coming — this is your personal health log.</p>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+    const menuBtn = document.getElementById('menu-btn');
+    const menu = document.getElementById('menu');
+    menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('show'); });
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
+    });
+    document.getElementById('signout-btn').addEventListener('click', () => {
+      if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+      signOut();
+    });
+
+    (async () => {
+      const profile = await requireProfile();   // auth.js — redirects if not signed in
+      if (!profile) return;
+      const first = (profile.row && profile.row.first_name) ? profile.row.first_name : 'there';
+      document.getElementById('greeting').textContent = 'Hi, ' + first;
+      document.getElementById('user-name').textContent = displayName(profile);
+    })();
+  </script>
+</body>
+</html>
