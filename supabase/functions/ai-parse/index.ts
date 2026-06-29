@@ -62,6 +62,9 @@ Return ONLY valid JSON, no markdown:
 - calories/protein/fat/carbs/fiber = totals for the stated quantity. Macros in grams. Integers are fine.
 Use realistic USDA-style values. If an amount is unreadable, assume a sensible default and mention it in note.`;
 
+const BARCODE_PHOTO_PROMPT =
+  `This image contains a product barcode (UPC or EAN). Return ONLY the barcode number — the digits printed beneath the bars — as a plain string of digits, no spaces and no other text. If you cannot read the digits clearly, return an empty string.`;
+
 // ── Anthropic call ──────────────────────────────────────────────────────────
 async function callClaude(content: unknown): Promise<string> {
   const res = await fetch(ANTHROPIC_URL, {
@@ -106,7 +109,7 @@ async function lookupBarcode(barcode: string): Promise<unknown> {
   );
   const data = await res.json();
   if (data?.status !== 1 || !data?.product) {
-    throw new Error("Product not found in Open Food Facts.");
+    throw new Error(`Barcode ${barcode} isn't in Open Food Facts. Use Photo label instead.`);
   }
   const p = data.product;
   const n = p.nutriments || {};
@@ -183,8 +186,19 @@ Deno.serve(async (req) => {
     }
 
     if (mode === "barcode") {
-      const barcode = String(body.barcode || "").trim();
-      if (!barcode) return json({ error: "Missing barcode" }, 400);
+      let barcode = String(body.barcode || "").trim();
+      if (!barcode && body.image) {
+        const mediaType = String(body.media_type || "image/jpeg");
+        const read = await callClaude([
+          { type: "image", source: { type: "base64", media_type: mediaType, data: String(body.image) } },
+          { type: "text", text: BARCODE_PHOTO_PROMPT },
+        ]);
+        barcode = (read.match(/\d/g) || []).join(""); // keep digits only
+      }
+      if (!barcode) return json({ error: "Couldn't read a barcode number from that photo. Try a clearer, closer shot." }, 400);
+      if (barcode.length < 8 || barcode.length > 14) {
+        return json({ error: `Read "${barcode}", which doesn't look like a barcode. Try again.` }, 400);
+      }
       return json(await lookupBarcode(barcode));
     }
 

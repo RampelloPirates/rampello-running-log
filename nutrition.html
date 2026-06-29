@@ -101,7 +101,7 @@
   var S = {
     view:'today', method:'type', loaded:false, userId:null,
     target:null, log:[], usuals:[], recipes:[], history:[],
-    draft:null, label:null, recipeDraft:null, recipeEditId:null,
+    draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
     busy:false, err:'', editTarget:false,
   };
@@ -464,6 +464,28 @@
 
   function labelEaten(v){ S.label.servingsEaten=parseFloat(v)||0; var n=el('labelAdds'); if(n) n.textContent=Math.round((S.label.caloriesPerServing||0)*(S.label.servingsEaten||0)).toLocaleString(); }
 
+  // ── Barcode: photo → OCR the number (edge fn) → Open Food Facts ────────────
+  async function scanBarcode(file){
+    if(!file||S.busy) return; S.busy=true; S.err=''; render();
+    try{
+      var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file); });
+      var out = await callEdge({mode:'barcode', image:b64, media_type:file.type||'image/jpeg'});
+      S.barcode = Object.assign({grams:100}, out);
+    }catch(e){ S.err = e.message || "Couldn't read that barcode."; }
+    finally{ S.busy=false; render(); }
+  }
+  function barcodeGrams(v){ S.barcode.grams=Math.max(0,parseFloat(v)||0); var n=el('barcodeAdds'); if(n) n.textContent=Math.round((num(S.barcode.cal_100g)*S.barcode.grams)/100).toLocaleString(); }
+  async function commitBarcode(){
+    var B=S.barcode; var g=B.grams||0; if(g<=0) return;
+    var cal=Math.round((num(B.cal_100g)*g)/100);
+    var m={p:round1((num(B.protein_100g)*g)/100), f:round1((num(B.fat_100g)*g)/100), c:round1((num(B.carbs_100g)*g)/100), fib:round1((num(B.fiber_100g)*g)/100)};
+    try{
+      await insertEntry({title:B.name||'Packaged item', source:'barcode', total:cal, macros:m,
+        items:[{name:B.name||'Packaged item', qty:g, unit:'g', calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib}]});
+      S.barcode=null; render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+
   function setView(v){ S.view=v; S.err=''; render(); if(v==='history') loadHistory().then(render); }
   function setMethod(m){ S.method=m; S.err=''; render(); }
 
@@ -577,7 +599,25 @@
     return h;
   }
   function paneBarcode(){
-    return '<div style="text-align:center;padding:14px 6px"><div style="font-size:30px;margin-bottom:8px;opacity:.35">▌║▌║▌</div><p style="font-size:13px;color:var(--muted);line-height:1.55;margin:0">On-device barcode scanning is coming. For packaged items now, use <button class="link" style="text-decoration:underline;color:var(--amber)" onclick="setMethod(\'label\')">Photo label</button>.</p></div>';
+    if(!S.barcode){
+      return '<div style="text-align:center;padding:8px 0"><div style="font-size:28px;opacity:.4;margin-bottom:6px">▌║▌║▌</div>'+
+        '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5">Snap the product\'s barcode — I\'ll read the number and look it up.</p>'+
+        '<input id="barcodeFile" type="file" accept="image/*" capture="environment" style="display:none" onchange="scanBarcode(this.files&&this.files[0])">'+
+        '<button class="btn btn-amber" onclick="el(\'barcodeFile\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Reading…':'Scan a barcode')+'</button>'+
+        '<p style="font-size:11px;color:var(--muted);margin-top:10px">Not found? Use <button class="link" style="text-decoration:underline" onclick="setMethod(\'label\')">Photo label</button> instead.</p></div>';
+    }
+    var B = S.barcode; var g = B.grams||0;
+    var cal = Math.round((num(B.cal_100g)*g)/100);
+    var h = '<div style="background:var(--amber-soft);border-radius:10px;padding:12px;margin-bottom:12px">'+
+      '<div style="font-family:var(--f-display);font-weight:600;font-size:15px;margin-bottom:2px">'+esc(B.name||'Packaged item')+'</div>'+
+      '<div style="font-size:12px;color:var(--muted);font-family:var(--f-mono)">'+(B.cal_100g!=null?Math.round(B.cal_100g):'?')+' cal / 100g'+(B.serving_size?(' · serving '+esc(B.serving_size)):'')+(B.barcode?(' · '+esc(B.barcode)):'')+'</div>';
+    if(B.protein_100g!=null||B.fat_100g!=null||B.carbs_100g!=null||B.fiber_100g!=null)
+      h += '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin-top:3px">per 100g — P'+(B.protein_100g!=null?B.protein_100g:'?')+' · F'+(B.fat_100g!=null?B.fat_100g:'?')+' · C'+(B.carbs_100g!=null?B.carbs_100g:'?')+' · Fb'+(B.fiber_100g!=null?B.fiber_100g:'?')+'</div>';
+    h += '</div>';
+    h += '<label style="font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:10px">Amount eaten<span style="display:flex;align-items:center;gap:4px"><input value="'+g+'" inputmode="decimal" oninput="barcodeGrams(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center"><span style="font-size:12px;color:var(--muted)">g</span></span></label>';
+    h += '<div class="row-between" style="padding:14px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:12px 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="barcodeAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+cal.toLocaleString()+'</span></div>';
+    h += '<div class="btn-row"><button class="btn btn-amber" onclick="commitBarcode()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="S.barcode=null;render()">Cancel</button></div>';
+    return h;
   }
 
   function loggedRow(e){
