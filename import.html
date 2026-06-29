@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Import Runs — Tally</title>
+  <meta name="theme-color" content="#2C4530">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green:#3A5A40; --green-deep:#2C4530; --amber:#BE722A; --ink:#1E241C;
+      --bone:#F4F1E9; --paper:#FFFFFF; --surface-warm:#FBF9F3; --muted:#71776B;
+      --silver:#E2DCCF; --green-tint:#EBF0E8; --danger:#A8443A;
+      --f-display:'Space Grotesk',system-ui,sans-serif; --f-body:'Inter',system-ui,sans-serif; --f-mono:'JetBrains Mono',ui-monospace,monospace;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--bone);color:var(--ink);min-height:100vh;}
+    .topbar{background:var(--green-deep);color:var(--paper);padding:.85rem 1.25rem;display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--amber);}
+    .brand{display:flex;align-items:baseline;gap:.5rem;text-decoration:none;color:inherit;}
+    .brand .name{font-family:var(--f-display);font-weight:700;font-size:1.15rem;}
+    .brand .name .dot{color:var(--amber);}
+    .brand .division{font-size:.7rem;color:var(--amber);letter-spacing:2px;text-transform:uppercase;}
+    main{max-width:760px;margin:0 auto;padding:1.5rem 1.1rem 3rem;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    h1{font-family:var(--f-display);font-size:1.5rem;color:var(--green-deep);margin:.2rem 0 .3rem;}
+    .sub{color:var(--muted);font-size:.95rem;margin:0 0 1.25rem;line-height:1.5;}
+    .card{background:var(--paper);border:1px solid var(--silver);border-radius:16px;padding:1.25rem;margin-bottom:1rem;}
+    details{font-size:.9rem;color:var(--muted);}
+    details summary{cursor:pointer;color:var(--green);font-weight:600;}
+    details ol{margin:.6rem 0 0;padding-left:1.2rem;line-height:1.6;}
+    .filebtn{display:inline-block;background:var(--green);color:#fff;border:none;border-radius:10px;padding:.8rem 1.2rem;font-family:var(--f-body);font-weight:600;font-size:.95rem;cursor:pointer;}
+    .row{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.9rem;}
+    label.inl{font-size:.85rem;color:var(--muted);font-weight:600;}
+    select,.numin{font-family:var(--f-body);font-size:.9rem;padding:.5rem .6rem;border:1px solid var(--silver);border-radius:8px;background:var(--surface-warm);color:var(--ink);}
+    .stat{font-family:var(--f-mono);font-weight:600;color:var(--green-deep);}
+    table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:.5rem;}
+    th,td{text-align:left;padding:.4rem .35rem;border-bottom:1px solid var(--silver);}
+    th{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+    td.num{font-family:var(--f-mono);text-align:right;}
+    .pill{display:inline-block;font-size:.7rem;padding:.1rem .45rem;border-radius:99px;background:var(--green-tint);color:var(--green-deep);}
+    .pill.x{background:#F1E6D2;color:var(--amber);}
+    .btn{background:var(--green);color:#fff;border:none;border-radius:10px;padding:.85rem 1.2rem;font-family:var(--f-body);font-weight:700;font-size:.95rem;cursor:pointer;width:100%;margin-top:.5rem;}
+    .btn:disabled{opacity:.5;cursor:default;}
+    .msg{font-size:.9rem;margin-top:.6rem;}
+    .msg.error{color:var(--danger);}
+    .msg.success{color:var(--green);}
+    .muted{color:var(--muted);font-size:.82rem;}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="home.html" class="brand"><span class="name">Tally<span class="dot">.</span></span><span class="division">Import</span></a>
+  </div>
+
+  <main>
+    <a href="my_runs.html" class="home-back">‹ My Runs</a>
+    <h1>Import runs from Strava</h1>
+    <p class="sub">Upload the <code>activities.csv</code> from your Strava data export. It's parsed in your browser, previewed below, and only the rows you confirm are added to your log. Re-importing skips anything already logged.</p>
+
+    <div class="card">
+      <details>
+        <summary>How to get your Strava export</summary>
+        <ol>
+          <li>On strava.com: <strong>Settings → My Account → Download or Delete Your Account</strong>.</li>
+          <li>Under "Download Request," click <strong>Request your archive</strong>.</li>
+          <li>Strava emails you a ZIP (can take a bit). Unzip it.</li>
+          <li>Upload the <strong>activities.csv</strong> file below.</li>
+        </ol>
+      </details>
+    </div>
+
+    <div class="card">
+      <input id="file" type="file" accept=".csv,text/csv" style="display:none">
+      <button class="filebtn" id="pickbtn">Choose activities.csv</button>
+      <span id="filename" class="muted" style="margin-left:.6rem;"></span>
+      <div id="controls" style="display:none;">
+        <div class="row">
+          <label class="inl" for="unit">Distance unit in file</label>
+          <select id="unit">
+            <option value="km">kilometers</option>
+            <option value="mi">miles</option>
+            <option value="m">meters</option>
+          </select>
+          <span class="muted" id="unitguess"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="previewcard" style="display:none;">
+      <div class="row" style="justify-content:space-between;">
+        <div><span class="stat" id="newcount">0</span> new runs to import</div>
+        <div class="muted"><span id="dupcount">0</span> already logged · <span id="totalcount">0</span> in file</div>
+      </div>
+      <div id="preview"></div>
+      <button class="btn" id="importbtn">Import runs</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+    var ATHLETE = null, USER = null;
+    var PARSED = [];   // {date, type, name, seconds, distRaw, run_type, cross, dup}
+    var EXISTING = {}; // key "date|seconds" -> true
+
+    function $(id){ return document.getElementById(id); }
+    function pad(n){ return String(n).padStart(2,'0'); }
+    function toDate(s){ var d=new Date(s); if(isNaN(d.getTime())) return null; return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+
+    // RFC-4180-ish CSV parser (handles quoted fields, commas, quotes, CRLF).
+    function parseCSV(text){
+      var rows=[], row=[], cur='', q=false;
+      for(var i=0;i<text.length;i++){
+        var ch=text[i];
+        if(q){
+          if(ch==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else q=false; }
+          else cur+=ch;
+        } else {
+          if(ch==='"') q=true;
+          else if(ch===','){ row.push(cur); cur=''; }
+          else if(ch==='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; }
+          else if(ch!=='\r') cur+=ch;
+        }
+      }
+      if(cur!=='' || row.length){ row.push(cur); rows.push(row); }
+      return rows;
+    }
+    function colIdx(headers, names){
+      for(var n=0;n<names.length;n++){
+        var want=names[n].toLowerCase();
+        for(var i=0;i<headers.length;i++){ if((headers[i]||'').trim().toLowerCase()===want) return i; }
+      }
+      return -1;
+    }
+    function mapType(t){
+      var s=(t||'').toLowerCase();
+      if(s.indexOf('run')>=0 || s.indexOf('treadmill')>=0) return {run_type:'easy', cross:null};
+      return {run_type:'cross_train', cross:(t && t.trim()) ? t.trim() : 'Other'};
+    }
+    function toMiles(raw, unit){
+      var v=parseFloat(raw)||0;
+      if(unit==='mi') return v;
+      if(unit==='m')  return v/1609.344;
+      return v/1.609344; // km
+    }
+    function guessUnit(vals){
+      var nums=vals.map(function(v){return parseFloat(v)||0;}).filter(function(v){return v>0;});
+      if(!nums.length) return 'km';
+      nums.sort(function(a,b){return a-b;});
+      var med=nums[Math.floor(nums.length/2)];
+      if(med>2000) return 'm';     // raw meters
+      return 'km';                 // Strava default summary unit
+    }
+
+    $('pickbtn').addEventListener('click', function(){ $('file').click(); });
+    $('file').addEventListener('change', function(e){
+      var f=e.target.files && e.target.files[0]; if(!f) return;
+      $('filename').textContent=f.name;
+      var rd=new FileReader();
+      rd.onload=function(){ loadCSV(rd.result); };
+      rd.readAsText(f);
+    });
+    $('unit').addEventListener('change', renderPreview);
+
+    function loadCSV(text){
+      var rows=parseCSV(text);
+      if(rows.length<2){ $('msg').textContent='That file had no rows.'; return; }
+      var H=rows[0];
+      var di=colIdx(H,['Activity Date']),
+          ti=colIdx(H,['Activity Type']),
+          ni=colIdx(H,['Activity Name']),
+          si=colIdx(H,['Moving Time','Elapsed Time']),
+          xi=colIdx(H,['Distance']);
+      if(di<0||ti<0){ $('msg').textContent="Couldn't find the expected columns (Activity Date / Activity Type). Is this Strava's activities.csv?"; return; }
+      PARSED=[];
+      for(var r=1;r<rows.length;r++){
+        var row=rows[r]; if(!row || row.length<2) continue;
+        var date=toDate(row[di]); if(!date) continue;
+        var tp=mapType(row[ti]);
+        PARSED.push({
+          date:date, type:(row[ti]||'').trim(), name:(ni>=0?(row[ni]||'').trim():''),
+          seconds:Math.round(parseFloat(si>=0?row[si]:0)||0),
+          distRaw:(xi>=0?row[xi]:''), run_type:tp.run_type, cross:tp.cross
+        });
+      }
+      $('unit').value=guessUnit(PARSED.map(function(p){return p.distRaw;}));
+      $('unitguess').textContent='(auto-detected — change if the numbers look wrong)';
+      $('controls').style.display='';
+      renderPreview();
+    }
+
+    function renderPreview(){
+      var unit=$('unit').value;
+      var newRows=PARSED.filter(function(p){ return !EXISTING[p.date+'|'+p.seconds]; });
+      var dup=PARSED.length-newRows.length;
+      $('totalcount').textContent=PARSED.length;
+      $('dupcount').textContent=dup;
+      $('newcount').textContent=newRows.length;
+      var show=newRows.slice(0,25);
+      var h='<table><thead><tr><th>Date</th><th>Type</th><th>Name</th><th class="num">Miles</th><th class="num">Time</th></tr></thead><tbody>';
+      h+=show.map(function(p){
+        var mi=toMiles(p.distRaw,unit); var hh=Math.floor(p.seconds/3600), mm=Math.floor((p.seconds%3600)/60), ssec=p.seconds%60;
+        var t=(hh?hh+':':'')+pad(mm)+':'+pad(ssec);
+        var badge=p.run_type==='cross_train'?'<span class="pill x">'+escapeHtml(p.cross)+'</span>':'<span class="pill">run</span>';
+        return '<tr><td>'+p.date+'</td><td>'+badge+'</td><td>'+escapeHtml(p.name).slice(0,40)+'</td><td class="num">'+mi.toFixed(2)+'</td><td class="num">'+t+'</td></tr>';
+      }).join('');
+      h+='</tbody></table>';
+      if(newRows.length>show.length) h+='<p class="muted">…and '+(newRows.length-show.length)+' more.</p>';
+      if(!newRows.length) h+='<p class="muted">Nothing new to import — everything in this file is already in your log.</p>';
+      $('preview').innerHTML=h;
+      $('previewcard').style.display='';
+      $('importbtn').disabled=!newRows.length;
+    }
+    function escapeHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    $('importbtn').addEventListener('click', async function(){
+      var unit=$('unit').value;
+      var newRows=PARSED.filter(function(p){ return !EXISTING[p.date+'|'+p.seconds]; });
+      if(!newRows.length) return;
+      var btn=$('importbtn'); btn.disabled=true; btn.textContent='Importing…';
+      var payload=newRows.map(function(p){
+        var mi=toMiles(p.distRaw,unit);
+        var row={ athlete_id:ATHLETE, created_by:USER, run_date:p.date, run_type:p.run_type,
+          distance_miles:(mi>0?Math.min(999.99, Math.round(mi*100)/100):null),
+          duration_seconds:(p.seconds>0?p.seconds:null),
+          notes:(p.name?('Imported from Strava: '+p.name):'Imported from Strava') };
+        if(p.run_type==='cross_train') row.cross_train_activity=p.cross;
+        return row;
+      });
+      try{
+        // insert in batches of 200
+        for(var i=0;i<payload.length;i+=200){
+          var chunk=payload.slice(i,i+200);
+          var res=await sb.from('runs').insert(chunk);
+          if(res.error) throw res.error;
+        }
+        $('msg').className='msg success';
+        $('msg').textContent='Imported '+payload.length+' runs. ';
+        // refresh existing set so re-clicks don't duplicate
+        await loadExisting();
+        renderPreview();
+        $('msg').className='msg success';
+        $('msg').innerHTML='Imported '+payload.length+' runs — <a href="my_runs.html">view them</a>.';
+      }catch(e){
+        $('msg').className='msg error';
+        $('msg').textContent='Import failed: '+(e.message||e);
+      }
+      btn.textContent='Import runs'; btn.disabled=false;
+    });
+
+    async function loadExisting(){
+      var res=await sb.from('runs').select('run_date,duration_seconds');
+      EXISTING={};
+      (res.data||[]).forEach(function(r){ EXISTING[r.run_date+'|'+(r.duration_seconds||0)]=true; });
+    }
+
+    (async function(){
+      var profile=await requireProfile(); if(!profile) return;
+      ATHLETE=profile.row.id; USER=profile.user.id;
+      await loadExisting();
+    })();
+  </script>
+</body>
+</html>
