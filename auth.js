@@ -77,6 +77,16 @@ async function requireCoach(athleteDest = 'my_runs.html') {
   return p; // { user, kind:'coach', row }
 }
 
+// Personal-app gate (nutrition + future personal-health pages). Unlike the
+// roster gates above, this requires only a signed-in auth user — no athlete/
+// coach lookup. Used by the individual-use side of the app (see the
+// personal-health pivot). Returns { user } or null after redirecting.
+async function requireUser() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { goToSignIn(); return null; }
+  return { user: session.user };
+}
+
 // "Switch user" / sign out everywhere.
 async function signOut() {
   try { await sb.auth.signOut(); } catch (_) { /* clear local state regardless */ }
