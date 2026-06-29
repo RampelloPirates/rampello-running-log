@@ -99,7 +99,7 @@
   var S = {
     view:'today', method:'type', loaded:false, userId:null,
     target:null, log:[], usuals:[], recipes:[], history:[],
-    draft:null, label:null, recipeDraft:null,
+    draft:null, label:null, recipeDraft:null, recipeEditId:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
     busy:false, err:'', editTarget:false,
   };
@@ -298,19 +298,51 @@
   }
 
   // ── Recipes ────────────────────────────────────────────────────────────────
+  function toDraftIngredient(g){
+    var grams = g.grams||0;
+    return {id:uid(), name:g.name, qty:(g.qty!=null?g.qty:''), unit:g.unit||'', grams:grams,
+      calories:Math.round(g.calories||0), protein:g.protein||0, fat:g.fat||0, carbs:g.carbs||0, fiber:g.fiber||0,
+      calPerG:grams?((g.calories||0)/grams):0, pPerG:grams?((g.protein||0)/grams):0, fPerG:grams?((g.fat||0)/grams):0, cPerG:grams?((g.carbs||0)/grams):0, fibPerG:grams?((g.fiber||0)/grams):0};
+  }
   async function parseRecipe(){
     if(!S.recipeText.trim()||S.busy) return; S.busy=true; S.err=''; render();
     try{
       var out = await callEdge({mode:'recipe', text:S.recipeText.trim()});
-      var ingredients = (out.ingredients||[]).map(function(g){
-        var grams = g.grams||0;
-        return {id:uid(), name:g.name, qty:g.qty!=null?g.qty:'', unit:g.unit||'', grams:grams,
-          calories:Math.round(g.calories||0), protein:g.protein||0, fat:g.fat||0, carbs:g.carbs||0, fiber:g.fiber||0,
-          calPerG:grams?((g.calories||0)/grams):0, pPerG:grams?((g.protein||0)/grams):0, fPerG:grams?((g.fat||0)/grams):0, cPerG:grams?((g.carbs||0)/grams):0, fibPerG:grams?((g.fiber||0)/grams):0};
-      });
+      var ingredients = (out.ingredients||[]).map(toDraftIngredient);
       var sumG = Math.round(ingredients.reduce(function(s,i){return s+i.grams;},0));
-      S.recipeDraft = {ingredients:ingredients, finalWeight:sumG, note:out.note||''};
+      S.recipeDraft = {ingredients:ingredients, finalWeight:sumG, note:out.note||'', weightOverridden:false};
     }catch(e){ S.err = e.message || "Couldn't read that recipe. One ingredient per line."; }
+    finally{ S.busy=false; render(); }
+  }
+  // Load a saved recipe back into the builder for editing (save will update it).
+  function editRecipe(id){
+    var r = S.recipes.filter(function(x){return x.id===id;})[0]; if(!r) return;
+    S.recipeEditId = r.id;
+    S.recipeName = r.name || '';
+    S.recipeServings = (r.servings!=null ? String(r.servings) : '');
+    S.recipeDraft = {ingredients:(r.ingredients||[]).map(toDraftIngredient), finalWeight:(r.finalWeight||0), note:'', weightOverridden:true};
+    S.view='recipes'; S.err=''; window.scrollTo(0,0); render();
+  }
+  function startOverRecipe(){ S.recipeDraft=null; S.recipeEditId=null; S.recipeName=''; S.recipeServings=''; S.recipeText=''; S.err=''; render(); }
+  // Keep the finished-weight in sync with the raw ingredient total until the
+  // user overrides it (e.g. after weighing the cooked dish).
+  function syncFinalWeight(){
+    if(S.recipeDraft && !S.recipeDraft.weightOverridden){
+      S.recipeDraft.finalWeight = Math.round(recipeTotals().g);
+      var n = el('recipeFinalWeight'); if(n) n.value = S.recipeDraft.finalWeight;
+    }
+  }
+  // Add an ingredient by typing it; estimate its weight + nutrition via the parser.
+  async function addIngredientEstimate(){
+    var t = ((el('addIngText')||{}).value || '').trim();
+    if(!t){ ingAdd(); return; }
+    if(S.busy) return; S.busy=true; S.err=''; render();
+    try{
+      var out = await callEdge({mode:'recipe', text:t});
+      var added = (out.ingredients||[]).map(toDraftIngredient);
+      if(added.length){ S.recipeDraft.ingredients = S.recipeDraft.ingredients.concat(added); syncFinalWeight(); }
+      else S.err = "Couldn't estimate that — add a blank row and fill it in by hand.";
+    }catch(e){ S.err = e.message || "Couldn't estimate that ingredient."; }
     finally{ S.busy=false; render(); }
   }
 
@@ -332,12 +364,15 @@
   async function saveRecipe(){
     var rt = recipeTotals(); var fw = S.recipeDraft.finalWeight || rt.g || 1;
     var ingredients = S.recipeDraft.ingredients.map(function(it){ return {name:it.name,qty:it.qty,unit:it.unit,grams:it.grams,calories:it.calories,protein:it.protein,fat:it.fat,carbs:it.carbs,fiber:it.fiber}; });
+    var payload = {user_id:S.userId, name:(S.recipeName.trim()||'Untitled recipe'), kind:'recipe',
+      cal_100g:Math.round((rt.cal/fw)*100), protein_100g:Math.round((rt.p/fw)*100), fat_100g:Math.round((rt.f/fw)*100), carbs_100g:Math.round((rt.c/fw)*100), fiber_100g:Math.round((rt.fib/fw)*100),
+      final_weight_g:fw, servings:parseFloat(S.recipeServings)||null, ingredients:ingredients};
     try{
-      var r = await sb.from('foods').insert({user_id:S.userId, name:(S.recipeName.trim()||'Untitled recipe'), kind:'recipe',
-        cal_100g:Math.round((rt.cal/fw)*100), protein_100g:Math.round((rt.p/fw)*100), fat_100g:Math.round((rt.f/fw)*100), carbs_100g:Math.round((rt.c/fw)*100), fiber_100g:Math.round((rt.fib/fw)*100),
-        final_weight_g:fw, servings:parseFloat(S.recipeServings)||null, ingredients:ingredients}).select('id').single();
+      var r = S.recipeEditId
+        ? await sb.from('foods').update(payload).eq('id', S.recipeEditId).select('id').single()
+        : await sb.from('foods').insert(payload).select('id').single();
       if(r.error) throw r.error;
-      S.recipeDraft=null; S.recipeText=''; S.recipeName=''; S.recipeServings='';
+      S.recipeDraft=null; S.recipeEditId=null; S.recipeText=''; S.recipeName=''; S.recipeServings='';
       await loadRecipes(); render();
     }catch(e){ S.err=e.message; render(); }
   }
@@ -379,12 +414,12 @@
   function ingGrams(id,v){
     var it=findIng(id); if(!it) return; var g=Math.max(0,parseFloat(v)||0); it.grams=g;
     it.calories=Math.round(it.calPerG*g); it.protein=+(it.pPerG*g).toFixed(1); it.fat=+(it.fPerG*g).toFixed(1); it.carbs=+(it.cPerG*g).toFixed(1); it.fiber=+((it.fibPerG||0)*g).toFixed(1);
-    var c=el('rcal-'+id); if(c) c.value=it.calories; refreshRecipeSummary();
+    var c=el('rcal-'+id); if(c) c.value=it.calories; syncFinalWeight(); refreshRecipeSummary();
   }
   function ingCal(id,v){ var it=findIng(id); if(!it) return; var cal=Math.max(0,parseInt(v)||0); it.calories=cal; it.calPerG=it.grams>0?cal/it.grams:cal; refreshRecipeSummary(); }
-  function ingRemove(id){ S.recipeDraft.ingredients=S.recipeDraft.ingredients.filter(function(x){return x.id!==id;}); render(); }
+  function ingRemove(id){ S.recipeDraft.ingredients=S.recipeDraft.ingredients.filter(function(x){return x.id!==id;}); syncFinalWeight(); render(); }
   function ingAdd(){ S.recipeDraft.ingredients.push({id:uid(),name:'',qty:'',unit:'',grams:0,calories:0,protein:0,fat:0,carbs:0,fiber:0,calPerG:0,pPerG:0,fPerG:0,cPerG:0,fibPerG:0}); render(); }
-  function setFinalWeight(v){ S.recipeDraft.finalWeight=Math.max(0,parseFloat(v)||0); refreshRecipeSummary(); }
+  function setFinalWeight(v){ S.recipeDraft.weightOverridden=true; S.recipeDraft.finalWeight=Math.max(0,parseFloat(v)||0); refreshRecipeSummary(); }
 
   function labelEaten(v){ S.label.servingsEaten=parseFloat(v)||0; var n=el('labelAdds'); if(n) n.textContent=Math.round((S.label.caloriesPerServing||0)*(S.label.servingsEaten||0)).toLocaleString(); }
 
@@ -541,19 +576,22 @@
       h += '<button class="btn btn-primary" onclick="parseRecipe()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Calculating…':'Calculate nutrition')+'</button>';
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     }else{
-      h += '<div class="row-between" style="margin-bottom:8px;align-items:baseline"><h2 class="h2" style="margin:0">'+esc(S.recipeName.trim()||'Untitled recipe')+'</h2><button class="link" style="color:var(--muted)" onclick="S.recipeDraft=null;render()">start over</button></div>';
+      h += '<div class="row-between" style="margin-bottom:8px;align-items:baseline"><h2 class="h2" style="margin:0">'+esc(S.recipeName.trim()||'Untitled recipe')+'</h2><button class="link" style="color:var(--muted)" onclick="startOverRecipe()">'+(S.recipeEditId?'cancel':'start over')+'</button></div>';
       h += S.recipeDraft.ingredients.map(function(it){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:8px"><input value="'+esc(it.name)+'" oninput="ingName(\''+it.id+'\',this.value)" style="flex:1;font-family:var(--f-body);font-size:14px;border:none;background:transparent;font-weight:500;padding:0"><button class="x" style="font-size:17px" onclick="ingRemove(\''+it.id+'\')">×</button></div>'+
           '<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span style="flex:1;font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+esc(it.qty)+' '+esc(it.unit)+'</span>'+
           '<div style="display:flex;align-items:center;gap:3px"><input value="'+it.grams+'" inputmode="decimal" oninput="ingGrams(\''+it.id+'\',this.value)" style="width:56px;font-family:var(--f-mono);font-size:13px;border:1px solid var(--border);border-radius:7px;padding:5px 6px;text-align:center"><span style="font-size:11px;color:var(--muted)">g</span></div>'+
           '<div style="display:flex;align-items:center;gap:3px"><input id="rcal-'+it.id+'" value="'+it.calories+'" inputmode="numeric" oninput="ingCal(\''+it.id+'\',this.value)" style="width:56px;font-family:var(--f-mono);font-size:13px;font-weight:600;border:1px solid var(--border);border-radius:7px;padding:5px 6px;text-align:center"><span style="font-size:11px;color:var(--muted)">cal</span></div></div></div>';
       }).join('');
-      h += '<button class="link" style="padding:9px 0" onclick="ingAdd()">+ add ingredient</button>';
-      h += '<div style="background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:12px;margin:8px 0 12px"><label style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:13px;font-weight:500">Finished dish weight</span><span style="display:flex;align-items:center;gap:4px"><input value="'+S.recipeDraft.finalWeight+'" inputmode="decimal" oninput="setFinalWeight(this.value)" style="width:72px;font-family:var(--f-mono);font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;text-align:center"><span style="font-size:12px;color:var(--muted)">g</span></span></label><p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.45">Defaults to the raw ingredient total. Weigh the cooked dish and enter it here for an accurate per-100g — cooking changes weight, calories stay the same.</p></div>';
+      h += '<div style="display:flex;gap:6px;margin:8px 0 2px">'+
+        '<input id="addIngText" class="field" placeholder="Add an ingredient — e.g. 2 tbsp olive oil" style="flex:1;padding:8px 10px;font-size:13px" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addIngredientEstimate();}">'+
+        '<button class="btn btn-quiet btn-auto" style="padding:8px 12px;white-space:nowrap" onclick="addIngredientEstimate()"'+(S.busy?' disabled':'')+'>'+(S.busy?'…':'+ Add')+'</button></div>'+
+        '<button class="link" style="padding:4px 0" onclick="ingAdd()">or add a blank row to fill in by hand</button>';
+      h += '<div style="background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:12px;margin:8px 0 12px"><label style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:13px;font-weight:500">Finished dish weight</span><span style="display:flex;align-items:center;gap:4px"><input id="recipeFinalWeight" value="'+S.recipeDraft.finalWeight+'" inputmode="decimal" oninput="setFinalWeight(this.value)" style="width:72px;font-family:var(--f-mono);font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;text-align:center"><span style="font-size:12px;color:var(--muted)">g</span></span></label><p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.45">Defaults to the raw ingredient total. Weigh the cooked dish and enter it here for an accurate per-100g — cooking changes weight, calories stay the same.</p></div>';
       h += '<div id="recipeSummary">'+recipeSummaryHTML()+'</div>';
       h += '<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px"><span style="font-size:13px;color:var(--muted)">Servings the recipe makes (optional)</span><input value="'+esc(S.recipeServings)+'" inputmode="numeric" placeholder="—" oninput="S.recipeServings=this.value;refreshRecipeSummary()" style="width:64px;font-family:var(--f-mono);font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;text-align:center"></label>';
       if(S.recipeDraft.note) h += '<p class="note">'+esc(S.recipeDraft.note)+'</p>';
-      h += '<button class="btn btn-primary" onclick="saveRecipe()">Save recipe</button>';
+      h += '<button class="btn btn-primary" onclick="saveRecipe()">'+(S.recipeEditId?'Update recipe':'Save recipe')+'</button>';
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     }
     h += '</section>';
@@ -563,7 +601,7 @@
       h += S.recipes.map(function(r){
         var totalCal = Math.round((r.per100.cal*r.finalWeight)/100);
         var line = r.per100.cal+' cal / 100g'+(r.per100.p?(' · P'+r.per100.p+' F'+r.per100.f+' C'+r.per100.c+' Fb'+(r.per100.fib||0)):'')+(r.servings?(' · '+Math.round(totalCal/r.servings)+' cal/serving'):'');
-        return '<div style="padding:13px 0;border-bottom:1px dashed var(--border)"><div style="display:flex;align-items:baseline;gap:8px"><span style="flex:1;font-family:var(--f-display);font-weight:600;font-size:15px">'+esc(r.name)+'</span><button class="x" style="font-size:16px" onclick="deleteRecipe(\''+r.id+'\')">×</button></div>'+
+        return '<div style="padding:13px 0;border-bottom:1px dashed var(--border)"><div style="display:flex;align-items:baseline;gap:8px"><span style="flex:1;font-family:var(--f-display);font-weight:600;font-size:15px">'+esc(r.name)+'</span><button class="link" style="font-size:12px;padding:0 10px 0 0" onclick="editRecipe(\''+r.id+'\')">Edit</button><button class="x" style="font-size:16px" onclick="deleteRecipe(\''+r.id+'\')">×</button></div>'+
           '<div style="font-size:12px;color:var(--muted);font-family:var(--f-mono);margin:3px 0 9px">'+line+'</div>'+
           '<div style="display:flex;align-items:center;gap:8px"><div class="stepper"><input id="rp-'+r.id+'" value="100" inputmode="decimal" oninput="recipePortionPreview(\''+r.id+'\')"><span style="font-size:12px;color:var(--muted)">g</span></div><span id="rpc-'+r.id+'" style="font-family:var(--f-mono);font-size:13px;font-weight:600">= '+Math.round(r.per100.cal)+' cal</span><div style="flex:1"></div><button class="pill" onclick="logRecipePortion(\''+r.id+'\')">+ Log</button></div></div>';
       }).join('');
