@@ -111,6 +111,7 @@
   function uid(){ return Date.now() + '_' + (_id++); }
   function num(v){ return v == null ? 0 : Number(v) || 0; }
   function round1(n){ return Math.round((n||0)*10)/10; }
+  function round2(n){ return Math.round((n||0)*100)/100; }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function sumMacros(items){ return (items||[]).reduce((a,i)=>({p:a.p+(i.protein||0),f:a.f+(i.fat||0),c:a.c+(i.carbs||0),fib:a.fib+(i.fiber||0)}),{p:0,f:0,c:0,fib:0}); }
   function macroCompact(m){ return 'P'+Math.round(m.p||0)+' · F'+Math.round(m.f||0)+' · C'+Math.round(m.c||0)+' · Fb'+Math.round(m.fib||0); }
@@ -358,7 +359,7 @@
     return '<div class="recipe-summary">'+
       '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px"><span style="font-family:var(--f-mono);font-size:32px;font-weight:600;color:var(--green-deep);line-height:1">'+per100+'</span><span style="font-size:13px;color:var(--green-deep)">cal / 100g</span></div>'+
       '<div style="font-size:12.5px;color:var(--green-deep);font-family:var(--f-mono);opacity:.85">Whole recipe '+rt.cal.toLocaleString()+' cal · '+Math.round(rt.g)+'g raw'+(sv>0?(' · '+Math.round(rt.cal/sv)+' cal/serving'):'')+'</div>'+
-      '<div style="font-size:12px;color:var(--green-deep);font-family:var(--f-mono);opacity:.7;margin-top:3px">per 100g — P '+Math.round((rt.p/fw)*100)+'g · F '+Math.round((rt.f/fw)*100)+'g · C '+Math.round((rt.c/fw)*100)+'g · Fb '+Math.round((rt.fib/fw)*100)+'g</div>'+
+      '<div style="font-size:12px;color:var(--green-deep);font-family:var(--f-mono);opacity:.7;margin-top:3px">per 100g — P '+round1((rt.p/fw)*100)+'g · F '+round1((rt.f/fw)*100)+'g · C '+round1((rt.c/fw)*100)+'g · Fb '+round1((rt.fib/fw)*100)+'g</div>'+
       '</div>';
   }
   function refreshRecipeSummary(){ var n = el('recipeSummary'); if(n) n.innerHTML = recipeSummaryHTML(); }
@@ -367,7 +368,7 @@
     var rt = recipeTotals(); var fw = S.recipeDraft.finalWeight || rt.g || 1;
     var ingredients = S.recipeDraft.ingredients.map(function(it){ return {name:it.name,qty:it.qty,unit:it.unit,grams:it.grams,calories:it.calories,protein:it.protein,fat:it.fat,carbs:it.carbs,fiber:it.fiber}; });
     var payload = {user_id:S.userId, name:(S.recipeName.trim()||'Untitled recipe'), kind:'recipe',
-      cal_100g:Math.round((rt.cal/fw)*100), protein_100g:Math.round((rt.p/fw)*100), fat_100g:Math.round((rt.f/fw)*100), carbs_100g:Math.round((rt.c/fw)*100), fiber_100g:Math.round((rt.fib/fw)*100),
+      cal_100g:Math.round((rt.cal/fw)*100), protein_100g:round2((rt.p/fw)*100), fat_100g:round2((rt.f/fw)*100), carbs_100g:round2((rt.c/fw)*100), fiber_100g:round2((rt.fib/fw)*100),
       final_weight_g:fw, servings:parseFloat(S.recipeServings)||null, ingredients:ingredients};
     try{
       var r = S.recipeEditId
