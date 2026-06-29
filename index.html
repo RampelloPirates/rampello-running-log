@@ -251,29 +251,18 @@
         autocomplete="email"
         autofocus
       >
-      <button type="submit" id="submit-btn">Email me a sign-in code</button>
-    </form>
-
-    <form id="code-form" style="display:none;margin-top:0.85rem;">
-      <label for="code">Enter the 6-digit code from the email</label>
+      <label for="password" style="margin-top:1rem;">Password</label>
       <input
-        type="text"
-        id="code"
-        inputmode="numeric"
-        autocomplete="one-time-code"
-        pattern="\d{6}"
-        maxlength="6"
-        placeholder="123456"
-        style="letter-spacing:6px;font-family:monospace;text-align:center;font-size:1.4rem;"
+        type="password"
+        id="password"
+        placeholder="••••••••"
+        required
+        autocomplete="current-password"
       >
-      <button type="submit" id="code-btn">Sign in</button>
+      <button type="submit" id="submit-btn">Sign in</button>
     </form>
 
     <div id="message"></div>
-
-    <div class="footer">
-      We'll email you a magic link and a 6-digit code.
-    </div>
 
     <button type="button" class="install-link" id="install-link">
       Install on your phone — one-tap access
@@ -296,7 +285,7 @@
             <li>Tap the <strong>Share</strong> button — the square with an arrow pointing up (bottom of the screen on iPhone, top-right on iPad).</li>
             <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
             <li>Tap <strong>Add</strong> in the top right.</li>
-            <li>Open the new icon, enter your email, and type the <strong>6-digit code</strong> from the email.</li>
+            <li>Open the new icon and sign in with your email and password.</li>
           </ol>
         </div>
 
@@ -310,8 +299,7 @@
         </div>
 
         <p class="install-note">
-          On iPhone, always use the <strong>6-digit code</strong> inside the app. (Tapping the email
-          link opens Safari instead of your installed app, so the app can stay signed out.)
+          Sign in once inside the installed app and it keeps you signed in.
         </p>
       </div>
     </div>
@@ -362,59 +350,29 @@
       if (event === 'SIGNED_IN' && session) await routeByProfile();
     });
 
-    // Step 1: request a magic link + 6-digit code.
+    // Email + password sign-in. No email delivery involved — accounts are
+    // created in the Supabase dashboard (Authentication → Users → Add user,
+    // with "Auto Confirm User" on). On success, onAuthStateChange →
+    // routeByProfile() handles the redirect.
+    const passwordInput = document.getElementById('password');
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = emailInput.value.trim();
-      if (!email) return;
+      const password = passwordInput.value;
+      if (!email || !password) return;
 
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Sending…';
+      submitBtn.textContent = 'Signing in…';
       showMessage('', '');
 
-      const { error } = await sb.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: window.location.origin + window.location.pathname,
-          shouldCreateUser: true,
-        },
-      });
+      const { error } = await sb.auth.signInWithPassword({ email, password });
 
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Email me a sign-in code';
+      submitBtn.textContent = 'Sign in';
 
       if (error) {
-        showMessage('Error: ' + error.message, 'error');
-      } else {
-        showMessage('Check your email — type the 6-digit code below. (On a computer you can also tap the link.)', 'success');
-        document.getElementById('code-form').style.display = '';
-        setTimeout(() => document.getElementById('code').focus(), 100);
+        showMessage('Sign-in failed: ' + error.message, 'error');
       }
-    });
-
-    // Step 2: verify the 6-digit code in this same app context. This is the
-    // reliable path for an installed iPhone PWA, where the emailed link would
-    // open in Safari (a separate storage container) instead of the app.
-    document.getElementById('code-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const email = emailInput.value.trim();
-      const code  = document.getElementById('code').value.trim();
-      if (!email || !code) return;
-
-      const codeBtn = document.getElementById('code-btn');
-      codeBtn.disabled = true;
-      codeBtn.textContent = 'Signing in…';
-      showMessage('', '');
-
-      const { error } = await sb.auth.verifyOtp({ email, token: code, type: 'email' });
-
-      codeBtn.disabled = false;
-      codeBtn.textContent = 'Sign in';
-
-      if (error) {
-        showMessage("That code didn't work. Double-check it, or request a new one.", 'error');
-      }
-      // On success, onAuthStateChange → routeByProfile() handles the redirect.
     });
   </script>
 </body>
