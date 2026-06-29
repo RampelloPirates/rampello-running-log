@@ -54,6 +54,14 @@ Return ONLY valid JSON, no markdown:
 - calories/protein/fat/carbs/fiber = totals for the stated quantity. Macros in grams. Integers are fine.
 Use realistic USDA-style values.`;
 
+const RECIPE_PHOTO_PROMPT =
+  `This image shows a recipe (an ingredient list, possibly with instructions). Read each ingredient and its amount, then estimate each one's weight in grams and its nutrition totals (not per 100g).
+Return ONLY valid JSON, no markdown:
+{"ingredients":[{"name":"...","qty":1,"unit":"cup","grams":120,"calories":455,"protein":12,"fat":2,"carbs":95,"fiber":4}],"note":"one short sentence on anything unreadable or assumed, or empty string"}
+- grams = estimated weight of that quantity of that ingredient.
+- calories/protein/fat/carbs/fiber = totals for the stated quantity. Macros in grams. Integers are fine.
+Use realistic USDA-style values. If an amount is unreadable, assume a sensible default and mention it in note.`;
+
 // ── Anthropic call ──────────────────────────────────────────────────────────
 async function callClaude(content: unknown): Promise<string> {
   const res = await fetch(ANTHROPIC_URL, {
@@ -65,7 +73,7 @@ async function callClaude(content: unknown): Promise<string> {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1500,
+      max_tokens: 2000,
       messages: [{ role: "user", content }],
     }),
   });
@@ -142,8 +150,19 @@ Deno.serve(async (req) => {
     }
 
     if (mode === "recipe") {
+      const image = String(body.image || ""); // base64, no data: prefix
+      if (image) {
+        const mediaType = String(body.media_type || "image/jpeg");
+        const out = parseJSON(
+          await callClaude([
+            { type: "image", source: { type: "base64", media_type: mediaType, data: image } },
+            { type: "text", text: RECIPE_PHOTO_PROMPT },
+          ]),
+        );
+        return json(out);
+      }
       const text = String(body.text || "").trim();
-      if (!text) return json({ error: "Missing recipe text" }, 400);
+      if (!text) return json({ error: "Missing recipe text or image" }, 400);
       const out = parseJSON(
         await callClaude(`${RECIPE_PROMPT}\n\nRecipe ingredients:\n${text}`),
       );

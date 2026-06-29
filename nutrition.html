@@ -307,14 +307,23 @@
       calories:Math.round(g.calories||0), protein:g.protein||0, fat:g.fat||0, carbs:g.carbs||0, fiber:g.fiber||0,
       calPerG:grams?((g.calories||0)/grams):0, pPerG:grams?((g.protein||0)/grams):0, fPerG:grams?((g.fat||0)/grams):0, cPerG:grams?((g.carbs||0)/grams):0, fibPerG:grams?((g.fiber||0)/grams):0};
   }
+  function applyRecipeOut(out){
+    var ingredients = (out.ingredients||[]).map(toDraftIngredient);
+    var sumG = Math.round(ingredients.reduce(function(s,i){return s+i.grams;},0));
+    S.recipeDraft = {ingredients:ingredients, finalWeight:sumG, note:out.note||'', weightOverridden:false};
+  }
   async function parseRecipe(){
     if(!S.recipeText.trim()||S.busy) return; S.busy=true; S.err=''; render();
+    try{ applyRecipeOut(await callEdge({mode:'recipe', text:S.recipeText.trim()})); }
+    catch(e){ S.err = e.message || "Couldn't read that recipe. One ingredient per line."; }
+    finally{ S.busy=false; render(); }
+  }
+  async function parseRecipePhoto(file){
+    if(!file||S.busy) return; S.busy=true; S.err=''; render();
     try{
-      var out = await callEdge({mode:'recipe', text:S.recipeText.trim()});
-      var ingredients = (out.ingredients||[]).map(toDraftIngredient);
-      var sumG = Math.round(ingredients.reduce(function(s,i){return s+i.grams;},0));
-      S.recipeDraft = {ingredients:ingredients, finalWeight:sumG, note:out.note||'', weightOverridden:false};
-    }catch(e){ S.err = e.message || "Couldn't read that recipe. One ingredient per line."; }
+      var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file); });
+      applyRecipeOut(await callEdge({mode:'recipe', image:b64, media_type:file.type||'image/jpeg'}));
+    }catch(e){ S.err = e.message || "Couldn't read that recipe photo. Try a clearer shot of the ingredient list."; }
     finally{ S.busy=false; render(); }
   }
   // Load a saved recipe back into the builder for editing (save will update it).
@@ -595,6 +604,9 @@
       h += '<input class="field" placeholder="Recipe name (e.g. weeknight chili)" value="'+esc(S.recipeName)+'" oninput="S.recipeName=this.value" style="margin-bottom:8px">';
       h += '<textarea class="field" rows="5" placeholder="1 lb ground beef\n2 cans kidney beans\n1 onion, diced\n2 tbsp olive oil\n1 can crushed tomatoes" oninput="S.recipeText=this.value" style="line-height:1.5;margin-bottom:10px">'+esc(S.recipeText)+'</textarea>';
       h += '<button class="btn btn-primary" onclick="parseRecipe()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Calculating…':'Calculate nutrition')+'</button>';
+      h += '<div style="text-align:center;margin:10px 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">or</div>';
+      h += '<input id="recipePhoto" type="file" accept="image/*" capture="environment" style="display:none" onchange="parseRecipePhoto(this.files&&this.files[0])">';
+      h += '<button class="btn btn-ghost" onclick="el(\'recipePhoto\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Reading photo…':'📷 Photo of a recipe')+'</button>';
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     }else{
       h += '<div class="row-between" style="margin-bottom:8px;align-items:baseline"><h2 class="h2" style="margin:0">'+esc(S.recipeName.trim()||'Untitled recipe')+'</h2><button class="link" style="color:var(--muted)" onclick="startOverRecipe()">'+(S.recipeEditId?'cancel':'start over')+'</button></div>';
