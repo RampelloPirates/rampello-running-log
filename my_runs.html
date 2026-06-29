@@ -3,26 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Runs — Tampa Bay Pirates XC</title>
-  <meta name="theme-color" content="#c8102e">
+  <title>My Runs — Tally</title>
+  <meta name="theme-color" content="#2C4530">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --red:      #c8102e;
-      --red-dark: #a00d24;
-      --black:    #1a1a1a;
-      --bone:     #f9f6f0;
-      --paper:    #ffffff;
-      --slate:    #4a5568;
-      --slate-2:  #6b7280;
-      --silver:   #d1d5db;
-      --silver-2: #e5e7eb;
-      --green:    #1b5e20;
-      --amber:    #b45309;
-      --font-display: Georgia, 'Times New Roman', serif;
-      --font-body:    'Helvetica Neue', Arial, sans-serif;
+      --red:      #3A5A40;   /* sage — primary accent */
+      --red-dark: #2C4530;
+      --black:    #1E241C;   /* warm near-black text */
+      --bone:     #F4F1E9;   /* cream page background */
+      --paper:    #FFFFFF;
+      --slate:    #71776B;
+      --slate-2:  #8A8F84;
+      --silver:   #E2DCCF;
+      --silver-2: #EBE6DA;
+      --green:    #3A5A40;
+      --green-deep:#2C4530;
+      --amber:    #BE722A;
+      --danger:   #A8443A;   /* destructive / errors */
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-body:    'Inter', system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
     body {
@@ -35,21 +38,20 @@
 
     /* topbar */
     .topbar {
-      background: var(--black);
+      background: var(--green-deep);
       color: var(--paper);
       padding: 0.85rem 1.25rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 4px solid var(--red);
+      border-bottom: 4px solid var(--amber);
     }
     .brand {
       display: flex; align-items: baseline; gap: 0.6rem;
       text-decoration: none; color: inherit;
     }
-    .brand .script { font-family: var(--font-display); font-style: italic; color: var(--red); font-size: 1rem; }
-    .brand .name { font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; font-size: 1.05rem; }
-    .brand .division { font-size: 0.7rem; color: var(--silver); letter-spacing: 2px; text-transform: uppercase; }
+    .brand .name { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.3px; font-size: 1.1rem; color: var(--paper); }
+    .brand .division { font-size: 0.7rem; color: var(--amber); letter-spacing: 2px; text-transform: uppercase; }
 
     .user-area { position: relative; }
     .menu-btn {
@@ -83,7 +85,7 @@
       text-decoration: none;
     }
     .menu-item:hover { background: var(--bone); }
-    .menu-item.danger { color: var(--red); }
+    .menu-item.danger { color: var(--danger); }
 
     /* main */
     main { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem 4rem 1rem; }
@@ -294,15 +296,15 @@
     }
     .edit-run-btn:hover { background: var(--bone); border-color: var(--slate-2); color: var(--black); }
     .del-run-btn {
-      background: var(--paper); color: var(--red);
-      border: 1px solid var(--red);
+      background: var(--paper); color: var(--danger);
+      border: 1px solid var(--danger);
       padding: 0.45rem 0.85rem;
       font-size: 0.8rem; font-weight: 700;
       border-radius: 3px; cursor: pointer;
       font-family: var(--font-body);
       letter-spacing: 0.5px;
     }
-    .del-run-btn:hover { background: var(--red); color: var(--paper); }
+    .del-run-btn:hover { background: var(--danger); color: var(--paper); }
     .del-run-btn:disabled { opacity: 0.6; cursor: default; }
 
     .empty { padding: 2.5rem 1.5rem; text-align: center; color: var(--slate-2); font-style: italic; }
@@ -339,9 +341,8 @@
 <body>
   <div class="topbar">
     <a href="#" class="brand">
-      <span class="script">Tampa Bay</span>
-      <span class="name">Pirates</span>
-      <span class="division">XC</span>
+      <span class="name">Tally</span>
+      <span class="division">Running</span>
     </a>
     <div class="user-area">
       <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
@@ -757,9 +758,8 @@
     });
 
     // ---- grade self-edit ----
-    // Kids set their own grade (it rolls over each year). RLS "athlete updates
-    // self" allows updating one's own athletes row. Grade drives the
-    // leaderboard's middle/elementary split, so keeping it current matters.
+    // Optional: set your grade. RLS "athlete updates self" allows updating your
+    // own profile row.
     const gradeSelect = document.getElementById('grade-select');
     gradeSelect.addEventListener('change', async () => {
       const status = document.getElementById('grade-status');
@@ -767,7 +767,7 @@
       status.textContent = 'Saving…'; status.style.color = 'var(--slate-2)';
       const { error } = await sb.from('athletes').update({ grade: val }).eq('id', athlete.id);
       if (error) {
-        status.textContent = "Couldn't save"; status.style.color = 'var(--red)';
+        status.textContent = "Couldn't save"; status.style.color = 'var(--danger)';
         return;
       }
       athlete.grade = val;

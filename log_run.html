@@ -3,26 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Log Run — Tampa Bay Pirates XC</title>
-  <meta name="theme-color" content="#c8102e">
+  <title>Log a Run — Tally</title>
+  <meta name="theme-color" content="#2C4530">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --red:      #c8102e;
-      --red-dark: #a00d24;
-      --black:    #1a1a1a;
-      --bone:     #f9f6f0;
-      --paper:    #ffffff;
-      --slate:    #4a5568;
-      --slate-2:  #6b7280;
-      --silver:   #d1d5db;
-      --silver-2: #e5e7eb;
-      --green:    #1b5e20;
-      --amber:    #b45309;
-      --font-display: Georgia, 'Times New Roman', serif;
-      --font-body:    'Helvetica Neue', Arial, sans-serif;
+      --red:      #3A5A40;   /* sage — primary accent */
+      --red-dark: #2C4530;
+      --black:    #1E241C;   /* warm near-black text */
+      --bone:     #F4F1E9;   /* cream page background */
+      --paper:    #FFFFFF;
+      --slate:    #71776B;
+      --slate-2:  #8A8F84;
+      --silver:   #E2DCCF;
+      --silver-2: #EBE6DA;
+      --green:    #3A5A40;
+      --green-deep:#2C4530;
+      --amber:    #BE722A;
+      --danger:   #A8443A;   /* destructive / errors */
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-body:    'Inter', system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
     body {
@@ -35,13 +38,13 @@
 
     /* topbar */
     .topbar {
-      background: var(--black);
+      background: var(--green-deep);
       color: var(--paper);
       padding: 0.85rem 1.25rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 4px solid var(--red);
+      border-bottom: 4px solid var(--amber);
     }
     .brand {
       display: flex;
@@ -50,21 +53,16 @@
       text-decoration: none;
       color: inherit;
     }
-    .brand .script {
-      font-family: var(--font-display);
-      font-style: italic;
-      color: var(--red);
-      font-size: 1rem;
-    }
     .brand .name {
-      font-weight: 900;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      font-size: 1.05rem;
+      font-family: var(--font-display);
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      font-size: 1.1rem;
+      color: var(--paper);
     }
     .brand .division {
       font-size: 0.7rem;
-      color: var(--silver);
+      color: var(--amber);
       letter-spacing: 2px;
       text-transform: uppercase;
     }
@@ -120,7 +118,7 @@
       color: var(--black);
     }
     .menu-item:hover { background: var(--bone); }
-    .menu-item.danger { color: var(--red); }
+    .menu-item.danger { color: var(--danger); }
 
     /* main */
     main {
@@ -481,7 +479,7 @@
       z-index: 100;
     }
     .toast.show { transform: translateX(-50%) translateY(0); }
-    .toast.error { background: #b71c1c; }
+    .toast.error { background: var(--danger); }
 
     /* celebration overlay */
     .celebration {
@@ -599,20 +597,8 @@
     }
     .celebration-secondary:hover { background: var(--bone); border-color: var(--slate-2); color: var(--black); }
 
-    .pace-target-hint {
-      margin-top: 0.85rem; padding: 0.6rem 0.85rem;
-      background: #fff8e1; border-left: 3px solid var(--amber, #b45309);
-      border-radius: 0 4px 4px 0; font-size: 0.9rem; color: var(--black);
-    }
-    .pace-target-hint strong { color: var(--amber, #b45309); }
-    .seg-pace-target {
-      grid-column: 1 / -1; font-size: 0.78rem; color: var(--amber, #b45309);
-      margin-top: -0.3rem;
-    }
-    .seg-pace-target:empty { display: none; }
-
     .form-error {
-      color: #b71c1c;
+      color: var(--danger);
       font-size: 0.85rem;
       margin-top: 0.5rem;
       display: none;
@@ -624,10 +610,9 @@
 </head>
 <body>
   <div class="topbar">
-    <a href="#" class="brand">
-      <span class="script">Tampa Bay</span>
-      <span class="name">Pirates</span>
-      <span class="division">XC</span>
+    <a href="my_runs.html" class="brand">
+      <span class="name">Tally</span>
+      <span class="division">Running</span>
     </a>
     <div class="user-area">
       <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
@@ -689,7 +674,6 @@
           <button type="button" class="type-btn" data-type="race">Race</button>
           <button type="button" class="type-btn" data-type="cross_train">Cross-train</button>
         </div>
-        <div id="pace-target-hint" class="pace-target-hint hidden"></div>
       </div>
 
       <!-- Cross-train activity (cross_train only) -->
@@ -976,42 +960,6 @@
       document.getElementById('xtrain-section').classList.toggle('hidden', selectedType !== 'cross_train');
       document.getElementById('race-section').classList.toggle('hidden', selectedType !== 'race');
       document.getElementById('mode-section').classList.toggle('hidden', selectedType === 'cross_train');
-      updateRunTypeTarget();
-    }
-
-    // ---- coach target paces (read-only here; set on the dashboard) ----
-    let paceTargets = { easy: null, tempo: null, race: null };
-    const RUN_TYPE_CATEGORY = { easy: 'easy', long: 'easy', tempo: 'tempo', race: 'race' };
-    const SEG_TYPE_CATEGORY = { warmup: 'easy', easy: 'easy', cooldown: 'easy', rest: 'easy', tempo: 'tempo', threshold: 'tempo' };
-
-    async function loadPaceTargets(athleteId) {
-      if (!athleteId) return;
-      const { data } = await sb.from('pace_targets')
-        .select('category, target_seconds')
-        .eq('athlete_id', athleteId);
-      (data || []).forEach(r => { paceTargets[r.category] = r.target_seconds; });
-      updateRunTypeTarget();
-      renderSegments(); // refresh any segment hints once targets arrive
-    }
-    function targetPaceFor(category) {
-      const s = category && paceTargets[category];
-      return s ? formatPace(s) : null;
-    }
-    function segTargetText(type) {
-      const cat = SEG_TYPE_CATEGORY[type];
-      const pace = targetPaceFor(cat);
-      return pace ? `🎯 Target ${cat} pace: ${pace}` : '';
-    }
-    function updateRunTypeTarget() {
-      const hint = document.getElementById('pace-target-hint');
-      const cat = RUN_TYPE_CATEGORY[selectedType];
-      const pace = targetPaceFor(cat);
-      if (pace) {
-        hint.innerHTML = `🎯 Coach's target ${cat} pace: <strong>${pace}</strong>`;
-        hint.classList.remove('hidden');
-      } else {
-        hint.classList.add('hidden');
-      }
     }
 
     // ---- mode toggle ----
@@ -1132,7 +1080,6 @@
             <input type="text" data-i="${i}" data-field="time" value="${seg.time ?? ''}" placeholder="MM:SS">
           </div>
           <button type="button" class="remove-seg" data-i="${i}" aria-label="Remove">×</button>
-          <div class="seg-pace-target">${segTargetText(seg.type)}</div>
         `;
         wrap.appendChild(row);
       });
@@ -1143,10 +1090,6 @@
           const f = e.target.dataset.field;
           segments[i][f] = e.target.value;
           if (f === 'unit') lastUnit = e.target.value;
-          if (f === 'type') {
-            const tEl = e.target.closest('.segment-row').querySelector('.seg-pace-target');
-            if (tEl) tEl.innerHTML = segTargetText(e.target.value);
-          }
           updateSegmentTotals();
         };
         el.addEventListener('input', handler);
@@ -1976,7 +1919,6 @@
         document.getElementById('user-name').textContent = displayName(profile);
         await loadRouteSuggestions(); // so a saved location matches a dropdown option
         enterEditMode(run);
-        loadPaceTargets(editAthleteId);
         return;
       }
 
@@ -1986,7 +1928,6 @@
       document.getElementById('user-name').textContent = displayName(auth);
       document.getElementById('run-date').value = new Date().toISOString().slice(0, 10);
       loadRouteSuggestions();
-      loadPaceTargets(auth.row.id);
     })();
   </script>
 </body>

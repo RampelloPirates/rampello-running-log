@@ -3,22 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign In — Tampa Bay Pirates XC</title>
-  <meta name="theme-color" content="#c8102e">
+  <title>Sign In — Tally</title>
+  <meta name="theme-color" content="#2C4530">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --red:      #c8102e;
-      --red-dark: #a00d24;
-      --black:    #1a1a1a;
-      --bone:     #f9f6f0;
-      --slate:    #4a5568;
-      --silver:   #d1d5db;
-      --white:    #ffffff;
-      --font-display: Georgia, 'Times New Roman', serif;
-      --font-body:    'Helvetica Neue', Arial, sans-serif;
+      --red:       #3A5A40;   /* sage — primary accent */
+      --red-dark:  #2C4530;
+      --green-deep:#2C4530;
+      --amber:     #BE722A;
+      --black:     #1E241C;   /* warm near-black text */
+      --bone:      #F4F1E9;   /* cream */
+      --slate:     #71776B;
+      --silver:    #E2DCCF;
+      --white:     #FFFFFF;
+      --font-display: 'Space Grotesk', system-ui, sans-serif;
+      --font-body:    'Inter', system-ui, sans-serif;
     }
 
     * { box-sizing: border-box; }
@@ -26,10 +29,7 @@
     body {
       margin: 0;
       font-family: var(--font-body);
-      background: var(--black);
-      background-image:
-        radial-gradient(circle at 20% 30%, rgba(200, 16, 46, 0.15), transparent 50%),
-        radial-gradient(circle at 80% 70%, rgba(200, 16, 46, 0.1), transparent 50%);
+      background: var(--bone);
       color: var(--black);
       min-height: 100vh;
       display: flex;
@@ -39,44 +39,34 @@
     }
 
     .card {
-      background: var(--bone);
-      border-radius: 4px;
+      background: var(--white);
+      border: 1px solid var(--silver);
+      border-top: 6px solid var(--red);
+      border-radius: 16px;
       padding: 2.5rem 2rem;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 12px 40px rgba(44, 69, 48, 0.10);
       width: 100%;
       max-width: 420px;
-      border-top: 6px solid var(--red);
     }
 
-    .logo { text-align: center; margin-bottom: 1.5rem; }
-    .logo .script {
-      font-family: var(--font-display);
-      font-style: italic;
-      color: var(--red);
-      font-size: 1.4rem;
-      letter-spacing: 0.5px;
-      margin: 0;
-      font-weight: 400;
-    }
+    .logo { text-align: center; margin-bottom: 1.25rem; }
     .logo .name {
-      font-family: var(--font-body);
-      color: var(--black);
-      font-size: 2.4rem;
-      font-weight: 900;
-      letter-spacing: 2px;
-      margin: -0.15rem 0 0 0;
-      text-transform: uppercase;
+      font-family: var(--font-display);
+      color: var(--green-deep);
+      font-size: 2.6rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin: 0;
     }
+    .logo .name .dot { color: var(--amber); }
     .logo .division {
       display: inline-block;
-      margin-top: 0.4rem;
-      padding: 0.2rem 0.75rem;
-      background: var(--red);
-      color: var(--white);
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 3px;
-      border-radius: 2px;
+      margin-top: 0.5rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--slate);
     }
 
     .tagline {
@@ -225,7 +215,7 @@
       margin: 0;
     }
     .install-close:hover { background: none; }
-    .install-body { padding: 1.25rem; font-size: 0.95rem; line-height: 1.5; color: #1a1a1a; }
+    .install-body { padding: 1.25rem; font-size: 0.95rem; line-height: 1.5; color: var(--black); }
     .install-intro { margin: 0 0 1.25rem 0; font-style: italic; color: var(--slate); }
     .install-platform { margin-bottom: 1.5rem; }
     .install-platform h3 { font-size: 0.95rem; font-weight: 700; margin: 0 0 0.6rem 0; color: var(--red); }
@@ -245,15 +235,14 @@
 <body>
   <div class="card">
     <div class="logo">
-      <p class="script">Tampa Bay</p>
-      <h1 class="name">Pirates</h1>
-      <span class="division">Cross Country</span>
+      <h1 class="name">Tally<span class="dot">.</span></h1>
+      <span class="division">Personal Health Log</span>
     </div>
 
-    <p class="tagline"><strong>Finish Line Mentality.</strong><br>Sign in to log your runs.</p>
+    <p class="tagline">Sign in to track your runs and nutrition.</p>
 
     <form id="login-form">
-      <label for="email">Team email</label>
+      <label for="email">Email</label>
       <input
         type="email"
         id="email"
@@ -283,7 +272,7 @@
     <div id="message"></div>
 
     <div class="footer">
-      On the roster but can't get in? Ask Coach Sowell.
+      We'll email you a magic link and a 6-digit code.
     </div>
 
     <button type="button" class="install-link" id="install-link">

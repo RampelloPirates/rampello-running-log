@@ -1,5 +1,5 @@
 // ============================================================================
-// Shared auth + Supabase client for the Tampa Bay Pirates running log.
+// Shared auth + Supabase client for the personal running + nutrition log.
 //
 // Load this AFTER the supabase-js CDN and BEFORE each page's inline script:
 //   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
