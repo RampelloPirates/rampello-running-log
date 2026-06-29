@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Import a Garmin run — Tally</title>
+  <meta name="theme-color" content="#2C4530">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--ink:#1E241C;--bone:#F4F1E9;--paper:#FFFFFF;--surface-warm:#FBF9F3;--muted:#71776B;--silver:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;--f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--bone);color:var(--ink);min-height:100vh;}
+    .topbar{background:var(--green-deep);color:var(--paper);padding:.85rem 1.25rem;display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid var(--amber);}
+    .brand{display:flex;align-items:baseline;gap:.5rem;text-decoration:none;color:inherit;}
+    .brand .name{font-family:var(--f-display);font-weight:700;font-size:1.15rem;}
+    .brand .name .dot{color:var(--amber);}
+    .brand .division{font-size:.7rem;color:var(--amber);letter-spacing:2px;text-transform:uppercase;}
+    main{max-width:820px;margin:0 auto;padding:1.5rem 1.1rem 3rem;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    h1{font-family:var(--f-display);font-size:1.5rem;color:var(--green-deep);margin:.2rem 0 .3rem;}
+    .sub{color:var(--muted);font-size:.95rem;margin:0 0 1.25rem;line-height:1.5;}
+    .card{background:var(--paper);border:1px solid var(--silver);border-radius:16px;padding:1.25rem;margin-bottom:1rem;}
+    details{font-size:.9rem;color:var(--muted);} details summary{cursor:pointer;color:var(--green);font-weight:600;} details ol{margin:.6rem 0 0;padding-left:1.2rem;line-height:1.6;}
+    .filebtn{display:inline-block;background:var(--green);color:#fff;border:none;border-radius:10px;padding:.8rem 1.2rem;font-family:var(--f-body);font-weight:600;font-size:.95rem;cursor:pointer;}
+    .muted{color:var(--muted);font-size:.82rem;} code{font-family:var(--f-mono);font-size:.85em;}
+    .summary{display:flex;flex-wrap:wrap;gap:1.25rem;margin:.25rem 0 1rem;}
+    .summary .m{display:flex;flex-direction:column;}
+    .summary .m .v{font-family:var(--f-mono);font-size:1.4rem;font-weight:600;color:var(--green-deep);}
+    .summary .m .l{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+    .row{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.6rem;}
+    label.inl{font-size:.85rem;color:var(--muted);font-weight:600;}
+    .field{font-family:var(--f-body);font-size:.9rem;padding:.5rem .6rem;border:1px solid var(--silver);border-radius:8px;background:var(--surface-warm);color:var(--ink);}
+    table{width:100%;border-collapse:collapse;font-size:.84rem;margin-top:.4rem;}
+    th,td{text-align:left;padding:.45rem .4rem;border-bottom:1px solid var(--silver);}
+    th{font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+    td.num{font-family:var(--f-mono);text-align:right;}
+    select.seg{font-family:var(--f-body);font-size:.8rem;padding:.25rem .3rem;border:1px solid var(--silver);border-radius:6px;background:var(--surface-warm);}
+    .btn{background:var(--green);color:#fff;border:none;border-radius:10px;padding:.85rem 1.2rem;font-family:var(--f-body);font-weight:700;font-size:.95rem;cursor:pointer;width:100%;margin-top:.75rem;}
+    .btn:disabled{opacity:.5;cursor:default;}
+    .msg{font-size:.9rem;margin-top:.6rem;} .msg.error{color:var(--danger);} .msg.success{color:var(--green);}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="home.html" class="brand"><span class="name">Tally<span class="dot">.</span></span><span class="division">Import</span></a>
+  </div>
+  <main>
+    <a href="my_runs.html" class="home-back">‹ My Runs</a>
+    <h1>Import a Garmin run (FIT)</h1>
+    <p class="sub">Upload one activity's <code>.fit</code> (or <code>.fit.gz</code>) file. It's decoded in your browser, and each Garmin <strong>lap</strong> becomes a run segment with its own measured cadence and heart rate — so you can see how those shift across the run.</p>
+
+    <div class="card">
+      <details>
+        <summary>Where to get the FIT file</summary>
+        <ol>
+          <li><strong>From Garmin Connect</strong> (one run): open the activity → gear/⚙ menu → <strong>Export Original</strong> → you get a <code>.fit</code>.</li>
+          <li><strong>From your Strava export</strong>: inside the ZIP, the <code>activities/</code> folder has the original files as <code>.fit.gz</code> — upload one of those.</li>
+        </ol>
+      </details>
+    </div>
+
+    <div class="card">
+      <input id="file" type="file" accept=".fit,.gz,application/octet-stream" style="display:none">
+      <button class="filebtn" id="pickbtn">Choose a .fit file</button>
+      <span id="filename" class="muted" style="margin-left:.6rem;"></span>
+      <div class="msg" id="loadmsg"></div>
+    </div>
+
+    <div class="card" id="previewcard" style="display:none;">
+      <div class="summary" id="summary"></div>
+      <div class="row">
+        <label class="inl" for="runtype">Run type</label>
+        <select class="field" id="runtype">
+          <option value="easy">Easy</option><option value="long">Long</option>
+          <option value="tempo">Tempo</option><option value="intervals">Intervals</option>
+          <option value="race">Race</option>
+        </select>
+        <span class="muted">Segments (laps) below — set each one's type if you like.</span>
+      </div>
+      <div id="segtable"></div>
+      <button class="btn" id="importbtn">Import this run + segments</button>
+      <div class="msg" id="msg"></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>window.__sb = sb;</script>
+  <script type="module">
+    import FitParserMod from 'https://cdn.jsdelivr.net/npm/fit-file-parser/+esm';
+    import pako from 'https://cdn.jsdelivr.net/npm/pako/+esm';
+    const FitParser = FitParserMod.default || FitParserMod;
+    const sb = window.__sb;
+
+    const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown'];
+    let RUN = null, SEGS = [], ATHLETE = null, USER = null;
+
+    const $ = (id) => document.getElementById(id);
+    const pad = (n) => String(n).padStart(2,'0');
+    function fmtTime(s){ s=Math.round(s||0); const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),x=s%60; return (h?h+':':'')+pad(m)+':'+pad(x); }
+    function localDate(d){ d=new Date(d); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+    function todPart(d){ const h=new Date(d).getHours(); return h<12?'morning':(h<17?'afternoon':'evening'); }
+    function clampInt(v,lo,hi){ v=Math.round(Number(v)); return (isFinite(v)&&v>=lo&&v<=hi)?v:null; }
+    // FIT running cadence is rev/min (one foot). steps/min = (cad + fractional) * 2.
+    // Guard against a parser that already doubled it.
+    function stepsPerMin(cad, frac){
+      let c = Number(cad); if(!isFinite(c)||c<=0) return null;
+      c = c + (Number(frac)||0);
+      if(c < 130) c = c*2;             // looks like rev/min → double to steps/min
+      return clampInt(c,100,250);
+    }
+    function num(v){ const n=Number(v); return isFinite(n)?n:0; }
+
+    // Map a FIT lap "intensity" to one of our segment types.
+    function segTypeFromIntensity(it){
+      const s = String(it==null?'':it).toLowerCase();
+      if(s.indexOf('warm')>=0) return 'warmup';
+      if(s.indexOf('cool')>=0) return 'cooldown';
+      if(s.indexOf('rest')>=0||s.indexOf('recover')>=0) return 'rest';
+      return 'easy';
+    }
+
+    $('pickbtn').addEventListener('click', ()=> $('file').click());
+    $('file').addEventListener('change', (e)=>{
+      const f = e.target.files && e.target.files[0]; if(!f) return;
+      $('filename').textContent = f.name;
+      $('loadmsg').textContent = 'Decoding…'; $('loadmsg').className='msg';
+      const rd = new FileReader();
+      rd.onload = ()=>{
+        try{
+          let bytes = new Uint8Array(rd.result);
+          if(/\.gz$/i.test(f.name) || (bytes[0]===0x1f && bytes[1]===0x8b)) bytes = pako.ungzip(bytes);
+          decodeFit(bytes.buffer);
+        }catch(err){ $('loadmsg').className='msg error'; $('loadmsg').textContent='Could not read that file: '+(err.message||err); }
+      };
+      rd.readAsArrayBuffer(f);
+    });
+
+    function decodeFit(arrayBuffer){
+      const parser = new FitParser({ force:true, mode:'list', lengthUnit:'mi', speedUnit:'mph', elapsedRecordField:true });
+      parser.parse(arrayBuffer, (error, data)=>{
+        if(error){ $('loadmsg').className='msg error'; $('loadmsg').textContent='Parse error: '+error; return; }
+        build(data);
+      });
+    }
+
+    function build(data){
+      const session = (data.sessions && data.sessions[0]) || {};
+      const laps = data.laps || [];
+      const startTime = session.start_time || (laps[0] && laps[0].start_time) || (data.activity && data.activity.timestamp) || Date.now();
+      const totalDist = num(session.total_distance);
+      const totalSecs = num(session.total_timer_time || session.total_elapsed_time);
+
+      RUN = {
+        run_date: localDate(startTime),
+        time_of_day: todPart(startTime),
+        distance_miles: totalDist>0 ? Math.min(999.99, Math.round(totalDist*100)/100) : null,
+        duration_seconds: totalSecs>0 ? Math.round(totalSecs) : null,
+        avg_cadence: stepsPerMin(session.avg_running_cadence!=null?session.avg_running_cadence:session.avg_cadence, session.avg_fractional_cadence),
+        avg_hr: clampInt(session.avg_heart_rate,30,240),
+        max_hr: clampInt(session.max_heart_rate,30,240),
+      };
+      SEGS = laps.map((lp,i)=>{
+        const d = num(lp.total_distance);
+        const t = num(lp.total_timer_time || lp.total_elapsed_time);
+        return {
+          segment_order: i+1,
+          segment_type: segTypeFromIntensity(lp.intensity),
+          distance_miles: d>0 ? Math.min(999.99, Math.round(d*100)/100) : null,
+          duration_seconds: t>0 ? Math.round(t) : null,
+          avg_cadence: stepsPerMin(lp.avg_running_cadence!=null?lp.avg_running_cadence:lp.avg_cadence, lp.avg_fractional_cadence),
+          avg_hr: clampInt(lp.avg_heart_rate,30,240),
+          max_hr: clampInt(lp.max_heart_rate,30,240),
+        };
+      });
+      renderPreview();
+    }
+
+    function paceStr(mi, secs){ if(!mi||!secs) return '—'; const p=secs/mi; return Math.floor(p/60)+':'+pad(Math.round(p%60))+'/mi'; }
+
+    function renderPreview(){
+      $('loadmsg').textContent='';
+      $('summary').innerHTML =
+        metric(RUN.distance_miles!=null?RUN.distance_miles.toFixed(2):'—','miles') +
+        metric(fmtTime(RUN.duration_seconds),'time') +
+        metric(paceStr(RUN.distance_miles,RUN.duration_seconds),'avg pace') +
+        metric(RUN.avg_cadence!=null?RUN.avg_cadence:'—','avg cadence') +
+        metric(RUN.avg_hr!=null?RUN.avg_hr:'—','avg HR') +
+        metric(RUN.max_hr!=null?RUN.max_hr:'—','max HR');
+
+      let h = '<table><thead><tr><th>#</th><th>Segment</th><th class="num">Miles</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Cad</th><th class="num">HR avg</th><th class="num">HR max</th></tr></thead><tbody>';
+      h += SEGS.map((s)=>{
+        const opts = SEG_TYPES.map(t=>'<option value="'+t+'"'+(t===s.segment_type?' selected':'')+'>'+t+'</option>').join('');
+        return '<tr><td>'+s.segment_order+'</td>'+
+          '<td><select class="seg" data-i="'+(s.segment_order-1)+'">'+opts+'</select></td>'+
+          '<td class="num">'+(s.distance_miles!=null?s.distance_miles.toFixed(2):'—')+'</td>'+
+          '<td class="num">'+fmtTime(s.duration_seconds)+'</td>'+
+          '<td class="num">'+paceStr(s.distance_miles,s.duration_seconds)+'</td>'+
+          '<td class="num">'+(s.avg_cadence!=null?s.avg_cadence:'—')+'</td>'+
+          '<td class="num">'+(s.avg_hr!=null?s.avg_hr:'—')+'</td>'+
+          '<td class="num">'+(s.max_hr!=null?s.max_hr:'—')+'</td></tr>';
+      }).join('');
+      h += '</tbody></table>';
+      if(!SEGS.length) h += '<p class="muted">This file had no laps — it will import as a single run with no segments.</p>';
+      $('segtable').innerHTML = h;
+      $('segtable').querySelectorAll('select.seg').forEach(sel=>{
+        sel.addEventListener('change', e=>{ SEGS[+e.target.dataset.i].segment_type = e.target.value; });
+      });
+      $('previewcard').style.display='';
+    }
+    function metric(v,l){ return '<div class="m"><span class="v">'+v+'</span><span class="l">'+l+'</span></div>'; }
+
+    $('importbtn').addEventListener('click', async ()=>{
+      const btn=$('importbtn'); btn.disabled=true; btn.textContent='Importing…';
+      try{
+        const runRow = Object.assign({ athlete_id:ATHLETE, created_by:USER, run_type:$('runtype').value }, RUN);
+        const ins = await sb.from('runs').insert(runRow).select('id').single();
+        if(ins.error) throw ins.error;
+        if(SEGS.length){
+          const rows = SEGS.map(s=> Object.assign({ run_id:ins.data.id }, s));
+          const seg = await sb.from('run_segments').insert(rows);
+          if(seg.error) throw seg.error;
+        }
+        $('msg').className='msg success';
+        $('msg').innerHTML='Imported the run with '+SEGS.length+' segment'+(SEGS.length===1?'':'s')+' — <a href="my_runs.html">view it</a>.';
+        btn.textContent='Imported ✓';
+      }catch(e){
+        $('msg').className='msg error'; $('msg').textContent='Import failed: '+(e.message||e);
+        btn.textContent='Import this run + segments'; btn.disabled=false;
+      }
+    });
+
+    (async ()=>{
+      const profile = await window.requireProfile(); if(!profile) return;
+      ATHLETE = profile.row.id; USER = profile.user.id;
+    })();
+  </script>
+</body>
+</html>
