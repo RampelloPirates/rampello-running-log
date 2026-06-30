@@ -101,7 +101,7 @@
   var S = {
     view:'today', method:'type', loaded:false, userId:null,
     target:null, log:[], usuals:[], recipes:[], history:[],
-    draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null,
+    draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null, editEntryId:null, editItems:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
     busy:false, err:'', editTarget:false,
   };
@@ -620,13 +620,64 @@
     return h;
   }
 
+  // ── Edit a logged entry's quantities (rescales calories/macros) ─────────────
+  function openEntryEdit(id){
+    var e = S.log.filter(function(x){return x.id===id;})[0]; if(!e) return;
+    var items = (e.items && e.items.length) ? e.items
+      : [{name:e.title, unit:'serving', qty:1, calories:e.total, protein:(e.macros||{}).p, fat:(e.macros||{}).f, carbs:(e.macros||{}).c, fiber:(e.macros||{}).fib}];
+    S.editEntryId = id;
+    S.editItems = items.map(function(it){
+      var q = it.qty || 1; var per = function(v){ return q ? ((v||0)/q) : (v||0); };
+      return {name:it.name, unit:it.unit, qty:q,
+        calories:it.calories||0, protein:num(it.protein), fat:num(it.fat), carbs:num(it.carbs), fiber:num(it.fiber),
+        calPerUnit:per(it.calories), pPerUnit:per(it.protein), fPerUnit:per(it.fat), cPerUnit:per(it.carbs), fibPerUnit:per(it.fiber)};
+    });
+    render();
+  }
+  function entryQty(idx,v){
+    var it=S.editItems[idx]; if(!it) return; var q=Math.max(0,parseFloat(v)||0); it.qty=q;
+    it.calories=Math.round(it.calPerUnit*q); it.protein=round1(it.pPerUnit*q); it.fat=round1(it.fPerUnit*q); it.carbs=round1(it.cPerUnit*q); it.fiber=round1(it.fibPerUnit*q);
+    var c=el('eecal-'+idx); if(c) c.textContent=it.calories;
+    var t=el('eeTotal'); if(t) t.textContent=S.editItems.reduce(function(s,x){return s+x.calories;},0).toLocaleString();
+  }
+  function cancelEntryEdit(){ S.editEntryId=null; S.editItems=null; render(); }
+  async function saveEntryEdit(){
+    var id=S.editEntryId, items=S.editItems;
+    var total=items.reduce(function(s,i){return s+i.calories;},0);
+    var m=sumMacros(items);
+    try{
+      var up=await sb.from('nutrition_entries').update({total_calories:Math.round(total), protein:round1(m.p), fat:round1(m.f), carbs:round1(m.c), fiber:round1(m.fib)}).eq('id',id);
+      if(up.error) throw up.error;
+      var del=await sb.from('nutrition_entry_items').delete().eq('entry_id',id);
+      if(del.error) throw del.error;
+      var rows=items.map(function(it,i){ return {entry_id:id, position:i, name:it.name, qty:it.qty, unit:it.unit||'serving', calories:Math.round(it.calories), protein:round1(it.protein), fat:round1(it.fat), carbs:round1(it.carbs), fiber:round1(it.fiber)}; });
+      if(rows.length){ var ins=await sb.from('nutrition_entry_items').insert(rows); if(ins.error) throw ins.error; }
+      S.editEntryId=null; S.editItems=null; await loadLog(); render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+  function entryEditor(e){
+    var h='<div class="logrow" style="background:var(--surface-warm);border-radius:10px;padding:10px 12px;border-bottom:none">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:6px">'+esc(e.title)+'</div>';
+    h += S.editItems.map(function(it,i){
+      return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0">'+
+        '<span style="flex:1;font-size:13px;min-width:0">'+esc(it.name)+'</span>'+
+        '<input value="'+it.qty+'" inputmode="decimal" oninput="entryQty('+i+',this.value)" style="width:54px;font-family:var(--f-mono);font-size:13px;border:1px solid var(--border);border-radius:7px;padding:5px 6px;text-align:center">'+
+        '<span style="font-size:11px;color:var(--muted);min-width:44px">'+esc(it.unit||'')+'</span>'+
+        '<span id="eecal-'+i+'" style="font-family:var(--f-mono);font-size:13px;font-weight:600;width:48px;text-align:right">'+it.calories+'</span></div>';
+    }).join('');
+    h += '<div class="row-between" style="padding:8px 0 8px;border-top:1px solid var(--border);margin-top:6px;align-items:baseline"><span style="font-size:12px;color:var(--muted)">Total</span><span id="eeTotal" style="font-family:var(--f-mono);font-size:16px;font-weight:600">'+S.editItems.reduce(function(s,x){return s+x.calories;},0).toLocaleString()+'</span></div>';
+    h += '<div class="btn-row"><button class="btn btn-primary" onclick="saveEntryEdit()">Save</button><button class="btn btn-ghost btn-auto" onclick="cancelEntryEdit()">Cancel</button></div></div>';
+    return h;
+  }
   function loggedRow(e){
+    if(S.editEntryId===e.id) return entryEditor(e);
     var hasMacros = e.macros && (e.macros.p||e.macros.f||e.macros.c||e.macros.fib);
     var canOpen = hasMacros || (e.items && e.items.length>1);
     var h = '<div class="logrow"><div class="head"'+(canOpen?(' style="cursor:pointer" onclick="toggleRow(this)"'):'')+'>'+
       '<span class="time">'+timeOf(e.ts)+'</span>'+
       '<span class="ltitle">'+esc(e.title)+(e.source==='label'?'<span class="badge">LABEL</span>':'')+'</span>'+
       '<span class="lcal">'+e.total.toLocaleString()+'</span>'+
+      '<button class="x" style="font-size:14px;padding:0 0 0 6px;color:var(--green)" title="Edit quantity" onclick="event.stopPropagation();openEntryEdit(\''+e.id+'\')">✎</button>'+
       '<button class="x" style="font-size:16px;padding:0 0 0 4px" onclick="event.stopPropagation();deleteEntry(\''+e.id+'\')">×</button></div>';
     if(hasMacros) h += '<div style="padding-left:66px;padding-top:3px"><span class="macro-compact">'+macroCompact(e.macros)+'</span></div>';
     if(e.items && e.items.length>1){
