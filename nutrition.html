@@ -181,6 +181,37 @@
     });
     S.history = Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return a.key<b.key?1:-1;});
   }
+  // Expand a history day to show its entries (loaded on demand), or collapse it.
+  async function expandHistoryDay(key){
+    var d = S.history.filter(function(x){return x.key===key;})[0]; if(!d) return;
+    if(d.expanded){ d.expanded=false; render(); return; }
+    if(!d.entries){
+      var er = await sb.from('nutrition_entries').select('*').eq('log_date',key).order('occurred_at',{ascending:true});
+      var entries = er.data||[]; var byE={};
+      if(entries.length){
+        var ir = await sb.from('nutrition_entry_items').select('*').in('entry_id',entries.map(function(e){return e.id;})).order('position',{ascending:true});
+        (ir.data||[]).forEach(function(it){ (byE[it.entry_id]=byE[it.entry_id]||[]).push(it); });
+      }
+      d.entries = entries.map(function(e){ return entryToView(e, byE[e.id]); });
+    }
+    d.expanded=true; render();
+  }
+  // Re-log a past entry into today.
+  async function relogEntry(key, entryId){
+    var d = S.history.filter(function(x){return x.key===key;})[0]; if(!d||!d.entries) return;
+    var e = d.entries.filter(function(x){return x.id===entryId;})[0]; if(!e) return;
+    try{
+      await insertEntry({title:e.title, source:e.source, total:e.total, macros:e.macros, items:e.items});
+      toast('Logged to today');
+    }catch(err){ S.err=err.message; render(); }
+  }
+  function toast(msg){
+    var t=document.createElement('div');
+    t.textContent=msg;
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--green-deep);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;z-index:300;box-shadow:0 8px 24px rgba(44,69,48,.3)';
+    document.body.appendChild(t);
+    setTimeout(function(){ if(t.parentNode) t.parentNode.removeChild(t); }, 1600);
+  }
 
   async function insertEntry(o){
     var ins = await sb.from('nutrition_entries').insert({
@@ -756,7 +787,22 @@
     else h += S.history.map(function(d){
       var m=d.macros; var macro=(m.p||m.f||m.c||m.fib)?(' · P'+Math.round(m.p)+' F'+Math.round(m.f)+' C'+Math.round(m.c)+' Fb'+Math.round(m.fib||0)):'';
       var over = S.target && d.total>S.target;
-      return '<div class="row-between" style="padding:12px 0;border-bottom:1px dashed var(--border);align-items:baseline"><div><div style="font-size:14px;font-weight:500">'+prettyDate(d.key)+'</div><div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+d.count+' entr'+(d.count===1?'y':'ies')+macro+(over?' · over goal':'')+'</div></div><span style="font-family:var(--f-mono);font-size:18px;font-weight:600;color:'+(over?'var(--danger)':'var(--ink)')+'">'+d.total.toLocaleString()+'</span></div>';
+      var head = '<div class="row-between" style="padding:12px 0;border-bottom:'+(d.expanded?'none':'1px dashed var(--border)')+';align-items:baseline;cursor:pointer" onclick="expandHistoryDay(\''+d.key+'\')">'+
+        '<div><div style="font-size:14px;font-weight:500">'+(d.expanded?'▾ ':'▸ ')+prettyDate(d.key)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+d.count+' entr'+(d.count===1?'y':'ies')+macro+(over?' · over goal':'')+'</div></div>'+
+        '<span style="font-family:var(--f-mono);font-size:18px;font-weight:600;color:'+(over?'var(--danger)':'var(--ink)')+'">'+d.total.toLocaleString()+'</span></div>';
+      var body='';
+      if(d.expanded && d.entries){
+        if(!d.entries.length){ body = '<div style="padding:4px 0 12px;color:var(--muted);font-size:12px;border-bottom:1px dashed var(--border)">No items.</div>'; }
+        else body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)">'+d.entries.map(function(e){
+          var em=e.macros||{}; var emac=(em.p||em.f||em.c||em.fib)?(' · '+macroCompact(em)):'';
+          return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 14px">'+
+            '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+esc(e.title)+'</div>'+
+            '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+e.total.toLocaleString()+' cal'+emac+'</div></div>'+
+            '<button class="pill" onclick="relogEntry(\''+d.key+'\',\''+e.id+'\')">+ Log</button></div>';
+        }).join('')+'</div>';
+      }
+      return head+body;
     }).join('');
     return h+'</section>';
   }
