@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Supplements — Tally</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--paper:#F4F1E9;--surface:#FFFFFF;--surface-warm:#FBF9F3;--ink:#1E241C;--muted:#71776B;--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--amber-soft:#F1E6D2;--border:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;
+      --f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;}
+    input:focus,select:focus,button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    .wrap{max-width:520px;margin:0 auto;padding:0 16px 48px;}
+    header{padding:22px 0 14px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:14px;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+    .row-between{display:flex;justify-content:space-between;align-items:center;}
+    .progress{font-family:var(--f-mono);font-size:15px;font-weight:600;color:var(--green-deep);}
+    .supp{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);}
+    .supp:last-child{border-bottom:none;}
+    .check{flex-shrink:0;width:30px;height:30px;border-radius:50%;border:2px solid var(--border);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;transition:background .12s,border-color .12s;}
+    .check.on{background:var(--green);border-color:var(--green);}
+    .supp .body{flex:1;min-width:0;}
+    .supp .name{font-size:14px;font-weight:500;}
+    .supp .meta{font-size:12px;color:var(--muted);font-family:var(--f-mono);}
+    .badge{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--green-deep);background:var(--green-tint);border-radius:99px;padding:1px 7px;margin-left:6px;}
+    .icon-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:2px 4px;}
+    .icon-btn:hover{color:var(--green);}
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:11px 16px;width:100%;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+    .btn-auto{width:auto;}
+    .btn-row{display:flex;gap:8px;margin-top:10px;}
+    .link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:8px 0;}
+    .empty{color:var(--muted);font-size:13.5px;line-height:1.5;}
+    .hist-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13px;}
+    .hist-row:last-child{border-bottom:none;}
+    .err{color:var(--danger);font-size:13px;margin:8px 0 0;}
+    .loading{padding:40px;text-align:center;color:var(--muted);}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  var S = { loaded:false, userId:null, stack:[], taken:{}, history:[], form:null, err:'' };
+
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function todayKey(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function prettyDate(key){
+    var p=key.split('-').map(Number); var dt=new Date(p[0],p[1]-1,p[2]);
+    if(key===todayKey()) return 'Today';
+    var y=new Date(Date.now()-86400000);
+    if(key===(y.getFullYear()+'-'+pad(y.getMonth()+1)+'-'+pad(y.getDate()))) return 'Yesterday';
+    return dt.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  }
+
+  // ── data ──
+  async function loadStack(){
+    var r = await sb.from('supplements').select('*').eq('active',true).order('sort_order',{ascending:true}).order('created_at',{ascending:true});
+    S.stack = r.data || [];
+  }
+  async function loadTakenToday(){
+    var r = await sb.from('supplement_log').select('supplement_id').eq('log_date',todayKey());
+    S.taken = {}; (r.data||[]).forEach(function(x){ S.taken[x.supplement_id]=true; });
+  }
+  async function loadHistory(){
+    var since = new Date(Date.now()-13*86400000); var sinceKey = since.getFullYear()+'-'+pad(since.getMonth()+1)+'-'+pad(since.getDate());
+    var r = await sb.from('supplement_log').select('log_date').gte('log_date',sinceKey);
+    var map={}; (r.data||[]).forEach(function(x){ map[x.log_date]=(map[x.log_date]||0)+1; });
+    S.history = Object.keys(map).map(function(k){return {key:k,count:map[k]};}).sort(function(a,b){return a.key<b.key?1:-1;});
+  }
+
+  async function toggleTaken(id){
+    try{
+      if(S.taken[id]){
+        await sb.from('supplement_log').delete().eq('supplement_id',id).eq('log_date',todayKey());
+        delete S.taken[id];
+      }else{
+        await sb.from('supplement_log').insert({user_id:S.userId, supplement_id:id, log_date:todayKey()});
+        S.taken[id]=true;
+      }
+      render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+
+  function openAdd(){ S.form={id:null, name:'', dose:'', timing:'Anytime'}; S.err=''; render(); }
+  function openEdit(id){ var s=S.stack.filter(function(x){return x.id===id;})[0]; if(!s) return; S.form={id:s.id, name:s.name||'', dose:s.dose||'', timing:s.timing||'Anytime'}; S.err=''; render(); }
+  function closeForm(){ S.form=null; render(); }
+  async function saveForm(){
+    var name=(el('sName')||{}).value||''; name=name.trim(); if(!name){ S.err='Name is required.'; render(); return; }
+    var dose=((el('sDose')||{}).value||'').trim(); var timing=(el('sTiming')||{}).value||'Anytime';
+    try{
+      if(S.form.id){
+        var u=await sb.from('supplements').update({name:name,dose:dose||null,timing:timing}).eq('id',S.form.id);
+        if(u.error) throw u.error;
+      }else{
+        var order = S.stack.length ? (S.stack[S.stack.length-1].sort_order+1) : 0;
+        var ins=await sb.from('supplements').insert({user_id:S.userId, name:name, dose:dose||null, timing:timing, sort_order:order});
+        if(ins.error) throw ins.error;
+      }
+      S.form=null; await loadStack(); render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+  async function removeSupp(id){
+    if(!confirm('Remove this supplement from your stack? Past history is kept.')) return;
+    try{ await sb.from('supplements').update({active:false}).eq('id',id); await loadStack(); await loadTakenToday(); render(); }
+    catch(e){ S.err=e.message; render(); }
+  }
+
+  // ── render ──
+  function render(){
+    var app=el('app');
+    if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
+    var h='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Supplements</small></h1></header>';
+
+    var takenCount=S.stack.filter(function(s){return S.taken[s.id];}).length;
+    h+='<section class="card"><div class="row-between" style="margin-bottom:6px"><span class="kicker">'+prettyDate(todayKey())+'</span><span class="progress">'+takenCount+' of '+S.stack.length+' taken</span></div>';
+    if(!S.stack.length){
+      h+='<p class="empty">No supplements yet. Add the things you take and check them off each day.</p>';
+    }else{
+      h+=S.stack.map(function(s){
+        var on=!!S.taken[s.id];
+        return '<div class="supp"><button class="check'+(on?' on':'')+'" onclick="toggleTaken(\''+s.id+'\')" aria-label="Toggle taken">'+(on?'✓':'')+'</button>'+
+          '<div class="body"><div class="name">'+esc(s.name)+(s.timing&&s.timing!=='Anytime'?'<span class="badge">'+esc(s.timing)+'</span>':'')+'</div>'+
+          (s.dose?('<div class="meta">'+esc(s.dose)+'</div>'):'')+'</div>'+
+          '<button class="icon-btn" title="Edit" onclick="openEdit(\''+s.id+'\')">✎</button></div>';
+      }).join('');
+    }
+    if(!S.form){
+      h+='<button class="link" onclick="openAdd()">+ Add a supplement</button>';
+    }else{
+      h+='<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">'+
+        '<input id="sName" class="field" placeholder="Name (e.g. Vitamin D)" value="'+esc(S.form.name)+'" style="margin-bottom:8px">'+
+        '<div style="display:flex;gap:8px">'+
+        '<input id="sDose" class="field" placeholder="Dose (e.g. 2000 IU)" value="'+esc(S.form.dose)+'" style="flex:1">'+
+        '<select id="sTiming" class="field" style="width:130px">'+
+        ['Anytime','Morning','Midday','Evening','Bedtime'].map(function(t){return '<option'+(S.form.timing===t?' selected':'')+'>'+t+'</option>';}).join('')+
+        '</select></div>'+
+        '<div class="btn-row"><button class="btn btn-primary" onclick="saveForm()">'+(S.form.id?'Save':'Add')+'</button>'+
+        (S.form.id?'<button class="btn btn-ghost btn-auto" onclick="removeSupp(\''+S.form.id+'\')" style="color:var(--danger);border-color:var(--danger)">Remove</button>':'')+
+        '<button class="btn btn-ghost btn-auto" onclick="closeForm()">Cancel</button></div></div>';
+    }
+    if(S.err) h+='<p class="err">'+esc(S.err)+'</p>';
+    h+='</section>';
+
+    // history
+    h+='<section class="card"><div class="kicker" style="margin-bottom:6px">Last 14 days</div>';
+    if(!S.history.length){ h+='<p class="empty">Nothing logged yet.</p>'; }
+    else h+=S.history.map(function(d){
+      return '<div class="hist-row"><span>'+prettyDate(d.key)+'</span><span style="font-family:var(--f-mono);color:var(--green-deep);font-weight:600">'+d.count+' taken</span></div>';
+    }).join('');
+    h+='</section>';
+
+    app.innerHTML=h;
+  }
+
+  (async function(){
+    var profile = await requireUser(); if(!profile) return;
+    S.userId = profile.user.id;
+    await Promise.all([loadStack(), loadTakenToday(), loadHistory()]);
+    S.loaded = true; render();
+  })();
+  </script>
+</body>
+</html>
