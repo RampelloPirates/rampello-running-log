@@ -205,6 +205,20 @@
       toast('Logged to today');
     }catch(err){ S.err=err.message; render(); }
   }
+  // Save a past entry as a reusable "usual".
+  async function saveUsualFromEntry(key, entryId){
+    var d = S.history.filter(function(x){return x.key===key;})[0]; if(!d||!d.entries) return;
+    var e = d.entries.filter(function(x){return x.id===entryId;})[0]; if(!e) return;
+    var items = (e.items||[]).map(function(it){ return {name:it.name,qty:it.qty,unit:it.unit,calories:it.calories,protein:it.protein,fat:it.fat,carbs:it.carbs,fiber:it.fiber}; });
+    var m = e.macros || sumMacros(items);
+    try{
+      var r = await sb.from('nutrition_usuals').insert({user_id:S.userId, name:e.title,
+        total_calories:Math.round(e.total||items.reduce(function(s,i){return s+i.calories;},0)),
+        protein:round1(m.p), fat:round1(m.f), carbs:round1(m.c), fiber:round1(m.fib), items:items}).select('id').single();
+      if(r.error) throw r.error;
+      await loadUsuals(); toast('Saved to usuals');
+    }catch(err){ S.err=err.message; render(); }
+  }
   function toast(msg){
     var t=document.createElement('div');
     t.textContent=msg;
@@ -799,6 +813,7 @@
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 14px">'+
             '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+esc(e.title)+'</div>'+
             '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+e.total.toLocaleString()+' cal'+emac+'</div></div>'+
+            '<button class="pill" style="background:var(--surface-warm);color:var(--green-deep);border:1px solid var(--border);font-weight:500" title="Save as a usual" onclick="saveUsualFromEntry(\''+d.key+'\',\''+e.id+'\')">★ Usual</button>'+
             '<button class="pill" onclick="relogEntry(\''+d.key+'\',\''+e.id+'\')">+ Log</button></div>';
         }).join('')+'</div>';
       }
