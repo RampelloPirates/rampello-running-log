@@ -149,6 +149,58 @@ def compute_from_streams(s):
     return samples, splits, (max_cad or None)
 
 
+def build_laps(sid, headers):
+    """Pull an activity's laps and turn them into run_segments rows — but only
+    when they look like a real workout (2+ laps that vary in distance). Uniform
+    auto 1-mile laps are skipped since the per-mile splits already cover those.
+    Segment type is auto-guessed from lap pace (fast=interval, slow=rest); the
+    user can re-classify in the app."""
+    try:
+        r = requests.get(f"{API}/activities/{sid}/laps", headers=headers)
+        if r.status_code != 200:
+            return None
+        laps = r.json()
+    except Exception:
+        return None
+    if not laps or len(laps) < 2:
+        return None
+
+    dists = [(l.get("distance") or 0) / 1609.344 for l in laps]
+    maxd, mind = max(dists), min(dists)
+    if maxd <= 0 or (maxd - mind) / maxd < 0.25:
+        return None  # near-uniform laps → leave it to the per-mile splits
+
+    paces = []
+    for l in laps:
+        d = (l.get("distance") or 0) / 1609.344
+        t = l.get("moving_time") or l.get("elapsed_time") or 0
+        paces.append((t / d) if d > 0 and t > 0 else None)
+    valid = sorted(p for p in paces if p)
+    med = valid[len(valid) // 2] if valid else None
+
+    rows = []
+    for i, l in enumerate(laps):
+        d = (l.get("distance") or 0) / 1609.344
+        t = int(l.get("moving_time") or l.get("elapsed_time") or 0)
+        p = (t / d) if d > 0 and t > 0 else None
+        seg_type = "easy"
+        if med and p:
+            if p <= 0.90 * med:
+                seg_type = "interval"
+            elif p >= 1.15 * med:
+                seg_type = "rest"
+        rows.append({
+            "segment_order": l.get("lap_index") or (i + 1),
+            "segment_type": seg_type,
+            "distance_miles": round(d, 2) if d > 0 else None,
+            "duration_seconds": t or None,
+            "avg_cadence": clamp(steps_per_min(l.get("average_cadence")), 100, 250) if l.get("average_cadence") else None,
+            "avg_hr": clamp(l.get("average_heartrate"), 30, 240),
+            "max_hr": clamp(l.get("max_heartrate"), 30, 240),
+        })
+    return rows
+
+
 def main():
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     auth = sb.auth.sign_in_with_password({"email": APP_EMAIL, "password": APP_PASSWORD})
@@ -221,7 +273,21 @@ def main():
             except Exception as e:
                 print(f"  {ref}: streams skipped ({e})")
 
-            sb.table("runs").insert(row).execute()
+            res = sb.table("runs").insert(row).execute()
+            run_id = res.data[0]["id"] if getattr(res, "data", None) else None
+
+            # Pull Strava's laps as structured segments (workouts only).
+            if run_id and activity_type == "run":
+                laps = build_laps(sid, headers)
+                if laps:
+                    for lp in laps:
+                        lp["run_id"] = run_id
+                    try:
+                        sb.table("run_segments").insert(laps).execute()
+                        print(f"    + {len(laps)} lap segment(s)")
+                    except Exception as e:
+                        print(f"  {ref}: laps skipped ({e})")
+
             added += 1
             print(f"  imported {ref} — {row['run_date']} {row.get('distance_miles')}mi")
             time.sleep(1)  # gentle on rate limits

@@ -559,7 +559,7 @@
           effort_rpe, avg_cadence, max_cadence, avg_hr, max_hr, route, shoes,
           conditions, temperature_f, dewpoint_f, humidity_percent, wind_mph,
           mile_splits, samples, notes,
-          run_segments(id, segment_order, segment_type, distance_miles, duration_seconds, notes)
+          run_segments(id, segment_order, segment_type, distance_miles, duration_seconds, avg_cadence, avg_hr, max_hr, notes)
         `)
         .eq('athlete_id', athlete.id)
         .gte('run_date', startDate)
@@ -893,7 +893,16 @@
       // to the auto per-mile splits from the Strava stream.
       if (segs.length) {
         const ss = segmentStreamStats(segs, run.samples);
-        const hasStream = ss.some(x => x.cad != null || x.hr != null);
+        // Prefer exact per-lap metrics (from Strava) when stored; otherwise use
+        // the values derived from the sample stream.
+        const stat = segs.map((s, i) => {
+          const c = ss[i] || {};
+          return {
+            cad: s.avg_cadence != null ? s.avg_cadence : (c.cad != null ? c.cad : null),
+            hr:  s.avg_hr != null ? s.avg_hr : (c.hr != null ? c.hr : null),
+          };
+        });
+        const hasStream = stat.some(x => x.cad != null || x.hr != null);
         body += `
           <table class="seg-mini-table">
             <thead>
@@ -904,7 +913,7 @@
                 const d = s.distance_miles ? Number(s.distance_miles) : 0;
                 const t = s.duration_seconds ? Number(s.duration_seconds) : 0;
                 const p = (d > 0 && t > 0) ? t / d : null;
-                const st = ss[i] || {};
+                const st = stat[i] || {};
                 return `
                   <tr>
                     <td>${s.segment_order || i+1}</td>
@@ -919,7 +928,7 @@
             </tbody>
           </table>
         `;
-        body += renderSegmentSummary(segs, ss);
+        body += renderSegmentSummary(segs, stat);
       } else if (run.mile_splits && run.mile_splits.length) {
         body += renderMileSplits(run.mile_splits);
       }
