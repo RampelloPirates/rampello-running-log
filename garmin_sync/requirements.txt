@@ -1,3 +1,0 @@
-garminconnect>=0.2.19
-fitparse>=1.2.0
-supabase>=2.4.0
