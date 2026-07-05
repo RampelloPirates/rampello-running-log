@@ -620,10 +620,24 @@
     }
 
     function renderStats(runs) {
-      let totalSec = 0;
-      runs.forEach(r => { if (r.duration_seconds) totalSec += Number(r.duration_seconds); });
-      document.getElementById('stat-runs').textContent = runs.length;
-      document.getElementById('stat-time').textContent = totalSec ? formatDuration(totalSec) : '—';
+      let totalSec = 0, totalMiles = 0, pMiles = 0, pSec = 0;
+      runs.forEach(r => {
+        if (r.duration_seconds) totalSec += Number(r.duration_seconds);
+        if (r.distance_miles) totalMiles += Number(r.distance_miles);
+        if (r.distance_miles && r.duration_seconds) { pMiles += Number(r.distance_miles); pSec += Number(r.duration_seconds); }
+      });
+      const tiles = [
+        `<div class="stat"><div class="label">Activities</div><div class="value">${runs.length}</div></div>`,
+        `<div class="stat"><div class="label">Total time</div><div class="value">${totalSec ? formatDuration(totalSec) : '—'}</div></div>`,
+      ];
+      // Miles + pace only make sense within a single activity type — show them
+      // once you've filtered to one (e.g. Run) up top; the range pills set "the week".
+      if (activeType !== 'all') {
+        tiles.push(`<div class="stat"><div class="label">Total miles</div><div class="value">${totalMiles ? formatMiles(totalMiles) + '<span class="unit">mi</span>' : '—'}</div></div>`);
+        const pace = (pMiles > 0 && pSec > 0) ? pSec / pMiles : null;
+        tiles.push(`<div class="stat"><div class="label">Avg pace</div><div class="value">${pace ? formatPace(pace) : '—'}</div></div>`);
+      }
+      document.getElementById('stats').innerHTML = tiles.join('');
     }
 
     function renderPaceByType(runs) {
@@ -753,36 +767,67 @@
       rerenderWithFilter();
     }
 
-    // Weekly context shown when an activity is expanded: total miles and avg
-    // pace for the SAME activity type across the Mon–Sun week it falls in.
-    function weekLineFor(run) {
-      const d = new Date(run.run_date + 'T00:00:00');
-      const monday = new Date(d);
-      monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-      monday.setHours(0, 0, 0, 0);
-      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-      const mk = x => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
-      const lo = mk(monday), hi = mk(sunday);
-      const act = run.activity_type || 'run';
-      let miles = 0, pMiles = 0, pSec = 0, count = 0;
-      allRunsInRange.forEach(r => {
-        if ((r.activity_type || 'run') !== act) return;
-        if (r.run_date < lo || r.run_date > hi) return;
-        count++;
-        if (r.distance_miles) miles += Number(r.distance_miles);
-        if (r.distance_miles && r.duration_seconds) { pMiles += Number(r.distance_miles); pSec += Number(r.duration_seconds); }
+    // Derive each segment's avg cadence / avg+max HR from the run's sample
+    // stream, by mapping the segment's cumulative-distance window onto the
+    // samples (which carry cumulative miles). Needs samples (Strava runs).
+    function segmentStreamStats(segs, samples) {
+      if (!samples || !samples.length) return segs.map(() => ({}));
+      let cum = 0;
+      const bounds = segs.map(s => { const start = cum; cum += Number(s.distance_miles || 0); return { start, end: cum }; });
+      const acc = segs.map(() => ({ cadSum: 0, cadN: 0, hrSum: 0, hrN: 0, hrMax: 0 }));
+      samples.forEach(p => {
+        if (p.mi == null) return;
+        for (let i = 0; i < bounds.length; i++) {
+          if (p.mi >= bounds[i].start && (p.mi < bounds[i].end || i === bounds.length - 1)) {
+            if (p.cad != null) { acc[i].cadSum += p.cad; acc[i].cadN++; }
+            if (p.hr != null) { acc[i].hrSum += p.hr; acc[i].hrN++; acc[i].hrMax = Math.max(acc[i].hrMax, p.hr); }
+            break;
+          }
+        }
       });
-      const pace = (pMiles > 0 && pSec > 0) ? pSec / pMiles : null;
-      const label = ACT_LABEL[act] || act;
-      const wkFmt = monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const parts = [`${count} ${count === 1 ? 'activity' : 'activities'}`];
-      if (miles) parts.push(`${formatMiles(miles)} mi`);
-      if (pace) parts.push(`${formatPace(pace)} avg`);
+      return acc.map(a => ({
+        cad: a.cadN ? Math.round(a.cadSum / a.cadN) : null,
+        hr: a.hrN ? Math.round(a.hrSum / a.hrN) : null,
+        hrMax: a.hrMax || null,
+      }));
+    }
+
+    // Summarize segments grouped by type (e.g. interval / rest) — time-weighted
+    // cadence + HR, blended pace. Only shown when there's more than one type.
+    function renderSegmentSummary(segs, ss) {
+      const byType = {};
+      segs.forEach((s, i) => {
+        const g = byType[s.segment_type] || (byType[s.segment_type] = { miles: 0, seconds: 0, count: 0, cadW: 0, cadT: 0, hrW: 0, hrT: 0 });
+        const sec = Number(s.duration_seconds || 0);
+        g.miles += Number(s.distance_miles || 0); g.seconds += sec; g.count++;
+        const st = ss[i] || {};
+        if (st.cad != null && sec > 0) { g.cadW += st.cad * sec; g.cadT += sec; }
+        if (st.hr != null && sec > 0) { g.hrW += st.hr * sec; g.hrT += sec; }
+      });
+      const order = ['warmup','easy','tempo','threshold','interval','hill','fartlek','strides','rest','cooldown'];
+      const types = Object.keys(byType).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      if (types.length < 2) return '';
+      const hasStream = types.some(t => byType[t].cadT || byType[t].hrT);
+      const rows = types.map(t => {
+        const g = byType[t];
+        const pace = (g.miles > 0 && g.seconds > 0) ? g.seconds / g.miles : null;
+        const cad = g.cadT ? Math.round(g.cadW / g.cadT) : null;
+        const hr = g.hrT ? Math.round(g.hrW / g.hrT) : null;
+        return `
+          <tr>
+            <td><span class="seg-pill seg-${t}">${t}</span> <span style="color:var(--slate-2)">×${g.count}</span></td>
+            <td class="num">${g.miles ? formatMiles(g.miles) + ' mi' : '—'}</td>
+            <td class="num">${g.seconds ? formatDuration(g.seconds) : '—'}</td>
+            <td class="num"><strong>${formatPace(pace)}</strong></td>
+            ${hasStream ? `<td class="num">${cad || '—'}</td><td class="num">${hr || '—'}</td>` : ''}
+          </tr>`;
+      }).join('');
       return `
-        <div style="margin-bottom:0.85rem;padding:0.6rem 0.85rem;background:var(--black);color:var(--paper);border-radius:3px;">
-          <div style="color:var(--silver);font-size:0.62rem;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:0.15rem;">Week of ${wkFmt} · ${escapeHtml(label)}</div>
-          <div style="font-size:0.9rem;font-weight:600;">${parts.join(' · ')}</div>
-        </div>`;
+        <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--slate-2);font-weight:700;margin:0.85rem 0 0.4rem;">By segment type</div>
+        <table class="seg-mini-table" style="margin-bottom:0.5rem;">
+          <thead><tr><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th>${hasStream ? '<th class="num">Cad</th><th class="num">HR</th>' : ''}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
     }
 
     // ---- per-mile splits + cadence/HR charts (from Strava-synced runs) ----
@@ -842,20 +887,24 @@
 
     function renderSegmentDetail(segs, run) {
       let body = '';
-      body += weekLineFor(run);
-      body += renderMileSplits(run.mile_splits);
       body += renderCharts(run);
+      // Structured segments (a workout you logged, or laps) take precedence and
+      // show cadence/HR per segment plus a grouped summary. Otherwise fall back
+      // to the auto per-mile splits from the Strava stream.
       if (segs.length) {
+        const ss = segmentStreamStats(segs, run.samples);
+        const hasStream = ss.some(x => x.cad != null || x.hr != null);
         body += `
           <table class="seg-mini-table">
             <thead>
-              <tr><th>#</th><th>Type</th><th class="num">Distance</th><th class="num">Time</th><th class="num">Pace</th></tr>
+              <tr><th>#</th><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th>${hasStream ? '<th class="num">Cad</th><th class="num">HR</th>' : ''}</tr>
             </thead>
             <tbody>
               ${segs.map((s, i) => {
                 const d = s.distance_miles ? Number(s.distance_miles) : 0;
                 const t = s.duration_seconds ? Number(s.duration_seconds) : 0;
                 const p = (d > 0 && t > 0) ? t / d : null;
+                const st = ss[i] || {};
                 return `
                   <tr>
                     <td>${s.segment_order || i+1}</td>
@@ -863,14 +912,16 @@
                     <td class="num">${d ? formatMiles(d) + ' mi' : '—'}</td>
                     <td class="num">${t ? formatDuration(t) : '—'}</td>
                     <td class="num">${formatPace(p)}</td>
+                    ${hasStream ? `<td class="num">${st.cad || '—'}</td><td class="num">${st.hr || '—'}</td>` : ''}
                   </tr>
                 `;
               }).join('')}
             </tbody>
           </table>
         `;
-      } else {
-        body += '<div style="color:var(--slate-2);font-size:0.9rem;font-style:italic;">No segments recorded.</div>';
+        body += renderSegmentSummary(segs, ss);
+      } else if (run.mile_splits && run.mile_splits.length) {
+        body += renderMileSplits(run.mile_splits);
       }
 
       // extras

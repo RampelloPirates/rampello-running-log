@@ -1829,7 +1829,7 @@
     async function loadRunForEdit(id) {
       const { data, error } = await sb.from('runs').select(`
         id, athlete_id, run_date, time_of_day, activity_type, sub_type, distance_miles, duration_seconds,
-        effort_rpe, avg_cadence, avg_hr, max_hr, route, notes,
+        effort_rpe, avg_cadence, avg_hr, max_hr, route, notes, mile_splits,
         run_segments(segment_order, segment_type, distance_miles, duration_seconds),
         race_results(meet_name, course_name, course_type, official_distance_meters,
           finish_place_overall, finish_place_team, team_score_total, opponents, conditions_notes)
@@ -1901,6 +1901,12 @@
       if (!isRunActivity() || segs.length === 0 || (allExpected && segs.length === 1)) {
         setMode('simple');
         renderSplitRows();
+        // Strava-synced runs carry per-mile splits in mile_splits (not segments);
+        // surface them in the split inputs so editing shows what you saw in the log.
+        if (isRunActivity() && segs.length === 0 && Array.isArray(run.mile_splits) && run.mile_splits.length) {
+          const inputs = Array.from(document.querySelectorAll('#splits-rows input[data-split]'));
+          run.mile_splits.forEach((ms, i) => { if (inputs[i] && ms && ms.seconds != null) inputs[i].value = formatDuration(ms.seconds); });
+        }
       } else if (looksLikeSplits) {
         setMode('simple');
         renderSplitRows();
