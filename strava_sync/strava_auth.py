@@ -41,6 +41,7 @@ def main():
             params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             got["code"] = params.get("code", [None])[0]
             got["error"] = params.get("error", [None])[0]
+            got["scope"] = params.get("scope", [None])[0]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -74,7 +75,15 @@ def main():
     r.raise_for_status()
     tok = r.json()
 
-    print("\n=== Add these three as GitHub repository secrets ===\n")
+    granted = got.get("scope") or ""
+    print(f"\nGranted scope: {granted or '(none)'}")
+    if "activity:read" not in granted:
+        print("\n*** WARNING: the 'activity' permission was NOT granted. ***")
+        print("The sync will get 401 on activities. Re-run this script and, on the")
+        print("Strava authorize page, CHECK the box to view your activities before")
+        print("clicking Authorize.\n")
+
+    print("=== Add these three as GitHub repository secrets ===\n")
     print(f"STRAVA_CLIENT_ID = {client_id}")
     print(f"STRAVA_CLIENT_SECRET = {client_secret}")
     print(f"STRAVA_REFRESH_TOKEN = {tok['refresh_token']}")
