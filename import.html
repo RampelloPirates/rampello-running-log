@@ -229,11 +229,15 @@
       var btn=$('importbtn'); btn.disabled=true; btn.textContent='Importing…';
       var payload=newRows.map(function(p){
         var mi=toMiles(p.distRaw,unit);
-        var row={ athlete_id:ATHLETE, created_by:USER, run_date:p.date, run_type:p.run_type,
+        var isRun=(p.run_type!=='cross_train');
+        var actMap={ride:/bik|cycl|ride/i, swim:/swim/i, walk:/walk/i, hike:/hik/i, strength:/weight|strength|lift/i};
+        var act='run';
+        if(!isRun){ act='workout'; for(var k in actMap){ if(actMap[k].test(p.cross||'')){ act=k; break; } } }
+        var row={ athlete_id:ATHLETE, created_by:USER, run_date:p.date,
+          activity_type:act, sub_type:(isRun?'easy':null),
           distance_miles:(mi>0?Math.min(999.99, Math.round(mi*100)/100):null),
           duration_seconds:(p.seconds>0?p.seconds:null),
           notes:(p.name?('Imported from Strava: '+p.name):'Imported from Strava') };
-        if(p.run_type==='cross_train') row.cross_train_activity=p.cross;
         return row;
       });
       try{

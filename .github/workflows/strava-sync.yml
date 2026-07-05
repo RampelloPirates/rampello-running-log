@@ -3,7 +3,12 @@ name: Strava sync
 on:
   schedule:
     - cron: "0 11 * * *"    # daily ~11:00 UTC. Adjust as you like.
-  workflow_dispatch: {}       # run on demand from the Actions tab
+  workflow_dispatch:          # run on demand from the Actions tab
+    inputs:
+      days:
+        description: "Days back to sync (use a big number like 3650 for a one-time backfill)"
+        default: "7"
+        required: false
 
 concurrency:
   group: strava-sync
@@ -28,5 +33,5 @@ jobs:
           STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
           STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
           STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
-          SYNC_DAYS: "7"
+          SYNC_DAYS: ${{ github.event.inputs.days || '7' }}
         run: python strava_sync/strava_sync.py

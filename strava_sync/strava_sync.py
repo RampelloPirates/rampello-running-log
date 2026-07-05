@@ -65,6 +65,26 @@ def time_of_day(iso_local):
     return "morning" if h < 12 else ("afternoon" if h < 17 else "evening")
 
 
+def activity_type_from_sport(sport):
+    """Map a Strava sport_type/type to our activity vocabulary."""
+    s = (sport or "").lower()
+    if "run" in s:
+        return "run"
+    if "ride" in s or "cycl" in s or "bike" in s or "handcycle" in s:
+        return "ride"
+    if "swim" in s:
+        return "swim"
+    if "walk" in s:
+        return "walk"
+    if "hike" in s:
+        return "hike"
+    if "weight" in s or "strength" in s or "crossfit" in s:
+        return "strength"
+    if any(k in s for k in ("workout", "yoga", "pilates", "hiit", "elliptical", "stair")):
+        return "workout"
+    return "other"
+
+
 def strava_access_token():
     r = requests.post("https://www.strava.com/oauth/token", data={
         "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
@@ -164,8 +184,8 @@ def main():
             if ex.data:
                 continue
 
-            sport = (a.get("sport_type") or a.get("type") or "").lower()
-            is_run = "run" in sport
+            sport = a.get("sport_type") or a.get("type") or ""
+            activity_type = activity_type_from_sport(sport)
             start_local = a.get("start_date_local") or ""
             dist_mi = (a.get("distance") or 0) / 1609.344
 
@@ -176,7 +196,8 @@ def main():
                 "run_date": (start_local[:10] if start_local
                              else datetime.now(timezone.utc).date().isoformat()),
                 "time_of_day": time_of_day(start_local),
-                "run_type": "easy" if is_run else "cross_train",
+                "activity_type": activity_type,
+                "sub_type": None,   # Strava doesn't classify runs; set it later in the app
                 "distance_miles": round(min(dist_mi, 999.99), 2) if dist_mi > 0 else None,
                 "duration_seconds": int(a.get("moving_time") or a.get("elapsed_time") or 0) or None,
                 "avg_hr": clamp(a.get("average_heartrate"), 30, 240),
@@ -184,8 +205,6 @@ def main():
                 "avg_cadence": clamp(steps_per_min(a.get("average_cadence")), 100, 250) if a.get("average_cadence") else None,
                 "notes": f"Strava: {a.get('name')}" if a.get("name") else "Imported from Strava",
             }
-            if not is_run:
-                row["cross_train_activity"] = sport or "other"
 
             try:
                 sr = requests.get(f"{API}/activities/{sid}/streams", headers=headers,

@@ -221,7 +221,7 @@
     $('importbtn').addEventListener('click', async ()=>{
       const btn=$('importbtn'); btn.disabled=true; btn.textContent='Importing…';
       try{
-        const runRow = Object.assign({ athlete_id:ATHLETE, created_by:USER, run_type:$('runtype').value }, RUN);
+        const runRow = Object.assign({ athlete_id:ATHLETE, created_by:USER, activity_type:'run', sub_type:$('runtype').value }, RUN);
         const ins = await sb.from('runs').insert(runRow).select('id').single();
         if(ins.error) throw ins.error;
         if(SEGS.length){

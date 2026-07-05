@@ -383,21 +383,7 @@
     <h1 class="page-title">My runs</h1>
     <p class="page-sub">Your log, paces, and trends.</p>
 
-    <div class="grade-row">
-      <label for="grade-select">Grade</label>
-      <select id="grade-select" aria-label="Your grade">
-        <option value="">—</option>
-        <option value="3">3rd</option>
-        <option value="4">4th</option>
-        <option value="5">5th</option>
-        <option value="6">6th</option>
-        <option value="7">7th</option>
-        <option value="8">8th</option>
-      </select>
-      <span id="grade-status" class="grade-status"></span>
-    </div>
-
-    <a href="log_run.html" class="log-cta">+ Log a new run</a>
+    <a href="log_run.html" class="log-cta">+ Log an activity</a>
 
     <div class="range-filter" role="tablist" aria-label="Date range">
       <button class="range-btn active" data-range="week" role="tab">This week</button>
@@ -405,22 +391,13 @@
       <button class="range-btn" data-range="year" role="tab">This year</button>
       <button class="range-btn" data-range="all" role="tab">All time</button>
     </div>
-    <div class="range-filter" role="tablist" aria-label="Run type" style="margin-left:0.5rem;flex-wrap:wrap;">
-      <button class="range-btn active" data-type="all"         role="tab">All types</button>
-      <button class="range-btn"        data-type="easy"        role="tab">Easy</button>
-      <button class="range-btn"        data-type="long"        role="tab">Long</button>
-      <button class="range-btn"        data-type="tempo"       role="tab">Tempo</button>
-      <button class="range-btn"        data-type="intervals"   role="tab">Intervals</button>
-      <button class="range-btn"        data-type="race"        role="tab">Race</button>
-      <button class="range-btn"        data-type="cross_train" role="tab">Cross-train</button>
-    </div>
+    <div class="range-filter" id="type-filter" role="tablist" aria-label="Activity type" style="margin-left:0.5rem;flex-wrap:wrap;"></div>
+    <div class="range-filter" id="subtype-filter" role="tablist" aria-label="Run type" style="margin-left:0.5rem;flex-wrap:wrap;display:none;"></div>
     <p id="range-sub" style="margin:0 0 1rem 0;font-size:0.8rem;color:var(--slate-2);"></p>
 
     <div class="stats" id="stats">
-      <div class="stat"><div class="label">Runs</div><div class="value" id="stat-runs">—</div></div>
-      <div class="stat"><div class="label">Total miles</div><div class="value" id="stat-miles">—</div></div>
+      <div class="stat"><div class="label">Activities</div><div class="value" id="stat-runs">—</div></div>
       <div class="stat"><div class="label">Total time</div><div class="value" id="stat-time">—</div></div>
-      <div class="stat"><div class="label">Avg pace</div><div class="value" id="stat-pace">—</div></div>
     </div>
 
     <div class="panel">
@@ -559,7 +536,16 @@
     let athlete = null;
     let activeRange = 'week';
     let activeType = 'all';
+    let activeSub = 'all';
     let allRunsInRange = [];
+
+    // Activity + sub-type vocabularies (mirror log_run.html and the sync worker).
+    const ACT_LABEL = { run:'Run', ride:'Ride', swim:'Swim', walk:'Walk', hike:'Hike', strength:'Strength', workout:'Workout', other:'Other' };
+    const ACT_ORDER = ['run','ride','swim','walk','hike','strength','workout','other'];
+    const SUB_LABEL = { easy:'Easy', long:'Long', tempo:'Tempo', intervals:'Intervals', race:'Race', recovery:'Recovery', workout:'Workout' };
+    const SUB_ORDER = ['easy','long','tempo','intervals','race','recovery','workout'];
+    // Reuse the seg-* pill palette for a bit of colour per activity.
+    function actClass(a) { return ({ run:'easy', ride:'strides', swim:'warmup', walk:'cooldown', hike:'fartlek', strength:'interval', workout:'rest' })[a] || 'cooldown'; }
 
     // ---- data load ----
     async function loadAll() {
@@ -569,10 +555,10 @@
       const { data: runs, error: runsErr } = await sb
         .from('runs')
         .select(`
-          id, run_date, run_type, distance_miles, duration_seconds,
-          effort_rpe, avg_cadence, avg_hr, max_hr, route, shoes,
+          id, run_date, activity_type, sub_type, distance_miles, duration_seconds,
+          effort_rpe, avg_cadence, max_cadence, avg_hr, max_hr, route, shoes,
           conditions, temperature_f, dewpoint_f, humidity_percent, wind_mph,
-          cross_train_activity, notes,
+          mile_splits, samples, notes,
           run_segments(id, segment_order, segment_type, distance_miles, duration_seconds, notes)
         `)
         .eq('athlete_id', athlete.id)
@@ -581,43 +567,63 @@
         .order('created_at', { ascending: false });
 
       if (runsErr) {
-        document.getElementById('pace-table-wrap').innerHTML = `<div class="empty">Error loading runs: ${escapeHtml(runsErr.message)}</div>`;
+        document.getElementById('pace-table-wrap').innerHTML = `<div class="empty">Error loading activities: ${escapeHtml(runsErr.message)}</div>`;
         return;
       }
 
       allRunsInRange = runs || [];
+      // A range change can leave an active type/sub that no longer exists.
+      if (activeType !== 'all' && !allRunsInRange.some(r => (r.activity_type || 'run') === activeType)) { activeType = 'all'; activeSub = 'all'; }
+      buildTypeChips();
       rerenderWithFilter();
     }
 
+    // ---- filter chips (built from what's actually in range) ----
+    function buildTypeChips() {
+      const present = [...new Set(allRunsInRange.map(r => r.activity_type || 'run'))]
+        .sort((a, b) => ACT_ORDER.indexOf(a) - ACT_ORDER.indexOf(b));
+      const chips = ['all', ...present];
+      const wrap = document.getElementById('type-filter');
+      wrap.innerHTML = chips.map(t =>
+        `<button class="range-btn${t === activeType ? ' active' : ''}" data-type="${t}" role="tab">${t === 'all' ? 'All' : escapeHtml(ACT_LABEL[t] || t)}</button>`
+      ).join('');
+      wrap.querySelectorAll('.range-btn').forEach(b => b.addEventListener('click', () => {
+        activeType = b.dataset.type; activeSub = 'all';
+        buildTypeChips(); rerenderWithFilter();
+      }));
+      buildSubChips();
+    }
+    function buildSubChips() {
+      const wrap = document.getElementById('subtype-filter');
+      const present = (activeType === 'run')
+        ? [...new Set(allRunsInRange.filter(r => (r.activity_type || 'run') === 'run').map(r => r.sub_type).filter(Boolean))]
+            .sort((a, b) => SUB_ORDER.indexOf(a) - SUB_ORDER.indexOf(b))
+        : [];
+      if (!present.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+      wrap.style.display = 'flex';
+      const chips = ['all', ...present];
+      wrap.innerHTML = chips.map(t =>
+        `<button class="range-btn${t === activeSub ? ' active' : ''}" data-sub="${t}" role="tab">${t === 'all' ? 'All runs' : escapeHtml(SUB_LABEL[t] || t)}</button>`
+      ).join('');
+      wrap.querySelectorAll('.range-btn').forEach(b => b.addEventListener('click', () => {
+        activeSub = b.dataset.sub; buildSubChips(); rerenderWithFilter();
+      }));
+    }
+
     function rerenderWithFilter() {
-      const filtered = (activeType === 'all')
-        ? allRunsInRange
-        : allRunsInRange.filter(r => r.run_type === activeType);
+      let filtered = allRunsInRange;
+      if (activeType !== 'all') filtered = filtered.filter(r => (r.activity_type || 'run') === activeType);
+      if (activeType === 'run' && activeSub !== 'all') filtered = filtered.filter(r => r.sub_type === activeSub);
       renderStats(filtered);
       renderPaceByType(filtered);
       renderRunList(filtered);
     }
 
     function renderStats(runs) {
-      const totalRuns = runs.length;
-      let totalMiles = 0, totalSec = 0;
-      // Avg-pace blend uses ONLY runs that have both distance AND time, so a
-      // distance-only run doesn't add miles to the denominator without time
-      // on top, which would skew the average pace artificially fast.
-      let paceMiles = 0, paceSec = 0;
-      runs.forEach(r => {
-        if (r.distance_miles) totalMiles += Number(r.distance_miles);
-        if (r.duration_seconds) totalSec += Number(r.duration_seconds);
-        if (r.distance_miles && r.duration_seconds) {
-          paceMiles += Number(r.distance_miles);
-          paceSec   += Number(r.duration_seconds);
-        }
-      });
-      document.getElementById('stat-runs').textContent = totalRuns;
-      document.getElementById('stat-miles').innerHTML = totalMiles ? formatMiles(totalMiles) + '<span class="unit">mi</span>' : '—';
+      let totalSec = 0;
+      runs.forEach(r => { if (r.duration_seconds) totalSec += Number(r.duration_seconds); });
+      document.getElementById('stat-runs').textContent = runs.length;
       document.getElementById('stat-time').textContent = totalSec ? formatDuration(totalSec) : '—';
-      document.getElementById('stat-pace').textContent =
-        (paceSec && paceMiles) ? formatPace(paceSec / paceMiles) : '—';
     }
 
     function renderPaceByType(runs) {
@@ -683,18 +689,19 @@
         const dist = r.distance_miles ? Number(r.distance_miles) : 0;
         const dur = r.duration_seconds ? Number(r.duration_seconds) : 0;
         const pace = (dist > 0 && dur > 0) ? dur / dist : null;
-        const typeLabel = r.run_type.replace('_', ' ');
+        const act = r.activity_type || 'run';
+        const actLabel = ACT_LABEL[act] || act;
+        const subPill = r.sub_type ? `<span class="seg-pill" style="background:var(--silver-2);color:var(--slate);margin-left:4px">${escapeHtml(SUB_LABEL[r.sub_type] || r.sub_type)}</span>` : '';
         const segs = (r.run_segments || []).sort((a, b) => (a.segment_order || 0) - (b.segment_order || 0));
 
         return `
           <div class="run-row" data-id="${r.id}">
             <div class="date">
               <strong>${formatDate(r.run_date)}</strong>
-              <span class="seg-pill seg-${segMap(r.run_type)}">${typeLabel}</span>
+              <span class="seg-pill seg-${actClass(act)}">${escapeHtml(actLabel)}</span>${subPill}
             </div>
             <div class="meta">
               <strong>${dist ? formatMiles(dist) + ' mi' : ''}</strong>${dist && dur ? ' · ' : ''}${dur ? formatDuration(dur) : ''}
-              ${r.cross_train_activity ? '<br><span style="color:var(--slate-2);font-size:0.85rem">' + escapeHtml(r.cross_train_activity) + '</span>' : ''}
             </div>
             <div class="pace">
               <strong>${formatPace(pace)}</strong>
@@ -746,12 +753,65 @@
       rerenderWithFilter();
     }
 
-    function segMap(runType) {
-      return ({ easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo', cross_train:'rest' })[runType] || 'easy';
+    // ---- per-mile splits + cadence/HR charts (from Strava-synced runs) ----
+    function renderMileSplits(splits) {
+      if (!splits || !splits.length) return '';
+      const rows = splits.map(s => {
+        const partial = s.partial ? Number(s.partial) : null;
+        const miDist = partial || 1;
+        const label = partial ? ('Last ' + partial.toFixed(2) + ' mi') : ('Mile ' + s.mile);
+        const pace = (s.seconds && miDist) ? s.seconds / miDist : null;
+        return `
+          <tr>
+            <td>${label}</td>
+            <td class="num">${s.seconds ? formatDuration(s.seconds) : '—'}</td>
+            <td class="num"><strong>${formatPace(pace)}</strong></td>
+            <td class="num">${s.avg_cadence || '—'}</td>
+            <td class="num">${s.avg_hr || '—'}${s.max_hr ? ' / ' + s.max_hr : ''}</td>
+          </tr>`;
+      }).join('');
+      return `
+        <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--slate-2);font-weight:700;margin-bottom:0.4rem;">Per-mile splits</div>
+        <table class="seg-mini-table" style="margin-bottom:0.85rem;">
+          <thead><tr><th>Split</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Cad</th><th class="num">HR a/m</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    // Minimal inline SVG line chart — no library. series: [{x,y}].
+    function svgChart(series, color, label) {
+      const pts = series.filter(p => p.y != null && isFinite(p.y) && p.x != null);
+      if (pts.length < 2) return '';
+      const W = 320, H = 72, padL = 4, padR = 4, padT = 6, padB = 4;
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const spanX = (maxX - minX) || 1, spanY = (maxY - minY) || 1;
+      const X = x => padL + ((x - minX) / spanX) * (W - padL - padR);
+      const Y = y => padT + (1 - (y - minY) / spanY) * (H - padT - padB);
+      const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p.x).toFixed(1) + ' ' + Y(p.y).toFixed(1)).join(' ');
+      return `
+        <div style="margin-bottom:0.6rem;">
+          <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--slate-2);font-weight:700;margin-bottom:2px;">${label} <span style="color:var(--slate);">${Math.round(minY)}–${Math.round(maxY)}</span></div>
+          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:72px;display:block;background:var(--paper);border:1px solid var(--silver-2);border-radius:3px;">
+            <path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+          </svg>
+        </div>`;
+    }
+
+    function renderCharts(run) {
+      const s = run.samples;
+      if (!s || !s.length) return '';
+      const cad = svgChart(s.map(p => ({ x: p.mi, y: p.cad })), '#3A5A40', 'Cadence (spm) over distance');
+      const hr  = svgChart(s.map(p => ({ x: p.mi, y: p.hr })),  '#A8443A', 'Heart rate (bpm) over distance');
+      if (!cad && !hr) return '';
+      return `<div style="margin-bottom:0.5rem;">${cad}${hr}</div>`;
     }
 
     function renderSegmentDetail(segs, run) {
       let body = '';
+      body += renderMileSplits(run.mile_splits);
+      body += renderCharts(run);
       if (segs.length) {
         body += `
           <table class="seg-mini-table">
@@ -785,6 +845,7 @@
       if (run.route) extras.push(`Route: ${escapeHtml(run.route)}`);
       if (run.shoes) extras.push(`Shoes: ${escapeHtml(run.shoes)}`);
       if (run.avg_cadence) extras.push(`Cadence: ${run.avg_cadence} spm`);
+      if (run.max_cadence) extras.push(`Max cadence: ${run.max_cadence} spm`);
       if (run.avg_hr) extras.push(`Avg HR: ${run.avg_hr}`);
       if (run.max_hr) extras.push(`Max HR: ${run.max_hr}`);
       if (run.temperature_f != null) extras.push(`${run.temperature_f}°F`);
@@ -815,32 +876,8 @@
         loadAll();
       });
     });
-    // Run-type pills are client-side: re-render from cache, no fetch.
-    document.querySelectorAll('.range-btn[data-type]').forEach(b => {
-      b.addEventListener('click', () => {
-        document.querySelectorAll('.range-btn[data-type]').forEach(x => x.classList.toggle('active', x === b));
-        activeType = b.dataset.type;
-        rerenderWithFilter();
-      });
-    });
-
-    // ---- grade self-edit ----
-    // Optional: set your grade. RLS "athlete updates self" allows updating your
-    // own profile row.
-    const gradeSelect = document.getElementById('grade-select');
-    gradeSelect.addEventListener('change', async () => {
-      const status = document.getElementById('grade-status');
-      const val = gradeSelect.value ? parseInt(gradeSelect.value, 10) : null;
-      status.textContent = 'Saving…'; status.style.color = 'var(--slate-2)';
-      const { error } = await sb.from('athletes').update({ grade: val }).eq('id', athlete.id);
-      if (error) {
-        status.textContent = "Couldn't save"; status.style.color = 'var(--danger)';
-        return;
-      }
-      athlete.grade = val;
-      status.textContent = 'Saved ✓'; status.style.color = 'var(--green)';
-      setTimeout(() => { status.textContent = ''; }, 2000);
-    });
+    // Activity-type and sub-type chips are built dynamically in buildTypeChips()
+    // / buildSubChips() with their own click handlers (client-side re-render).
 
     // ---- boot ----
     (async () => {
@@ -848,7 +885,6 @@
       if (!profile) return;
       athlete = profile.row;
       document.getElementById('user-name').textContent = displayName(profile);
-      gradeSelect.value = athlete.grade != null ? String(athlete.grade) : '';
       loadAll();
     })();
   </script>

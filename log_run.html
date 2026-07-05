@@ -632,7 +632,7 @@
 
   <main>
     <h1 class="page-title">Log a run</h1>
-    <p class="page-sub">Pick the run type, then enter what you tracked.</p>
+    <p class="page-sub">Pick the activity, then enter what you tracked.</p>
 
     <form id="run-form" autocomplete="off">
 
@@ -670,24 +670,32 @@
           <!-- Hidden when a named option is picked; the select drives the route value.
                When + Add is selected, the visible input below takes over. -->
         </div>
-        <label style="margin-top:1rem;">Run type</label>
-        <div class="type-grid" id="type-grid">
-          <button type="button" class="type-btn" data-type="easy">Easy</button>
-          <button type="button" class="type-btn" data-type="long">Long</button>
-          <button type="button" class="type-btn" data-type="tempo">Tempo</button>
-          <button type="button" class="type-btn" data-type="intervals">Intervals</button>
-          <button type="button" class="type-btn" data-type="race">Race</button>
-          <button type="button" class="type-btn" data-type="cross_train">Cross-train</button>
+        <label style="margin-top:1rem;">Activity</label>
+        <div class="type-grid" id="activity-grid">
+          <button type="button" class="type-btn" data-act="run">Run</button>
+          <button type="button" class="type-btn" data-act="ride">Ride</button>
+          <button type="button" class="type-btn" data-act="swim">Swim</button>
+          <button type="button" class="type-btn" data-act="walk">Walk</button>
+          <button type="button" class="type-btn" data-act="hike">Hike</button>
+          <button type="button" class="type-btn" data-act="strength">Strength</button>
+          <button type="button" class="type-btn" data-act="workout">Workout</button>
+          <button type="button" class="type-btn" data-act="other">Other</button>
+        </div>
+        <div id="subtype-wrap" class="hidden" style="margin-top:1rem;">
+          <label>Run type</label>
+          <div class="type-grid" id="subtype-grid">
+            <button type="button" class="type-btn" data-sub="easy">Easy</button>
+            <button type="button" class="type-btn" data-sub="long">Long</button>
+            <button type="button" class="type-btn" data-sub="tempo">Tempo</button>
+            <button type="button" class="type-btn" data-sub="intervals">Intervals</button>
+            <button type="button" class="type-btn" data-sub="race">Race</button>
+            <button type="button" class="type-btn" data-sub="recovery">Recovery</button>
+            <button type="button" class="type-btn" data-sub="workout">Workout</button>
+          </div>
         </div>
       </div>
 
-      <!-- Cross-train activity (cross_train only) -->
-      <div class="section hidden" id="xtrain-section">
-        <h2>Activity</h2>
-        <input type="text" id="xtrain-activity" placeholder="e.g. swimming, biking, elliptical">
-      </div>
-
-      <!-- Mode toggle (hidden for cross_train) -->
+      <!-- Mode toggle (segments are run-only) -->
       <div class="section" id="mode-section">
         <h2>How do you want to enter it?</h2>
         <div class="mode-toggle">
@@ -912,9 +920,11 @@
       return `${m}:${String(s).padStart(2,'0')} /mi`;
     }
 
-    // ---- run type selector ----
-    let selectedType = null;
+    // ---- activity + sub-type selector ----
+    let selectedActivity = null;  // run, ride, swim, walk, hike, strength, workout, other
+    let selectedSub = null;       // runs only: easy, long, tempo, intervals, race, recovery, workout
     let selectedTod  = null;
+    const isRunActivity = () => selectedActivity === 'run';
 
     // Default the Time-of-day pick to whichever bucket "now" falls into.
     function defaultTimeOfDay() {
@@ -953,18 +963,33 @@
         routeInp.value = v;
       }
     });
-    document.querySelectorAll('.type-btn').forEach(btn => {
+    document.querySelectorAll('#activity-grid .type-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        selectedType = btn.dataset.type;
-        document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('selected', b === btn));
+        selectedActivity = btn.dataset.act;
+        document.querySelectorAll('#activity-grid .type-btn').forEach(b => b.classList.toggle('selected', b === btn));
+        if (!isRunActivity()) {
+          selectedSub = null;
+          document.querySelectorAll('#subtype-grid .type-btn').forEach(b => b.classList.remove('selected'));
+        }
+        applyTypeChange();
+      });
+    });
+    document.querySelectorAll('#subtype-grid .type-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedSub = btn.dataset.sub;
+        document.querySelectorAll('#subtype-grid .type-btn').forEach(b => b.classList.toggle('selected', b === btn));
         applyTypeChange();
       });
     });
 
     function applyTypeChange() {
-      document.getElementById('xtrain-section').classList.toggle('hidden', selectedType !== 'cross_train');
-      document.getElementById('race-section').classList.toggle('hidden', selectedType !== 'race');
-      document.getElementById('mode-section').classList.toggle('hidden', selectedType === 'cross_train');
+      const run = isRunActivity();
+      document.getElementById('subtype-wrap').classList.toggle('hidden', !run);
+      document.getElementById('race-section').classList.toggle('hidden', !(run && selectedSub === 'race'));
+      // Runs get the Simple / By-segment toggle; other activities are simple only.
+      const toggle = document.querySelector('#mode-section .mode-toggle');
+      if (toggle) toggle.style.display = run ? 'inline-flex' : 'none';
+      if (!run) setMode('simple');
     }
 
     // ---- mode toggle ----
@@ -1111,7 +1136,7 @@
 
     function addSegment() {
       const defaultType = segments.length === 0 ? 'warmup' :
-                          segments.length === 1 ? (selectedType === 'intervals' ? 'interval' : 'easy') : 'easy';
+                          segments.length === 1 ? (selectedSub === 'intervals' ? 'interval' : 'easy') : 'easy';
       segments.push({ type: defaultType, distance: '', time: '', unit: lastUnit });
       renderSegments();
       updateSegmentTotals();
@@ -1152,7 +1177,7 @@
         .select('id, time_of_day, distance_miles, duration_seconds')
         .eq('athlete_id', p.athlete_id)
         .eq('run_date', p.run_date)
-        .eq('run_type', p.run_type);
+        .eq('activity_type', p.activity_type);
       if (excludeId) q = q.neq('id', excludeId); // editing a run shouldn't match itself
       const { data, error } = await q;
       if (error || !data) return false; // never block on a lookup failure
@@ -1173,8 +1198,13 @@
       errEl.classList.remove('show');
       errEl.textContent = '';
 
-      if (!selectedType) {
-        errEl.textContent = 'Pick a run type first.';
+      if (!selectedActivity) {
+        errEl.textContent = 'Pick an activity first.';
+        errEl.classList.add('show');
+        return;
+      }
+      if (isRunActivity() && !selectedSub) {
+        errEl.textContent = 'Pick a run type (easy, long, tempo…).';
         errEl.classList.add('show');
         return;
       }
@@ -1187,7 +1217,7 @@
 
       // Only the active entry mode is saved. If the OTHER mode also has data,
       // warn before silently dropping it.
-      if (selectedType !== 'cross_train') {
+      if (isRunActivity()) {
         const splitFilled = Array.from(document.querySelectorAll('#splits-rows input[data-split]')).some(i => i.value.trim());
         const simpleHasData = !!(document.getElementById('simple-distance').value.trim()
           || document.getElementById('simple-time').value.trim() || splitFilled);
@@ -1218,9 +1248,7 @@
       let segmentsToInsert = [];
 
       const simpleUnit = document.getElementById('simple-distance-unit').value;
-      if (selectedType === 'cross_train') {
-        const activity = document.getElementById('xtrain-activity').value.trim();
-        if (!activity) { showErr('Tell us what cross-training activity you did.'); return; }
+      if (!isRunActivity()) {
         distance = toMiles(document.getElementById('simple-distance').value, simpleUnit);
         duration = parseDuration(document.getElementById('simple-time').value) || null;
         if (!duration && !distance) { showErr('Enter at least a distance or a time.'); return; }
@@ -1228,8 +1256,8 @@
         distance = toMiles(document.getElementById('simple-distance').value, simpleUnit);
         duration = parseDuration(document.getElementById('simple-time').value) || null;
         if (!distance && !duration) { showErr('Enter at least a distance or a time.'); return; }
-        const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo' };
-        const segType = segTypeMap[selectedType];
+        const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo', recovery:'easy', workout:'tempo' };
+        const segType = segTypeMap[selectedSub];
 
         // If the athlete filled in any per-mile splits, store those as the segments
         // instead of one bulk segment. Blank rows are skipped.
@@ -1300,7 +1328,8 @@
         athlete_id: runAthleteId,
         run_date: runDate,
         time_of_day: selectedTod,
-        run_type: selectedType,
+        activity_type: selectedActivity,
+        sub_type: isRunActivity() ? selectedSub : null,
         distance_miles: distance,
         duration_seconds: duration,
         avg_cadence: int('cadence'),
@@ -1308,7 +1337,6 @@
         max_hr: int('max-hr'),
         effort_rpe: int('rpe'),
         route: txt('route'),
-        cross_train_activity: selectedType === 'cross_train' ? txt('xtrain-activity') : null,
         notes: txt('notes'),
       };
 
@@ -1339,7 +1367,7 @@
         runPayload.conditions == null &&
         runPayload.wind_mph == null
       );
-      if (!editId && weatherUntouched && runPayload.run_type !== 'cross_train') {
+      if (!editId && weatherUntouched && isRunActivity()) {
         const w = await fetchWeatherForDate(runPayload.run_date, selectedTod);
         if (w) {
           runPayload.temperature_f    ??= w.temperature_f;
@@ -1392,7 +1420,7 @@
       if (editId) {
         await sb.from('race_results').delete().eq('run_id', runId);
       }
-      if (selectedType === 'race') {
+      if (isRunActivity() && selectedSub === 'race') {
         const racePayload = {
           run_id: runId,
           meet_name: txt('race-meet'),
@@ -1449,7 +1477,8 @@
       // Keep the unit sticky to whatever the athlete last picked; form.reset()
       // already restores it to the first option ("mi") so re-apply lastUnit.
       document.getElementById('simple-distance-unit').value = lastUnit;
-      selectedType = null;
+      selectedActivity = null;
+      selectedSub = null;
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('selected'));
       setTodSelection(defaultTimeOfDay());
       document.getElementById('loc-select').value = '';
@@ -1542,15 +1571,13 @@
       return (n < 10 ? n.toFixed(2) : n.toFixed(1)) + ' miles';
     }
 
-    function typeLabel(type) {
-      return ({
-        easy: 'Easy day',
-        long: 'Long run',
-        tempo: 'Tempo',
-        intervals: 'Speed work',
-        race: 'Race day!',
-        cross_train: 'Cross training'
-      })[type] || 'Nice run';
+    function typeLabel(kind, activity) {
+      const map = {
+        easy: 'Easy day', long: 'Long run', tempo: 'Tempo', intervals: 'Speed work',
+        race: 'Race day!', recovery: 'Recovery', workout: 'Workout',
+        run: 'Run', ride: 'Ride', swim: 'Swim', walk: 'Walk', hike: 'Hike', strength: 'Strength', other: 'Activity'
+      };
+      return map[kind] || map[activity] || 'Nice work';
     }
 
     function runTypeFlavor(type, rpe) {
@@ -1639,9 +1666,10 @@
     async function generateFunFacts(runPayload, athleteId) {
       const facts = [];
 
+      const kind = runPayload.sub_type || runPayload.activity_type;
       facts.push({
-        label: typeLabel(runPayload.run_type),
-        text: runTypeFlavor(runPayload.run_type, runPayload.effort_rpe)
+        label: typeLabel(kind, runPayload.activity_type),
+        text: runTypeFlavor(kind, runPayload.effort_rpe)
       });
 
       const weekStart = startOfWeekISO();
@@ -1720,10 +1748,12 @@
       }
 
       let recap;
-      if (runPayload.run_type === 'cross_train') {
-        const dur = runPayload.duration_seconds ? formatDuration(runPayload.duration_seconds) : '';
-        const act = runPayload.cross_train_activity || 'cross training';
-        recap = dur ? `${dur} of ${act}.` : `Logged your ${act} session.`;
+      if (runPayload.activity_type !== 'run') {
+        const label = typeLabel(runPayload.activity_type, runPayload.activity_type);
+        const bits = [];
+        if (runPayload.distance_miles) bits.push(formatMiles(runPayload.distance_miles));
+        if (runPayload.duration_seconds) bits.push((bits.length ? 'in ' : '') + formatDuration(runPayload.duration_seconds));
+        recap = bits.length ? `${label} — ${bits.join(' ')}.` : `${label} logged.`;
       } else {
         const parts = [];
         if (runPayload.distance_miles) parts.push(formatMiles(runPayload.distance_miles));
@@ -1798,8 +1828,8 @@
 
     async function loadRunForEdit(id) {
       const { data, error } = await sb.from('runs').select(`
-        id, athlete_id, run_date, time_of_day, run_type, distance_miles, duration_seconds,
-        effort_rpe, avg_cadence, avg_hr, max_hr, route, notes, cross_train_activity,
+        id, athlete_id, run_date, time_of_day, activity_type, sub_type, distance_miles, duration_seconds,
+        effort_rpe, avg_cadence, avg_hr, max_hr, route, notes,
         run_segments(segment_order, segment_type, distance_miles, duration_seconds),
         race_results(meet_name, course_name, course_type, official_distance_meters,
           finish_place_overall, finish_place_team, team_score_total, opponents, conditions_notes)
@@ -1834,9 +1864,11 @@
         }
       }
 
-      // Run type
-      selectedType = run.run_type;
-      document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('selected', b.dataset.type === run.run_type));
+      // Activity + sub-type
+      selectedActivity = run.activity_type || 'run';
+      selectedSub = run.sub_type || null;
+      document.querySelectorAll('#activity-grid .type-btn').forEach(b => b.classList.toggle('selected', b.dataset.act === selectedActivity));
+      document.querySelectorAll('#subtype-grid .type-btn').forEach(b => b.classList.toggle('selected', b.dataset.sub === selectedSub));
       applyTypeChange();
 
       // Effort + optional detail + notes
@@ -1845,7 +1877,6 @@
       setVal('avg-hr', run.avg_hr);
       setVal('max-hr', run.max_hr);
       setVal('notes', run.notes);
-      if (run.run_type === 'cross_train') setVal('xtrain-activity', run.cross_train_activity);
 
       // Distance / duration / segments. The simple fields are always filled
       // (cross-train and simple modes read them); segments decide the mode.
@@ -1859,15 +1890,15 @@
       // Match the entry shape: a simple run is 0 segments, 1 segment, or a set
       // of ~1-mile splits, all of the run-type's segment kind. Anything else
       // (mixed efforts) opens in detailed mode, which round-trips losslessly.
-      const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo' };
-      const expected = segTypeMap[run.run_type];
+      const segTypeMap = { easy:'easy', long:'easy', tempo:'tempo', intervals:'interval', race:'tempo', recovery:'easy', workout:'tempo' };
+      const expected = segTypeMap[run.sub_type];
       const allExpected = segs.length > 0 && expected && segs.every(s => s.segment_type === expected);
       const looksLikeSplits = allExpected && segs.length > 1 && segs.every((s, i) => {
         const d = s.distance_miles != null ? Number(s.distance_miles) : 0;
         return i === segs.length - 1 ? (d > 0 && d <= 1.05) : Math.abs(d - 1) < 0.06;
       });
 
-      if (run.run_type === 'cross_train' || segs.length === 0 || (allExpected && segs.length === 1)) {
+      if (!isRunActivity() || segs.length === 0 || (allExpected && segs.length === 1)) {
         setMode('simple');
         renderSplitRows();
       } else if (looksLikeSplits) {
