@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Labs — Tally</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--paper:#F4F1E9;--surface:#FFFFFF;--surface-warm:#FBF9F3;--ink:#1E241C;--muted:#71776B;--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--amber-soft:#F1E6D2;--border:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;--blue:#3E6B8A;--blue-tint:#E4EDF2;
+      --f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;}
+    input:focus,select:focus,button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    .wrap{max-width:560px;margin:0 auto;padding:0 16px 56px;}
+    header{padding:22px 0 8px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:14px;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+    .row-between{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+
+    /* report bar */
+    .repbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:9px 10px;background:var(--surface);}
+    select.field{background:var(--surface);}
+    .rep-meta{font-size:12px;color:var(--muted);font-family:var(--f-mono);}
+    .rep-meta .dot{margin:0 6px;opacity:.5;}
+
+    /* filter chips */
+    .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;-webkit-overflow-scrolling:touch;}
+    .chip{flex:0 0 auto;border:1px solid var(--border);background:var(--surface);border-radius:99px;padding:7px 13px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;}
+    .chip.on{background:var(--green-deep);border-color:var(--green-deep);color:#fff;}
+    .chip .n{font-family:var(--f-mono);font-size:12px;opacity:.9;}
+    .chip .swatch{width:8px;height:8px;border-radius:50%;}
+
+    /* category group */
+    .group-head{display:flex;align-items:center;gap:9px;margin:20px 2px 8px;}
+    .group-head .gi{font-size:18px;}
+    .group-head .gt{font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--green-deep);}
+    .group-head .gc{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-left:auto;}
+
+    /* marker row */
+    .marker{width:100%;text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:13px 14px;margin-bottom:9px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
+    .marker:hover{border-color:var(--green);}
+    .m-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+    .m-name{font-size:14px;font-weight:600;line-height:1.25;}
+    .m-val{font-family:var(--f-mono);font-weight:600;font-size:15px;white-space:nowrap;}
+    .m-val .u{font-size:11px;color:var(--muted);font-weight:500;margin-left:3px;}
+    .m-sub{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:7px;}
+    .pill{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
+    .pill.in{color:var(--green-deep);background:var(--green-tint);}
+    .pill.high{color:#8a4a1f;background:var(--amber-soft);}
+    .pill.low{color:#2f5468;background:var(--blue-tint);}
+    .pill.review{color:var(--muted);background:#ECEAE2;}
+    .m-ref{font-family:var(--f-mono);font-size:11px;color:var(--muted);}
+
+    /* gauge */
+    .gauge{margin-top:9px;}
+    .gauge-track{position:relative;height:8px;border-radius:99px;background:#ECEAE2;overflow:visible;}
+    .gauge-band{position:absolute;top:0;bottom:0;background:var(--green-tint);border-radius:99px;}
+    .gauge-band.edge-l{border-top-left-radius:0;border-bottom-left-radius:0;}
+    .gauge-band.edge-r{border-top-right-radius:0;border-bottom-right-radius:0;}
+    .gauge-dot{position:absolute;top:50%;width:13px;height:13px;border-radius:50%;transform:translate(-50%,-50%);border:2.5px solid var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.25);}
+    .gauge-dot.in{background:var(--green);}
+    .gauge-dot.high{background:var(--amber);}
+    .gauge-dot.low{background:var(--blue);}
+    .gauge-dot.review{background:var(--muted);}
+
+    /* detail */
+    .back-link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;margin-bottom:4px;}
+    .d-name{font-family:var(--f-display);font-size:20px;font-weight:600;margin:2px 0 2px;color:var(--green-deep);}
+    .d-big{display:flex;align-items:baseline;gap:8px;margin:6px 0 2px;}
+    .d-big .v{font-family:var(--f-mono);font-size:30px;font-weight:600;}
+    .d-big .u{font-size:13px;color:var(--muted);}
+    .chart{width:100%;height:auto;display:block;margin:6px 0 2px;}
+    .hist-row{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13px;}
+    .hist-row:last-child{border-bottom:none;}
+    .hist-row .hv{font-family:var(--f-mono);font-weight:600;}
+
+    /* buttons / forms */
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:11px 16px;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+    .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+    .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+    .link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:10px 0;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+    label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:block;margin:8px 0 4px;}
+    .full{width:100%;}
+    .err{color:var(--danger);font-size:13px;margin:8px 0 0;}
+    .empty{color:var(--muted);font-size:13.5px;line-height:1.55;}
+    .loading{padding:48px;text-align:center;color:var(--muted);}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  var S = { loaded:false, userId:null, reports:[], reportId:null, results:[],
+            filter:'all', view:'list', detail:null, form:null, err:'' };
+
+  var CAT_ICON = { 'Lipids':'🫀','CBC':'🩸','Thyroid':'🦋','Hormones':'⚗️',
+    'Vitamins & minerals':'💊','Inflammation':'🔥','Heavy metals':'⚙️',
+    'Urinalysis':'🧪','Metabolic':'⚡','Fatty acids':'🐟','Other':'🔬' };
+  var CAT_ORDER = ['Lipids','Metabolic','CBC','Thyroid','Hormones',
+    'Vitamins & minerals','Inflammation','Fatty acids','Heavy metals','Urinalysis','Other'];
+
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmt(n){ if(n==null) return ''; var x=Math.round(Number(n)*100)/100; return String(x); }
+  function prettyDate(iso){ if(!iso) return ''; var p=iso.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }
+  function shortDate(iso){ if(!iso) return ''; var p=iso.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'2-digit'}); }
+  function todayISO(){ var d=new Date(),p=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+
+  // ── status + range logic ───────────────────────────────────────────────
+  function statusOf(r){
+    if(r.flag==='H') return 'high';
+    if(r.flag==='L') return 'low';
+    var op=r.ref_operator, lo=r.ref_low, hi=r.ref_high;
+    if(r.value_num==null){
+      if(r.value_text && r.normal_text){
+        var v=r.value_text.toUpperCase(), n=r.normal_text.toUpperCase();
+        return (v===n||v.indexOf(n)>=0||n.indexOf(v)>=0)?'in':'review';
+      }
+      return 'in';
+    }
+    var v=Number(r.value_num);
+    if(op==='range'||op==='eq'){ if(lo!=null&&v<lo) return 'low'; if(hi!=null&&v>hi) return 'high'; if(lo!=null||hi!=null) return 'in'; }
+    else if(op==='lte'){ if(hi!=null) return v>hi?'high':'in'; }
+    else if(op==='gte'){ if(lo!=null) return v<lo?'low':'in'; }
+    return 'review';
+  }
+  function statusLabel(s){ return s==='in'?'In Range':s==='high'?'High':s==='low'?'Low':'Review'; }
+
+  function refText(r){
+    var u=r.unit?(' '+r.unit):'';
+    if(r.ref_operator==='range') return fmt(r.ref_low)+'–'+fmt(r.ref_high)+u;
+    if(r.ref_operator==='lte') return '≤ '+fmt(r.ref_high)+u;
+    if(r.ref_operator==='gte') return '≥ '+fmt(r.ref_low)+u;
+    if(r.ref_operator==='eq') return fmt(r.ref_low)+u;
+    if(r.normal_text) return 'Normal: '+r.normal_text;
+    return '';
+  }
+
+  // domain + healthy band (in value units) for a numeric gauge, or null
+  function gaugeModel(r){
+    if(r.value_num==null) return null;
+    var v=Number(r.value_num), op=r.ref_operator, lo=r.ref_low, hi=r.ref_high, dmin,dmax,hs,he;
+    if(op==='range'||op==='eq'){
+      if(lo==null||hi==null) return null;
+      var span=(hi-lo)||Math.abs(hi)*0.3||1, pad=Math.max(span*0.5, Math.abs(hi)*0.12);
+      dmin=lo-pad; dmax=hi+pad; hs=lo; he=hi;
+    } else if(op==='lte'){
+      if(hi==null) return null;
+      dmin=0; dmax=Math.max(hi,v)*1.2||1; hs=dmin; he=hi;
+    } else if(op==='gte'){
+      if(lo==null) return null;
+      dmin=Math.min(lo*0.5, v*0.9); dmax=Math.max(lo*1.6, v*1.15)||1; hs=lo; he=dmax;
+    } else return null;
+    // make sure the value is visible
+    if(v<dmin) dmin=v-(dmax-v)*0.08;
+    if(v>dmax) dmax=v+(v-dmin)*0.08;
+    var W=dmax-dmin||1;
+    var pct=function(x){ return Math.max(0,Math.min(100,(x-dmin)/W*100)); };
+    return { vp:pct(v), hs:pct(hs), he:pct(he), op:op };
+  }
+  function gaugeHTML(r){
+    var g=gaugeModel(r); if(!g) return '';
+    var st=statusOf(r);
+    var bandCls='gauge-band'+(g.op==='lte'?' edge-l':'')+(g.op==='gte'?' edge-r':'');
+    return '<div class="gauge"><div class="gauge-track">'+
+      '<div class="'+bandCls+'" style="left:'+g.hs.toFixed(1)+'%;right:'+(100-g.he).toFixed(1)+'%"></div>'+
+      '<div class="gauge-dot '+st+'" style="left:'+g.vp.toFixed(1)+'%"></div>'+
+      '</div></div>';
+  }
+
+  function valDisplay(r){
+    var v = r.value_text!=null ? r.value_text : fmt(r.value_num);
+    return '<span class="m-val">'+esc(v)+(r.unit?'<span class="u">'+esc(r.unit)+'</span>':'')+'</span>';
+  }
+
+  // ── data ───────────────────────────────────────────────────────────────
+  async function loadReports(){
+    var r=await sb.from('lab_reports').select('*').order('collected_on',{ascending:false});
+    S.reports=r.data||[];
+    if(!S.reportId && S.reports.length) S.reportId=S.reports[0].id;
+  }
+  async function loadResults(){
+    if(!S.reportId){ S.results=[]; return; }
+    var r=await sb.from('lab_results').select('*').eq('report_id',S.reportId).order('sort_order',{ascending:true});
+    S.results=r.data||[];
+  }
+  async function loadHistory(name){
+    var r=await sb.from('lab_results')
+      .select('value_num,value_text,unit,flag,ref_operator,ref_low,ref_high,normal_text,report_id,lab_reports(collected_on)')
+      .eq('name',name);
+    var rows=(r.data||[]).map(function(x){ return {
+      value_num:x.value_num, value_text:x.value_text, unit:x.unit, flag:x.flag,
+      ref_operator:x.ref_operator, ref_low:x.ref_low, ref_high:x.ref_high, normal_text:x.normal_text,
+      date:(x.lab_reports&&x.lab_reports.collected_on)||null };
+    }).filter(function(x){return x.date;});
+    rows.sort(function(a,b){ return a.date<b.date?-1:1; });
+    return rows;
+  }
+
+  // ── trend chart (inline SVG) ────────────────────────────────────────────
+  function trendSVG(hist, cur){
+    var pts=hist.filter(function(h){return h.value_num!=null;});
+    if(pts.length<1) return '<p class="empty">No numeric history to chart yet.</p>';
+    var W=520,H=170,padL=8,padR=8,padT=14,padB=26;
+    var vals=pts.map(function(p){return Number(p.value_num);});
+    var lo=cur.ref_low, hi=cur.ref_high;
+    var lows=vals.slice(), highs=vals.slice();
+    if(lo!=null){lows.push(lo);highs.push(lo);} if(hi!=null){lows.push(hi);highs.push(hi);}
+    var ymin=Math.min.apply(null,lows), ymax=Math.max.apply(null,highs);
+    var yspan=(ymax-ymin)||Math.abs(ymax)*0.2||1; ymin-=yspan*0.12; ymax+=yspan*0.12;
+    var x=function(i){ return pts.length===1 ? W/2 : padL+(W-padL-padR)*i/(pts.length-1); };
+    var y=function(v){ return padT+(H-padT-padB)*(1-(v-ymin)/(ymax-ymin)); };
+    var svg='<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+    // healthy band
+    if(lo!=null||hi!=null){
+      var yb=hi!=null?y(hi):padT, yb2=lo!=null?y(lo):(H-padB);
+      svg+='<rect x="0" y="'+yb.toFixed(1)+'" width="'+W+'" height="'+Math.max(0,(yb2-yb)).toFixed(1)+'" fill="#EBF0E8"/>';
+      if(hi!=null) svg+='<line x1="0" y1="'+y(hi)+'" x2="'+W+'" y2="'+y(hi)+'" stroke="#C9D6C4" stroke-dasharray="4 4" stroke-width="1"/>';
+      if(lo!=null) svg+='<line x1="0" y1="'+y(lo)+'" x2="'+W+'" y2="'+y(lo)+'" stroke="#C9D6C4" stroke-dasharray="4 4" stroke-width="1"/>';
+    }
+    // line
+    if(pts.length>1){
+      var d=pts.map(function(p,i){return (i?'L':'M')+x(i).toFixed(1)+' '+y(Number(p.value_num)).toFixed(1);}).join(' ');
+      svg+='<path d="'+d+'" fill="none" stroke="#3A5A40" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    // dots + date labels
+    pts.forEach(function(p,i){
+      var st=statusOf(p);
+      var col=st==='high'?'#BE722A':st==='low'?'#3E6B8A':'#3A5A40';
+      svg+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(Number(p.value_num)).toFixed(1)+'" r="4.5" fill="'+col+'" stroke="#fff" stroke-width="1.5"/>';
+      var lx=Math.max(16,Math.min(W-16,x(i)));
+      svg+='<text x="'+lx.toFixed(1)+'" y="'+(H-8)+'" font-size="10" fill="#71776B" font-family="monospace" text-anchor="middle">'+esc(shortDate(p.date))+'</text>';
+    });
+    svg+='</svg>';
+    return svg;
+  }
+
+  // ── render: list ────────────────────────────────────────────────────────
+  function counts(){
+    var c={all:S.results.length,in:0,out:0};
+    S.results.forEach(function(r){ var s=statusOf(r); if(s==='high'||s==='low') c.out++; else if(s==='in') c.in++; });
+    return c;
+  }
+  function renderList(){
+    var h='';
+    // report bar
+    h+='<div class="repbar">';
+    if(S.reports.length){
+      h+='<select class="field" id="repSel" onchange="pickReport(this.value)">'+
+        S.reports.map(function(rp){ return '<option value="'+rp.id+'"'+(rp.id===S.reportId?' selected':'')+'>'+esc(prettyDate(rp.collected_on))+(rp.source?(' · '+esc(rp.source)):'')+'</option>'; }).join('')+
+        '</select>';
+    }
+    h+='<button class="link" onclick="openReportForm()" style="padding:9px 4px">+ Report</button>';
+    h+='</div>';
+
+    var rep=S.reports.filter(function(r){return r.id===S.reportId;})[0];
+    if(rep){
+      var bits=[]; if(rep.fasting!=null) bits.push(rep.fasting?'Fasting':'Non-fasting');
+      if(rep.physician) bits.push(rep.physician);
+      if(bits.length) h+='<div class="rep-meta" style="margin:-4px 2px 12px">'+bits.map(esc).join('<span class="dot">•</span>')+'</div>';
+    }
+
+    if(!S.results.length){
+      h+='<div class="card"><p class="empty">No results in this report yet. Import a lab PDF with <code>labs_sync</code>, or add a marker by hand below.</p>'+
+         '<button class="btn btn-ghost full" style="margin-top:10px" onclick="openResultForm(null)">+ Add a result</button></div>';
+      return h;
+    }
+
+    // filter chips
+    var c=counts();
+    h+='<div class="chips">'+
+      chip('all','All',c.all,null)+
+      chip('in','In Range',c.in,'var(--green)')+
+      chip('out','Out of Range',c.out,'var(--amber)')+
+      '</div>';
+
+    // group by category
+    var groups={};
+    S.results.forEach(function(r){
+      var s=statusOf(r);
+      if(S.filter==='in' && s!=='in') return;
+      if(S.filter==='out' && !(s==='high'||s==='low')) return;
+      (groups[r.category||'Other']=groups[r.category||'Other']||[]).push(r);
+    });
+    var cats=Object.keys(groups).sort(function(a,b){ var ia=CAT_ORDER.indexOf(a),ib=CAT_ORDER.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); });
+    if(!cats.length){ h+='<div class="card"><p class="empty">Nothing matches this filter.</p></div>'; }
+    cats.forEach(function(cat){
+      h+='<div class="group-head"><span class="gi">'+(CAT_ICON[cat]||'🔬')+'</span><span class="gt">'+esc(cat)+'</span><span class="gc">'+groups[cat].length+'</span></div>';
+      h+=groups[cat].map(markerRow).join('');
+    });
+
+    h+='<button class="btn btn-ghost full" style="margin-top:16px" onclick="openResultForm(null)">+ Add a result by hand</button>';
+    return h;
+  }
+  function chip(key,label,n,color){
+    return '<button class="chip'+(S.filter===key?' on':'')+'" onclick="setFilter(\''+key+'\')">'+
+      (color?'<span class="swatch" style="background:'+color+'"></span>':'')+esc(label)+'<span class="n">'+n+'</span></button>';
+  }
+  function markerRow(r){
+    var st=statusOf(r), ref=refText(r);
+    return '<button class="marker" onclick="openDetail(\''+esc(r.name).replace(/'/g,"\\'")+'\')">'+
+      '<div class="m-top"><span class="m-name">'+esc(r.name)+'</span>'+valDisplay(r)+'</div>'+
+      gaugeHTML(r)+
+      '<div class="m-sub"><span class="pill '+st+'">'+statusLabel(st)+'</span>'+
+      (ref?'<span class="m-ref">'+esc(ref)+'</span>':'')+'</div>'+
+      '</button>';
+  }
+
+  // ── render: detail ──────────────────────────────────────────────────────
+  function renderDetail(){
+    var d=S.detail; var cur=d.cur;
+    var st=statusOf(cur);
+    var h='<button class="back-link" onclick="closeDetail()">‹ All results</button>';
+    h+='<div class="card">';
+    h+='<div class="kicker">'+esc(cur.category||'')+'</div>';
+    h+='<div class="d-name">'+esc(cur.name)+'</div>';
+    h+='<div class="d-big"><span class="v">'+esc(cur.value_text!=null?cur.value_text:fmt(cur.value_num))+'</span>'+(cur.unit?'<span class="u">'+esc(cur.unit)+'</span>':'')+'<span class="pill '+st+'" style="align-self:center;margin-left:4px">'+statusLabel(st)+'</span></div>';
+    var ref=refText(cur); if(ref) h+='<div class="m-ref" style="margin-bottom:8px">Reference '+esc(ref)+'</div>';
+    h+=gaugeHTML(cur);
+    h+='</div>';
+
+    h+='<div class="card"><div class="kicker" style="margin-bottom:8px">Over time</div>'+trendSVG(d.history,cur)+'</div>';
+
+    h+='<div class="card"><div class="kicker" style="margin-bottom:4px">History</div>';
+    if(!d.history.length){ h+='<p class="empty">Just this one reading so far.</p>'; }
+    else h+=d.history.slice().reverse().map(function(x){
+      var s=statusOf(x);
+      return '<div class="hist-row"><span>'+esc(prettyDate(x.date))+'</span>'+
+        '<span class="hv"><span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>'+
+        esc(x.value_text!=null?x.value_text:fmt(x.value_num))+(x.unit?(' '+esc(x.unit)):'')+'</span></div>';
+    }).join('');
+    h+='</div>';
+
+    h+='<div class="btn-row"><button class="btn btn-ghost" onclick="openResultForm(\''+esc(cur.id)+'\')">Edit this reading</button>'+
+       '<button class="btn btn-danger" onclick="deleteResult(\''+esc(cur.id)+'\')">Delete</button></div>';
+    return h;
+  }
+
+  // ── render root ─────────────────────────────────────────────────────────
+  function render(){
+    var app=el('app');
+    if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
+    var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Lab results</small></h1></header>';
+    var body;
+    if(S.form) body=renderForm();
+    else if(S.view==='detail'&&S.detail) body=renderDetail();
+    else if(!S.reports.length) body=emptyState();
+    else body=renderList();
+    app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
+    var sel=el('repSel'); // keep native select value in sync
+  }
+  function emptyState(){
+    return '<div class="card"><p class="empty">No lab reports yet.<br><br>'+
+      'Import a Quest / Function Health PDF with the <code>labs_sync</code> script, '+
+      'or start one by hand to enter older bloodwork.</p>'+
+      '<button class="btn btn-primary full" style="margin-top:12px" onclick="openReportForm()">+ Start a report</button></div>';
+  }
+
+  // ── forms ───────────────────────────────────────────────────────────────
+  function renderForm(){
+    var f=S.form;
+    if(f.kind==='report'){
+      return '<button class="back-link" onclick="closeForm()">‹ Cancel</button>'+
+        '<div class="card"><div class="kicker" style="margin-bottom:10px">New report</div>'+
+        '<label class="lbl">Collection date</label><input id="fDate" type="date" class="field full" value="'+esc(f.date)+'">'+
+        '<label class="lbl">Source</label><input id="fSource" class="field full" placeholder="e.g. LabCorp, Manual" value="'+esc(f.source)+'">'+
+        '<label class="lbl">Fasting?</label><select id="fFast" class="field full"><option value="">—</option><option value="yes"'+(f.fasting==='yes'?' selected':'')+'>Yes</option><option value="no"'+(f.fasting==='no'?' selected':'')+'>No</option></select>'+
+        '<div class="btn-row"><button class="btn btn-primary" onclick="saveReport()">Create report</button>'+
+        (f.id?'<button class="btn btn-danger" onclick="deleteReport(\''+esc(f.id)+'\')">Delete report</button>':'')+'</div></div>';
+    }
+    // result form
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button>'+
+      '<div class="card"><div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit reading':'Add a result')+'</div>'+
+      '<label class="lbl">Marker name</label><input id="rName" class="field full" placeholder="e.g. Vitamin B12" value="'+esc(f.name)+'">'+
+      '<div class="grid2"><div><label class="lbl">Value</label><input id="rVal" class="field full" placeholder="e.g. 550 or NEGATIVE" value="'+esc(f.value)+'"></div>'+
+      '<div><label class="lbl">Unit</label><input id="rUnit" class="field full" placeholder="ng/mL" value="'+esc(f.unit)+'"></div></div>'+
+      '<div class="grid2"><div><label class="lbl">Range low</label><input id="rLo" class="field full" inputmode="decimal" placeholder="optional" value="'+esc(f.lo)+'"></div>'+
+      '<div><label class="lbl">Range high</label><input id="rHi" class="field full" inputmode="decimal" placeholder="optional" value="'+esc(f.hi)+'"></div></div>'+
+      '<label class="lbl">Category</label><select id="rCat" class="field full">'+
+      CAT_ORDER.map(function(c){return '<option'+(f.category===c?' selected':'')+'>'+c+'</option>';}).join('')+'</select>'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveResult()">Save</button></div>'+
+      '<p class="empty" style="margin-top:10px">Leave both range fields set for a two-sided gauge. For a one-sided limit (e.g. “under 100”), fill only the high field.</p></div>';
+  }
+
+  function openReportForm(){ S.form={kind:'report',id:null,date:todayISO(),source:'Manual',fasting:''}; S.err=''; render(); }
+  function openResultForm(id){
+    if(id){ var r=S.results.filter(function(x){return x.id===id;})[0]; if(!r){ // maybe from detail
+        r=S.detail&&S.detail.cur; }
+      S.form={kind:'result',id:id,name:r.name||'',value:(r.value_text!=null?r.value_text:fmt(r.value_num)),
+        unit:r.unit||'',lo:r.ref_low!=null?fmt(r.ref_low):'',hi:r.ref_high!=null?fmt(r.ref_high):'',category:r.category||'Other'}; }
+    else S.form={kind:'result',id:null,name:'',value:'',unit:'',lo:'',hi:'',category:'Metabolic'};
+    S.err=''; render();
+  }
+  function closeForm(){ S.form=null; render(); }
+
+  async function saveReport(){
+    var date=(el('fDate')||{}).value, source=((el('fSource')||{}).value||'').trim();
+    var fast=(el('fFast')||{}).value;
+    if(!date){ S.err='Pick a date.'; render(); return; }
+    try{
+      var ref='manual:'+date+':'+(source||'').toLowerCase().replace(/\s+/g,'')+':'+Math.random().toString(36).slice(2,7);
+      var ins=await sb.from('lab_reports').insert({user_id:S.userId,collected_on:date,source:source||'Manual',
+        fasting: fast==='yes'?true:(fast==='no'?false:null), import_ref:ref}).select('id').single();
+      if(ins.error) throw ins.error;
+      S.form=null; S.reportId=ins.data.id; await loadReports(); await loadResults(); render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+  async function deleteReport(id){
+    if(!confirm('Delete this entire report and all its results? This cannot be undone.')) return;
+    try{ await sb.from('lab_reports').delete().eq('id',id); S.form=null; S.reportId=null;
+      await loadReports(); await loadResults(); S.view='list'; render(); }
+    catch(e){ S.err=e.message; render(); }
+  }
+
+  function numOrNull(s){ s=(s||'').trim(); if(!s) return null; var n=Number(s); return isNaN(n)?null:n; }
+  async function saveResult(){
+    var f=S.form;
+    var name=((el('rName')||{}).value||'').trim();
+    var val=((el('rVal')||{}).value||'').trim();
+    if(!name){ S.err='Marker name is required.'; render(); return; }
+    if(!val){ S.err='Enter a value.'; render(); return; }
+    var lo=numOrNull((el('rLo')||{}).value), hi=numOrNull((el('rHi')||{}).value);
+    var unit=((el('rUnit')||{}).value||'').trim()||null;
+    var cat=(el('rCat')||{}).value||'Other';
+    var vnum=Number(val), isNum=val!==''&&!isNaN(vnum)&&!/^[<>]/.test(val);
+    var op = (lo!=null&&hi!=null)?'range':(hi!=null?'lte':(lo!=null?'gte':(isNum?'none':'qual')));
+    var row={ category:cat, name:name, unit:unit, ref_low:lo, ref_high:hi, ref_operator:op,
+      value_num: isNum?vnum:(/^[<>]/.test(val)?numOrNull(val.replace(/[<>=]/g,'')):null),
+      value_text: isNum?null:val, normal_text: (!isNum&&!/^[<>]/.test(val))?val:null, flag:null };
+    try{
+      if(f.id){
+        var u=await sb.from('lab_results').update(row).eq('id',f.id); if(u.error) throw u.error;
+      }else{
+        if(!S.reportId){ S.err='Create or pick a report first.'; render(); return; }
+        row.user_id=S.userId; row.report_id=S.reportId;
+        row.sort_order=(S.results.length?Math.max.apply(null,S.results.map(function(x){return x.sort_order||0;}))+1:0);
+        var ins=await sb.from('lab_results').insert(row); if(ins.error) throw ins.error;
+      }
+      S.form=null; await loadResults();
+      if(S.view==='detail'&&S.detail){ await openDetail(name); } else render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+  async function deleteResult(id){
+    if(!confirm('Delete this reading?')) return;
+    try{ await sb.from('lab_results').delete().eq('id',id); S.view='list'; S.detail=null; await loadResults(); render(); }
+    catch(e){ S.err=e.message; render(); }
+  }
+
+  // ── nav ─────────────────────────────────────────────────────────────────
+  function setFilter(f){ S.filter=f; render(); }
+  async function pickReport(id){ S.reportId=id; S.view='list'; S.detail=null; await loadResults(); render(); }
+  async function openDetail(name){
+    var cur=S.results.filter(function(r){return r.name===name;})[0];
+    S.detail={cur:cur||{name:name},history:[]}; S.view='detail'; S.err=''; render();
+    var hist=await loadHistory(name);
+    if(!cur){ cur=hist.length?Object.assign({name:name},hist[hist.length-1]):{name:name}; }
+    // a name can recur across specimens (e.g. serum vs urine GLUCOSE) — keep the
+    // trend to readings that share this reading's unit so we don't mix them.
+    if(cur.unit!=null) hist=hist.filter(function(x){ return x.unit===cur.unit; });
+    S.detail={cur:cur,history:hist}; render();
+  }
+  function closeDetail(){ S.view='list'; S.detail=null; render(); }
+
+  (async function(){
+    var profile=await requireUser(); if(!profile) return;
+    S.userId=profile.user.id;
+    await loadReports(); await loadResults();
+    S.loaded=true; render();
+  })();
+  </script>
+</body>
+</html>
