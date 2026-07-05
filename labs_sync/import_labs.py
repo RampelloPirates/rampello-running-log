@@ -220,11 +220,196 @@ def parse_report_meta(reader):
     }
 
 
+# ── BayCare / MyChart patient-portal format ──────────────────────────────────
+# A different layout entirely: results stacked vertically (name / value / Date: /
+# Reference Range:), one *latest* value per marker, each from its own date. We map
+# the portal's short names to the Quest names above so a marker trends as one line
+# across both sources, and normalise unit spellings for the same reason.
+PORTAL_NAME_MAP = {
+    "WBC": "WHITE BLOOD CELL COUNT", "RBC": "RED BLOOD CELL COUNT", "HGB": "HEMOGLOBIN",
+    "HCT": "HEMATOCRIT", "MCV": "MCV", "MCH": "MCH", "MCHC": "MCHC", "RDW": "RDW",
+    "PLT": "PLATELET COUNT", "MPV": "MPV", "SEGS": "NEUTROPHILS", "LYMPHS": "LYMPHOCYTES",
+    "MONO": "MONOCYTES", "EOS": "EOSINOPHILS", "BASO": "BASOPHILS",
+    "NEUTROPHIL, ABS": "ABSOLUTE NEUTROPHILS", "LYMPH, ABS": "ABSOLUTE LYMPHOCYTES",
+    "MONOCYTE, ABS": "ABSOLUTE MONOCYTES", "EOSINOPHIL, ABS": "ABSOLUTE EOSINOPHILS",
+    "BASOPHIL, ABS": "ABSOLUTE BASOPHILS", "BUN": "UREA NITROGEN (BUN)",
+    "BUN/CREAT": "BUN/CREATININE RATIO", "PROTEIN, TOT": "PROTEIN, TOTAL",
+    "ALB/GLOB": "ALBUMIN/GLOBULIN RATIO", "BILI, TOTAL": "BILIRUBIN, TOTAL",
+    "ALK PHOS": "ALKALINE PHOSPHATASE", "EGFR (CR)": "EGFR", "TRIGLYCERIDE": "TRIGLYCERIDES",
+    "CHOLESTEROL": "CHOLESTEROL, TOTAL", "HDL": "HDL CHOLESTEROL", "LDL CALC": "LDL-CHOLESTEROL",
+    "RISK RATIO": "CHOL/HDLC RATIO", "SP GRAV": "SPECIFIC GRAVITY", "KETONE": "KETONES",
+    "BLOOD": "OCCULT BLOOD", "LEUK EST": "LEUKOCYTE ESTERASE",
+}
+PORTAL_UNIT_MAP = {"th/uL": "Thousand/uL", "mill/uL": "Million/uL", "IU/L": "U/L"}
+PORTAL_QUAL = {"NEGATIVE", "POSITIVE", "YELLOW", "CLEAR", "CLOUDY", "TRACE", "NONE SEEN"}
+PORTAL_SKIP_VALUE = {"SEE NOTE", "SEE BELOW", "N/A", "NEVER A SMOKER", "STANDING", "NO", "YES"}
+PORTAL_SKIP_NAME = ["BLOOD PRESSURE", "WEIGHT", "HEIGHT", "TYPE OF SCALE", "TOBACCO",
+                    "ECRCL", "AKI", "LIPID INTERP", "CULTURE REFLEXED",
+                    "EGFR (NONAFRAM)", "EGFR (AFRAM)"]
+PORTAL_SKIP_UNITS = {"kg", "lb", "lbs", "oz", "inch", "inch(es)", "mmhg"}
+PORTAL_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
+PORTAL_DROP = {"Skip to Content", "Health Record", "Results", "All results",
+               "Patient Viewable Results", "Hematology", "Urinalysis", "General Chem",
+               "Lipids", "Health Profile", "Medications", "Procedures", "Documents",
+               "Clinical Notes", "Radiology/Cardiology", "Pathology", "Microbiology",
+               "Visit Summaries", "SBP/DBP"}
+PORTAL_TIME_RE = re.compile(r"^(a\.m\.|p\.m\.)\s+E[SD]T$", re.I)
+PORTAL_DATE_RE = re.compile(r"([A-Z][a-z]{2})\s*(\d{1,2}),?\s*(\d{4})")
+
+
+def portal_clean(reader):
+    out = []
+    for p in reader.pages:
+        for ln in (p.extract_text() or "").split("\n"):
+            s = re.sub("[-]", "", ln).strip()   # strip portal graph-icon glyphs
+            if not s or s.startswith("====="):
+                continue
+            if s.startswith("View all") or s.replace(" ", "") == "Viewallforthisresult":
+                continue
+            if s in PORTAL_DROP:
+                continue
+            if s.startswith(("The information provided", "If you believe", "Test results are released",
+                             "days.", "Graphing is available", "on the result", "our Patient Portal",
+                             "provider to request", "Vital signs", "record.", "surgery",
+                             "Results are typically", "soon as they", "see results",
+                             "data is incorrect", "equipment not", "BayCare", "document or image",
+                             "contain information", "JEFFREY", "Jeffrey")):
+                continue
+            if s.startswith("Date:") and s != "Date:":
+                continue
+            if s.startswith("Range:") and s != "Range:":
+                s = s[len("Range:"):].strip()
+                if not s:
+                    continue
+            out.append(s)
+    return out
+
+
+def portal_date(line):
+    m = PORTAL_DATE_RE.search(line)
+    if not m:
+        return None
+    mon = PORTAL_MONTHS.get(m.group(1))
+    return f"{int(m.group(3)):04d}-{mon:02d}-{int(m.group(2)):02d}" if mon else None
+
+
+def portal_is_value(s):
+    t = s.strip()
+    if re.match(r"^[<>]?=?\s*\d", t):
+        return True
+    up = t.upper().rstrip(" .")
+    return any(up.startswith(q) for q in PORTAL_QUAL) or any(up.startswith(k) for k in PORTAL_SKIP_VALUE)
+
+
+def portal_value(s):
+    """-> (value_num, value_text, unit, flag, skip)"""
+    flag = None
+    m = re.search(r"\((High|Low)\)", s, re.I)
+    if m:
+        flag = "H" if m.group(1).lower() == "high" else "L"
+    s = re.sub(r"\((High|Low)\)", "", s, flags=re.I).strip()
+    up = s.upper().rstrip(" .")
+    if any(up.startswith(k) for k in PORTAL_SKIP_VALUE):
+        return (None, None, None, None, True)
+    for q in PORTAL_QUAL:
+        if up.startswith(q):
+            unit = s[len(q):].strip() or None
+            return (None, q.title() if q != "NONE SEEN" else "None seen", unit, flag, False)
+    m = re.match(r"^(?P<pre>[<>]=?)?\s*(?P<num>\d[\d.]*)\s*(?P<unit>.*)$", s)
+    if not m:
+        return (None, None, None, flag, True)
+    unit = (m.group("unit") or "").strip() or None
+    vtext = (m.group("pre") + m.group("num")) if m.group("pre") else None
+    return (float(m.group("num")), vtext, unit, flag, False)
+
+
+def portal_range(lines):
+    raw = " ".join(lines).strip()
+    if not raw:
+        return {"ref_operator": "none", "ref_low": None, "ref_high": None, "unit": None, "normal_text": None}
+    up = raw.upper()
+    for q in PORTAL_QUAL:
+        if up.startswith(q):
+            return {"ref_operator": "qual", "ref_low": None, "ref_high": None, "unit": None, "normal_text": q.title()}
+    m = re.match(r"^(?P<lo>[\d.]+)\s*(?P<u1>[^\d-]*?)\s*-\s*(?P<hi>[\d.]+)\s*(?P<u2>.*)$", raw)
+    if m:
+        unit = (m.group("u2") or m.group("u1") or "").strip() or None
+        return {"ref_operator": "range", "ref_low": float(m.group("lo")), "ref_high": float(m.group("hi")),
+                "unit": unit, "normal_text": None}
+    m = re.match(r"^(?P<op>>=|<=|>|<)\s*(?P<n>[\d.]+)\s*(?P<u>.*)$", raw)
+    if m:
+        n, unit = float(m.group("n")), (m.group("u") or "").strip() or None
+        if m.group("op") in (">=", ">"):
+            return {"ref_operator": "gte", "ref_low": n, "ref_high": None, "unit": unit, "normal_text": None}
+        return {"ref_operator": "lte", "ref_low": None, "ref_high": n, "unit": unit, "normal_text": None}
+    return {"ref_operator": "none", "ref_low": None, "ref_high": None, "unit": None, "normal_text": None}
+
+
+def norm_unit(u):
+    return PORTAL_UNIT_MAP.get(u, u) if u else u
+
+
+def parse_portal(reader):
+    """Return groups: [(report_meta, rows), …] — one report per distinct date."""
+    lines = portal_clean(reader)
+    date_idx = [i for i, s in enumerate(lines) if s == "Date:"]
+    by_date = {}
+    for k, di in enumerate(date_idx):
+        if di < 2:
+            continue
+        value_line, name = lines[di - 1], lines[di - 2]
+        if portal_is_value(name) and di >= 3:      # glyph/reflow bumped the value onto its own line
+            name = lines[di - 3]
+        date = portal_date(lines[di + 1]) if di + 1 < len(lines) else None
+        stop = date_idx[k + 1] - 2 if k + 1 < len(date_idx) else len(lines)
+        seg = lines[di + 1:stop]
+        rng_lines = []
+        if "Range:" in seg:
+            ri = seg.index("Range:")
+            rng_lines = [x for x in seg[ri + 1:]
+                         if not PORTAL_TIME_RE.match(x) and not PORTAL_DATE_RE.search(x)
+                         and x not in ("Reference", "Range:")]
+        nm_up = name.upper().strip()
+        if any(sk in nm_up for sk in PORTAL_SKIP_NAME):
+            continue
+        vnum, vtext, vunit, flag, skip = portal_value(value_line)
+        if skip or (vunit or "").lower().strip() in PORTAL_SKIP_UNITS or not date:
+            continue
+        ref = portal_range(rng_lines)
+        canon = PORTAL_NAME_MAP.get(nm_up, name.strip())
+        grp = by_date.setdefault(date, [])
+        grp.append({
+            "category": categorize(canon), "panel": None, "name": canon,
+            "value_num": vnum, "value_text": vtext, "flag": flag,
+            "unit": norm_unit(vunit or ref["unit"]), "ref_operator": ref["ref_operator"],
+            "ref_low": ref["ref_low"], "ref_high": ref["ref_high"],
+            "normal_text": ref["normal_text"], "sort_order": len(grp),
+        })
+    groups = []
+    for date in sorted(by_date):
+        groups.append(({"collected_on": date, "source": "BayCare (portal)",
+                        "physician": None, "fasting": None,
+                        "import_ref": f"portal:{date}"}, by_date[date]))
+    return groups
+
+
+def detect_format(reader):
+    head = " ".join((reader.pages[i].extract_text() or "") for i in range(min(3, len(reader.pages))))
+    if "View all for this result" in head or "BayCare" in head or "Patient Viewable Results" in head:
+        return "portal"
+    return "quest"
+
+
 def parse_pdf(path):
+    """Return (format, groups) where groups = [(report_meta, rows), …]."""
     reader = pypdf.PdfReader(path)
+    fmt = detect_format(reader)
+    if fmt == "portal":
+        return fmt, parse_portal(reader)
     meta = parse_report_meta(reader)
     rows = parse_results(merge_wraps(clean_lines(reader)))
-    return meta, rows
+    return fmt, [(meta, rows)]
 
 
 # ── DB upsert ────────────────────────────────────────────────────────────────
@@ -235,7 +420,7 @@ def env(key, required=False, default=None):
     return v
 
 
-def upload(meta, rows, replace=False):
+def upload(groups, replace=False):
     from supabase import create_client
     url = env("SUPABASE_URL", True)
     key = env("SUPABASE_ANON_KEY", True)
@@ -247,33 +432,31 @@ def upload(meta, rows, replace=False):
     sb.postgrest.auth(auth.session.access_token)
     user_id = auth.user.id
 
-    if not meta.get("collected_on"):
-        sys.exit("Could not read a collection date from the PDF — aborting.")
-    ref = meta.get("import_ref") or f"quest:{meta['collected_on']}"
+    imported = 0
+    for meta, rows in groups:
+        if not meta.get("collected_on"):
+            print("  skipping a group with no collection date."); continue
+        ref = meta.get("import_ref") or f"lab:{meta['collected_on']}"
+        existing = sb.table("lab_reports").select("id").eq("user_id", user_id).eq("import_ref", ref).execute()
+        if existing.data:
+            if not replace:
+                print(f"  {ref}: already imported — skipping (use --replace to overwrite).")
+                continue
+            for r in existing.data:
+                sb.table("lab_reports").delete().eq("id", r["id"]).execute()   # cascades to results
+            print(f"  {ref}: replacing existing report.")
 
-    existing = sb.table("lab_reports").select("id").eq("user_id", user_id).eq("import_ref", ref).execute()
-    if existing.data:
-        if not replace:
-            print(f"Report {ref} already imported ({len(existing.data)} found). "
-                  f"Use --replace to overwrite. Nothing to do.")
-            return
-        for r in existing.data:
-            sb.table("lab_reports").delete().eq("id", r["id"]).execute()   # cascades to results
-        print(f"Replacing existing report {ref}.")
-
-    rep = sb.table("lab_reports").insert({
-        "user_id": user_id,
-        "collected_on": meta["collected_on"],
-        "source": meta.get("source"),
-        "physician": meta.get("physician"),
-        "fasting": meta.get("fasting"),
-        "import_ref": ref,
-    }).execute()
-    report_id = rep.data[0]["id"]
-
-    payload = [{**r, "user_id": user_id, "report_id": report_id} for r in rows]
-    sb.table("lab_results").insert(payload).execute()
-    print(f"Imported {len(payload)} markers for {meta['collected_on']} ({meta.get('source')}).")
+        rep = sb.table("lab_reports").insert({
+            "user_id": user_id, "collected_on": meta["collected_on"], "source": meta.get("source"),
+            "physician": meta.get("physician"), "fasting": meta.get("fasting"), "import_ref": ref,
+        }).execute()
+        report_id = rep.data[0]["id"]
+        payload = [{**r, "user_id": user_id, "report_id": report_id} for r in rows]
+        if payload:
+            sb.table("lab_results").insert(payload).execute()
+        imported += 1
+        print(f"  {meta['collected_on']} ({meta.get('source')}): {len(payload)} markers.")
+    print(f"Done. {imported} report(s) imported.")
 
 
 def main():
@@ -284,14 +467,16 @@ def main():
     if not paths:
         sys.exit("Usage: python labs_sync/import_labs.py [--dry-run] [--replace] <lab.pdf>")
 
-    meta, rows = parse_pdf(paths[0])
-    print(f"Report: {meta.get('collected_on')}  source={meta.get('source')}  "
-          f"ref={meta.get('import_ref')}  fasting={meta.get('fasting')}")
-    print(f"Parsed {len(rows)} markers.")
+    fmt, groups = parse_pdf(paths[0])
+    total = sum(len(rows) for _, rows in groups)
+    print(f"Detected format: {fmt}. {len(groups)} report(s), {total} markers total.")
+    for meta, rows in groups:
+        print(f"  • {meta.get('collected_on')}  {meta.get('source')}  "
+              f"({len(rows)} markers)  ref={meta.get('import_ref')}")
     if dry:
-        print(json.dumps({"meta": meta, "results": rows}, indent=1, default=str))
+        print(json.dumps([{"meta": m, "results": r} for m, r in groups], indent=1, default=str))
         return
-    upload(meta, rows, replace=replace)
+    upload(groups, replace=replace)
 
 
 if __name__ == "__main__":
