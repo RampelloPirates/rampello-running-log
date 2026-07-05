@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Vitals — Tally</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--paper:#F4F1E9;--surface:#FFFFFF;--surface-warm:#FBF9F3;--ink:#1E241C;--muted:#71776B;--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--amber-soft:#F1E6D2;--border:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;--blue:#3E6B8A;--blue-tint:#E4EDF2;
+      --f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;}
+    input:focus,select:focus,button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    .wrap{max-width:560px;margin:0 auto;padding:0 16px 56px;}
+    header{padding:22px 0 8px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+
+    .vcard{width:100%;text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:15px 16px;margin-bottom:11px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
+    .vcard:hover{border-color:var(--green);}
+    .v-top{display:flex;align-items:center;gap:9px;}
+    .v-icon{font-size:18px;}
+    .v-label{font-family:var(--f-display);font-weight:600;font-size:15px;color:var(--green-deep);}
+    .v-top .pill{margin-left:auto;}
+    .pill{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
+    .pill.in{color:var(--green-deep);background:var(--green-tint);}
+    .pill.high{color:#8a4a1f;background:var(--amber-soft);}
+    .pill.low{color:#2f5468;background:var(--blue-tint);}
+    .pill.flat{color:var(--muted);background:#ECEAE2;}
+    .v-big{display:flex;align-items:baseline;gap:7px;margin:8px 0 2px;}
+    .v-val{font-family:var(--f-mono);font-size:26px;font-weight:600;line-height:1;}
+    .v-unit{font-size:12px;color:var(--muted);}
+    .v-date{font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-left:auto;}
+    .v-extra{font-size:12px;color:var(--muted);margin-top:2px;}
+    .spark{width:100%;height:34px;display:block;margin-top:8px;}
+
+    .chart{width:100%;height:auto;display:block;margin:6px 0 2px;}
+    .legend{display:flex;gap:14px;font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-top:4px;}
+    .legend .k{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:14px;}
+    .back-link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;margin-bottom:4px;}
+    .d-name{font-family:var(--f-display);font-size:20px;font-weight:600;margin:2px 0 2px;color:var(--green-deep);}
+    .d-big{display:flex;align-items:baseline;gap:8px;margin:4px 0 2px;}
+    .d-big .v{font-family:var(--f-mono);font-size:30px;font-weight:600;}
+    .d-big .u{font-size:13px;color:var(--muted);}
+    .hist-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13px;cursor:pointer;}
+    .hist-row:last-child{border-bottom:none;}
+    .hist-row:hover{color:var(--green);}
+    .hist-row .hv{font-family:var(--f-mono);font-weight:600;}
+
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:11px 16px;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+    .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+    .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+    .link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:10px 0;}
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+    label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:block;margin:8px 0 4px;}
+    .full{width:100%;}
+    .err{color:var(--danger);font-size:13px;margin:8px 0 0;}
+    .empty{color:var(--muted);font-size:13.5px;line-height:1.55;}
+    .loading{padding:48px;text-align:center;color:var(--muted);}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  var S = { loaded:false, userId:null, rows:[], view:'list', detailKind:null, form:null, err:'' };
+
+  var META = {
+    blood_pressure:{label:'Blood Pressure', icon:'🩺', unit:'mmHg', compound:true, guides:[120,80]},
+    weight:        {label:'Weight',         icon:'⚖️', unit:'lb'},
+    pulse:         {label:'Resting Pulse',  icon:'💓', unit:'bpm', band:[60,100]},
+    temperature:   {label:'Temperature',    icon:'🌡️', unit:'°F', band:[97,99]},
+    height:        {label:'Height',         icon:'📏', unit:'in'},
+  };
+  var ORDER = ['blood_pressure','weight','pulse','temperature','height'];
+
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmt(n){ if(n==null) return ''; var x=Math.round(Number(n)*100)/100; return String(x); }
+  function todayISO(){ var d=new Date(),p=function(n){return String(n).padStart(2,'0');}; return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+  function prettyDate(iso){ if(!iso) return ''; var p=iso.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); return d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }
+  function shortDate(iso){ if(!iso) return ''; var p=iso.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); return d.toLocaleDateString(undefined,{month:'short',year:'2-digit'}); }
+
+  function valText(r){ return r.value2!=null ? (fmt(r.value)+'/'+fmt(r.value2)) : fmt(r.value); }
+
+  // status vs standard vital ranges
+  function statusOf(kind, v, v2){
+    if(v==null) return 'flat';
+    if(kind==='blood_pressure'){ if(v>=130||v2>=80) return 'high'; if(v<90||v2<60) return 'low'; if(v>=120) return 'high'; return 'in'; }
+    if(kind==='pulse'){ return v>100?'high':(v<60?'low':'in'); }
+    if(kind==='temperature'){ return v>=100.4?'high':(v<97?'low':'in'); }
+    return 'flat';   // weight, height — no universal range
+  }
+  function statusLabel(s){ return s==='in'?'In Range':s==='high'?'High':s==='low'?'Low':''; }
+
+  function byKind(kind){ return S.rows.filter(function(r){return r.kind===kind;})
+    .sort(function(a,b){return a.measured_on<b.measured_on?1:-1;}); }   // newest first
+  function latestHeight(){ var h=byKind('height')[0]; return h?Number(h.value):null; }
+  function bmi(wLb){ var h=latestHeight(); if(!h) return null; return Math.round(703*wLb/(h*h)*10)/10; }
+
+  // ── charts ──────────────────────────────────────────────────────────────
+  function chartSVG(kind, rowsAsc, mini){
+    var meta=META[kind];
+    var pts=rowsAsc.filter(function(p){return p.value!=null;});
+    if(!pts.length) return '';
+    var W=520,H=mini?38:172,padT=mini?4:14,padB=mini?4:26,padL=8,padR=8;
+    var series=meta.compound?[{k:'value',c:'#BE722A'},{k:'value2',c:'#3E6B8A'}]:[{k:'value',c:'#3A5A40'}];
+    var ys=[]; pts.forEach(function(p){ series.forEach(function(s){ if(p[s.k]!=null) ys.push(Number(p[s.k])); }); });
+    if(!mini){ if(meta.band){ys.push(meta.band[0],meta.band[1]);} if(meta.guides){meta.guides.forEach(function(g){ys.push(g);});} }
+    var ymin=Math.min.apply(null,ys), ymax=Math.max.apply(null,ys), sp=(ymax-ymin)||1;
+    ymin-=sp*0.14; ymax+=sp*0.14;
+    var x=function(i){ return pts.length===1?W/2:padL+(W-padL-padR)*i/(pts.length-1); };
+    var y=function(v){ return padT+(H-padT-padB)*(1-(v-ymin)/(ymax-ymin)); };
+    var svg='<svg class="'+(mini?'spark':'chart')+'" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+    if(!mini){
+      if(meta.band){ var yb=y(meta.band[1]),yb2=y(meta.band[0]); svg+='<rect x="0" y="'+yb.toFixed(1)+'" width="'+W+'" height="'+Math.max(0,yb2-yb).toFixed(1)+'" fill="#EBF0E8"/>'; }
+      if(meta.guides){ meta.guides.forEach(function(g){ svg+='<line x1="0" y1="'+y(g).toFixed(1)+'" x2="'+W+'" y2="'+y(g).toFixed(1)+'" stroke="#D8CFBE" stroke-dasharray="4 4" stroke-width="1"/>'; }); }
+    }
+    series.forEach(function(s){
+      var sp2=pts.filter(function(p){return p[s.k]!=null;});
+      if(sp2.length>1){
+        var d=pts.map(function(p,i){ return (p[s.k]==null?'':((i&&pts[i-1][s.k]!=null?'L':'M')+x(i).toFixed(1)+' '+y(Number(p[s.k])).toFixed(1))); }).filter(Boolean).join(' ');
+        svg+='<path d="'+d+'" fill="none" stroke="'+s.c+'" stroke-width="'+(mini?1.6:2)+'" stroke-linejoin="round" stroke-linecap="round"/>';
+      }
+      pts.forEach(function(p,i){ if(p[s.k]!=null) svg+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(Number(p[s.k])).toFixed(1)+'" r="'+(mini?2:4)+'" fill="'+s.c+'" '+(mini?'':'stroke="#fff" stroke-width="1.5"')+'/>'; });
+    });
+    if(!mini){
+      [0, Math.floor((pts.length-1)/2), pts.length-1].filter(function(v,i,a){return a.indexOf(v)===i;}).forEach(function(i){
+        var lx=Math.max(16,Math.min(W-16,x(i)));
+        svg+='<text x="'+lx.toFixed(1)+'" y="'+(H-8)+'" font-size="10" fill="#71776B" font-family="monospace" text-anchor="middle">'+esc(shortDate(pts[i].measured_on))+'</text>';
+      });
+    }
+    svg+='</svg>';
+    return svg;
+  }
+
+  // ── render: list ──────────────────────────────────────────────────────────
+  function renderList(){
+    var h='<button class="link" onclick="openForm(null)" style="float:right;margin-top:-2px">+ Add reading</button>';
+    var any=false;
+    h+=ORDER.map(function(kind){
+      var rows=byKind(kind); if(!rows.length) return '';
+      any=true;
+      var meta=META[kind], latest=rows[0], st=statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null);
+      var asc=rows.slice().reverse();
+      var extra='';
+      if(kind==='weight'){ var b=bmi(Number(latest.value)); if(b!=null) extra='<div class="v-extra">BMI '+b+'</div>'; }
+      return '<button class="vcard" onclick="openDetail(\''+kind+'\')">'+
+        '<div class="v-top"><span class="v-icon">'+meta.icon+'</span><span class="v-label">'+esc(meta.label)+'</span>'+
+        (statusLabel(st)?'<span class="pill '+st+'">'+statusLabel(st)+'</span>':'')+'</div>'+
+        '<div class="v-big"><span class="v-val">'+esc(valText(latest))+'</span><span class="v-unit">'+esc(meta.unit)+'</span>'+
+        '<span class="v-date">'+esc(shortDate(latest.measured_on))+'</span></div>'+extra+
+        chartSVG(kind, asc, true)+'</button>';
+    }).join('');
+    if(!any) h+=emptyState();
+    return h;
+  }
+  function emptyState(){
+    return '<div class="card"><p class="empty">No vitals yet.<br><br>Import a BayCare portal PDF with <code>labs_sync</code> — it pulls blood pressure, weight, pulse and temperature alongside labs — or add a reading by hand.</p>'+
+      '<button class="btn btn-primary full" style="margin-top:12px" onclick="openForm(null)">+ Add a reading</button></div>';
+  }
+
+  // ── render: detail ──────────────────────────────────────────────────────
+  function renderDetail(){
+    var kind=S.detailKind, meta=META[kind], rows=byKind(kind);
+    var asc=rows.slice().reverse(), latest=rows[0];
+    var st=latest?statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null):'flat';
+    var h='<button class="back-link" onclick="closeDetail()">‹ All vitals</button>';
+    h+='<div class="card"><div class="kicker">'+meta.icon+' Vital</div><div class="d-name">'+esc(meta.label)+'</div>';
+    if(latest){
+      h+='<div class="d-big"><span class="v">'+esc(valText(latest))+'</span><span class="u">'+esc(meta.unit)+'</span>'+
+        (statusLabel(st)?'<span class="pill '+st+'" style="align-self:center;margin-left:4px">'+statusLabel(st)+'</span>':'')+'</div>';
+      h+='<div class="v-extra" style="margin-bottom:8px">Latest · '+esc(prettyDate(latest.measured_on));
+      if(kind==='weight'){ var b=bmi(Number(latest.value)); if(b!=null) h+=' · BMI '+b; }
+      h+='</div>';
+    }
+    h+=chartSVG(kind, asc, false);
+    if(meta.compound) h+='<div class="legend"><span><span class="k" style="background:#BE722A"></span>Systolic</span><span><span class="k" style="background:#3E6B8A"></span>Diastolic</span></div>';
+    else if(meta.band) h+='<div class="legend"><span><span class="k" style="background:#EBF0E8"></span>Normal '+meta.band[0]+'–'+meta.band[1]+' '+esc(meta.unit)+'</span></div>';
+    h+='</div>';
+
+    h+='<div class="card"><div class="kicker" style="margin-bottom:6px">History</div>';
+    if(!rows.length){ h+='<p class="empty">No readings yet.</p>'; }
+    else h+=rows.map(function(r){
+      var s=statusOf(kind,Number(r.value),r.value2!=null?Number(r.value2):null);
+      return '<div class="hist-row" onclick="openForm(\''+esc(r.id)+'\')"><span>'+esc(prettyDate(r.measured_on))+'</span>'+
+        '<span class="hv">'+(statusLabel(s)?'<span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>':'')+
+        esc(valText(r))+' '+esc(meta.unit)+'</span></div>';
+    }).join('');
+    h+='<button class="link" onclick="openForm(null,\''+kind+'\')">+ Add a '+esc(meta.label.toLowerCase())+' reading</button></div>';
+    return h;
+  }
+
+  // ── render root ─────────────────────────────────────────────────────────
+  function render(){
+    var app=el('app');
+    if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
+    var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Vitals</small></h1></header>';
+    var body;
+    if(S.form) body=renderForm();
+    else if(S.view==='detail'&&S.detailKind) body=renderDetail();
+    else body=renderList();
+    app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
+  }
+
+  // ── form ────────────────────────────────────────────────────────────────
+  function renderForm(){
+    var f=S.form, meta=META[f.kind];
+    var kindSel=f.id?('<div class="v-extra" style="margin-bottom:6px">'+meta.icon+' '+esc(meta.label)+'</div>'):
+      ('<label class="lbl">Type</label><select id="fKind" class="field full" onchange="onKindChange(this.value)">'+
+       ORDER.map(function(k){return '<option value="'+k+'"'+(f.kind===k?' selected':'')+'>'+META[k].label+'</option>';}).join('')+'</select>');
+    var compound=META[f.kind].compound;
+    var valFields = compound
+      ? '<div class="grid2"><div><label class="lbl">Systolic</label><input id="fVal" class="field full" inputmode="decimal" value="'+esc(f.value)+'"></div>'+
+        '<div><label class="lbl">Diastolic</label><input id="fVal2" class="field full" inputmode="decimal" value="'+esc(f.value2)+'"></div></div>'
+      : '<label class="lbl">Value <span style="font-weight:400">('+esc(META[f.kind].unit)+')</span></label><input id="fVal" class="field full" inputmode="decimal" value="'+esc(f.value)+'">';
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button>'+
+      '<div class="card"><div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit reading':'Add a reading')+'</div>'+
+      kindSel+
+      '<label class="lbl">Date</label><input id="fDate" type="date" class="field full" value="'+esc(f.date)+'">'+
+      valFields+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveForm()">Save</button>'+
+      (f.id?'<button class="btn btn-danger" onclick="deleteReading(\''+esc(f.id)+'\')">Delete</button>':'')+'</div></div>';
+  }
+  function onKindChange(k){
+    // preserve typed values across a type switch
+    S.form.value=(el('fVal')||{}).value||''; S.form.value2=(el('fVal2')||{}).value||'';
+    S.form.date=(el('fDate')||{}).value||S.form.date; S.form.kind=k; render();
+  }
+  function openForm(id, kind){
+    if(id){ var r=S.rows.filter(function(x){return x.id===id;})[0]; if(!r) return;
+      S.form={id:id, kind:r.kind, date:r.measured_on, value:fmt(r.value), value2:r.value2!=null?fmt(r.value2):''}; }
+    else S.form={id:null, kind:kind||'weight', date:todayISO(), value:'', value2:''};
+    S.err=''; render();
+  }
+  function closeForm(){ S.form=null; render(); }
+  function numOrNull(s){ s=(s||'').trim(); if(!s) return null; var n=Number(s); return isNaN(n)?null:n; }
+  async function saveForm(){
+    var f=S.form, meta=META[f.kind];
+    var date=(el('fDate')||{}).value;
+    var v=numOrNull((el('fVal')||{}).value), v2=meta.compound?numOrNull((el('fVal2')||{}).value):null;
+    if(!date){ S.err='Pick a date.'; render(); return; }
+    if(v==null){ S.err='Enter a value.'; render(); return; }
+    var row={ kind:f.kind, measured_on:date, value:v, value2:v2, unit:meta.unit };
+    try{
+      if(f.id){ var u=await sb.from('vitals').update(row).eq('id',f.id); if(u.error) throw u.error; }
+      else{ row.user_id=S.userId; row.source='Manual'; row.import_ref='manual:'+date+':'+f.kind+':'+Math.random().toString(36).slice(2,7);
+        var ins=await sb.from('vitals').insert(row); if(ins.error) throw ins.error; }
+      S.form=null; await load();
+      if(S.view!=='detail') S.view='list';
+      render();
+    }catch(e){ S.err=e.message; render(); }
+  }
+  async function deleteReading(id){
+    if(!confirm('Delete this reading?')) return;
+    try{ await sb.from('vitals').delete().eq('id',id); S.form=null; await load(); render(); }
+    catch(e){ S.err=e.message; render(); }
+  }
+
+  function openDetail(kind){ S.detailKind=kind; S.view='detail'; S.err=''; render(); }
+  function closeDetail(){ S.view='list'; S.detailKind=null; render(); }
+
+  async function load(){
+    var r=await sb.from('vitals').select('*').order('measured_on',{ascending:false});
+    S.rows=r.data||[];
+  }
+  (async function(){
+    var profile=await requireUser(); if(!profile) return;
+    S.userId=profile.user.id;
+    await load();
+    S.loaded=true; render();
+  })();
+  </script>
+</body>
+</html>

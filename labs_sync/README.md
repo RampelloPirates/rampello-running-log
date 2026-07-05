@@ -14,6 +14,10 @@ in range" gauge and trends over time.
   (`WHITE BLOOD CELL COUNT`, …) and units normalised (`th/uL`→`Thousand/uL`) so the
   same marker trends as one continuous line across both sources.
 
+From a **portal** PDF it also pulls **vitals** — blood pressure, weight, pulse,
+temperature, height — into the `vitals` table (run `sql/18_vitals.sql` once), which
+`vitals.html` charts over time. Each vital carries its own date, same as the labs.
+
 Unlike the Strava sync, this is **run by hand** when you download a new report —
 there's no API to poll, you just save the PDF and run the script.
 

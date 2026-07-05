@@ -394,6 +394,67 @@ def parse_portal(reader):
     return groups
 
 
+def classify_vital(name, value_line):
+    """Map a portal marker (name, value line) to a vital reading, or None."""
+    up = name.upper().strip()
+    m = re.search(r"[\d.]+", value_line)
+    if up.startswith("WEIGHT, ACTUAL"):
+        if "LBS/OZ" in up or not m:
+            return None                          # skip the lb/oz decomposition rows
+        val = float(m.group())
+        if "KG" in up:
+            val = val * 2.20462                  # store one canonical weight, in lb
+        return {"kind": "weight", "value": round(val, 1), "value2": None, "unit": "lb"}
+    if up.startswith("HEIGHT") and m:
+        return {"kind": "height", "value": float(m.group()), "value2": None, "unit": "in"}
+    if (up.startswith("PULSE") or up.startswith("HEART RATE")) and m:
+        return {"kind": "pulse", "value": float(m.group()), "value2": None, "unit": "bpm"}
+    if up.startswith("TEMPERATURE") and m:
+        return {"kind": "temperature", "value": float(m.group()), "value2": None, "unit": "°F"}
+    return None
+
+
+def parse_portal_vitals(reader):
+    """Pull vitals (BP / weight / pulse / temp / height) from a portal PDF.
+    Returns a list of readings, deduped per (date, kind)."""
+    lines = portal_clean(reader)
+    date_idx = [i for i, s in enumerate(lines) if s == "Date:"]
+    found = {}
+    # blood pressure — its value ('127 / 77 mmHg (…High)') and name span multiple
+    # reflowed lines, so scan for the compound value and attach the nearest date.
+    for i, l in enumerate(lines):
+        m = re.match(r"^(\d{2,3})\s*/\s*(\d{2,3})\s*mmHg", l)
+        if not m:
+            continue
+        date = None
+        for j in range(i, min(i + 8, len(lines))):
+            if lines[j] == "Date:" and j + 1 < len(lines):
+                date = portal_date(lines[j + 1]); break
+        if date:
+            found.setdefault((date, "blood_pressure"), {
+                "date": date, "kind": "blood_pressure",
+                "value": float(m.group(1)), "value2": float(m.group(2)), "unit": "mmHg"})
+    # weight / height / pulse / temperature via the name/value/Date anchor
+    for k, d in enumerate(date_idx):
+        if d < 2:
+            continue
+        name, val = lines[d - 2], lines[d - 1]
+        if portal_is_value(name) and d >= 3:
+            name = lines[d - 3]
+        date = portal_date(lines[d + 1]) if d + 1 < len(lines) else None
+        if not date:
+            continue
+        v = classify_vital(name, val)
+        if v:
+            found.setdefault((date, v["kind"]), {**v, "date": date})
+    rows = []
+    for (date, kind), v in found.items():
+        rows.append({"measured_on": date, "kind": kind, "value": v["value"],
+                     "value2": v["value2"], "unit": v["unit"], "source": "BayCare (portal)",
+                     "import_ref": f"portalv:{date}:{kind}"})
+    return rows
+
+
 def detect_format(reader):
     head = " ".join((reader.pages[i].extract_text() or "") for i in range(min(3, len(reader.pages))))
     if "View all for this result" in head or "BayCare" in head or "Patient Viewable Results" in head:
@@ -402,14 +463,14 @@ def detect_format(reader):
 
 
 def parse_pdf(path):
-    """Return (format, groups) where groups = [(report_meta, rows), …]."""
+    """Return (format, lab_groups, vitals) where lab_groups = [(report_meta, rows), …]."""
     reader = pypdf.PdfReader(path)
     fmt = detect_format(reader)
     if fmt == "portal":
-        return fmt, parse_portal(reader)
+        return fmt, parse_portal(reader), parse_portal_vitals(reader)
     meta = parse_report_meta(reader)
     rows = parse_results(merge_wraps(clean_lines(reader)))
-    return fmt, [(meta, rows)]
+    return fmt, [(meta, rows)], []
 
 
 # ── DB upsert ────────────────────────────────────────────────────────────────
@@ -420,7 +481,7 @@ def env(key, required=False, default=None):
     return v
 
 
-def upload(groups, replace=False):
+def upload(groups, vitals=None, replace=False):
     from supabase import create_client
     url = env("SUPABASE_URL", True)
     key = env("SUPABASE_ANON_KEY", True)
@@ -458,6 +519,21 @@ def upload(groups, replace=False):
         print(f"  {meta['collected_on']} ({meta.get('source')}): {len(payload)} markers.")
     print(f"Done. {imported} report(s) imported.")
 
+    # vitals — upsert-by-import_ref (skip any already present unless --replace)
+    vitals = vitals or []
+    if vitals:
+        existing = sb.table("vitals").select("import_ref").eq("user_id", user_id).execute()
+        have = {r["import_ref"] for r in (existing.data or [])}
+        added = 0
+        for v in vitals:
+            if v["import_ref"] in have:
+                if not replace:
+                    continue
+                sb.table("vitals").delete().eq("user_id", user_id).eq("import_ref", v["import_ref"]).execute()
+            sb.table("vitals").insert({**v, "user_id": user_id}).execute()
+            added += 1
+        print(f"Vitals: {added} new reading(s) ({len(vitals) - added} already present).")
+
 
 def main():
     args = sys.argv[1:]
@@ -467,16 +543,20 @@ def main():
     if not paths:
         sys.exit("Usage: python labs_sync/import_labs.py [--dry-run] [--replace] <lab.pdf>")
 
-    fmt, groups = parse_pdf(paths[0])
+    fmt, groups, vitals = parse_pdf(paths[0])
     total = sum(len(rows) for _, rows in groups)
-    print(f"Detected format: {fmt}. {len(groups)} report(s), {total} markers total.")
+    print(f"Detected format: {fmt}. {len(groups)} report(s), {total} markers, {len(vitals)} vitals.")
     for meta, rows in groups:
         print(f"  • {meta.get('collected_on')}  {meta.get('source')}  "
               f"({len(rows)} markers)  ref={meta.get('import_ref')}")
+    for v in sorted(vitals, key=lambda x: (x["kind"], x["measured_on"])):
+        val = f"{v['value']}/{v['value2']}" if v["value2"] else v["value"]
+        print(f"  ♥ {v['measured_on']}  {v['kind']:15} {val} {v['unit']}")
     if dry:
-        print(json.dumps([{"meta": m, "results": r} for m, r in groups], indent=1, default=str))
+        print(json.dumps({"reports": [{"meta": m, "results": r} for m, r in groups],
+                          "vitals": vitals}, indent=1, default=str))
         return
-    upload(groups, replace=replace)
+    upload(groups, vitals, replace=replace)
 
 
 if __name__ == "__main__":
