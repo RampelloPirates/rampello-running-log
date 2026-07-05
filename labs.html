@@ -77,6 +77,12 @@
     .gauge-dot.high{background:var(--amber);}
     .gauge-dot.low{background:var(--blue);}
     .gauge-dot.review{background:var(--muted);}
+    .gauge-track .over,.gauge-track .under{position:absolute;top:50%;transform:translateY(-50%);font-size:11px;line-height:1;font-weight:700;}
+    .gauge-track .over{right:1px;color:var(--amber);}
+    .gauge-track .under{left:1px;color:var(--blue);}
+    .gauge-scale{position:relative;height:13px;margin-top:4px;}
+    .gtick{position:absolute;transform:translateX(-50%);font-family:var(--f-mono);font-size:9.5px;color:var(--muted);white-space:nowrap;}
+    .gtick.edge-start{transform:none;} .gtick.edge-end{transform:translateX(-100%);}
 
     /* detail */
     .back-link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;margin-bottom:4px;}
@@ -156,36 +162,39 @@
     return '';
   }
 
-  // domain + healthy band (in value units) for a numeric gauge, or null
+  // The healthy band sits in a FIXED zone of the track (so it's always clearly
+  // readable) and the value is placed on the same linear scale — so an out-of-range
+  // value lands proportionally outside the band. Values more than ~one band-width
+  // out get pinned to the edge with an over/under arrow (the number still shows).
   function gaugeModel(r){
     if(r.value_num==null) return null;
-    var v=Number(r.value_num), op=r.ref_operator, lo=r.ref_low, hi=r.ref_high, dmin,dmax,hs,he;
+    var v=Number(r.value_num), op=r.ref_operator, lo=r.ref_low, hi=r.ref_high;
+    var hs,he,raw,loLab=null,hiLab=null;
     if(op==='range'||op==='eq'){
-      if(lo==null||hi==null) return null;
-      var span=(hi-lo)||Math.abs(hi)*0.3||1, pad=Math.max(span*0.5, Math.abs(hi)*0.12);
-      dmin=lo-pad; dmax=hi+pad; hs=lo; he=hi;
+      if(lo==null||hi==null||hi<=lo) return null;
+      hs=30; he=70; raw=30+(v-lo)/(hi-lo)*40; loLab=lo; hiLab=hi;   // lo→30%, hi→70%
     } else if(op==='lte'){
-      if(hi==null) return null;
-      dmin=0; dmax=Math.max(hi,v)*1.2||1; hs=dmin; he=hi;
+      if(hi==null||hi<=0) return null;
+      hs=0; he=68; raw=v/hi*68; hiLab=hi;                            // 0→0%, hi→68%
     } else if(op==='gte'){
-      if(lo==null) return null;
-      dmin=Math.min(lo*0.5, v*0.9); dmax=Math.max(lo*1.6, v*1.15)||1; hs=lo; he=dmax;
+      if(lo==null||lo<=0) return null;
+      hs=32; he=100; raw=v/lo*32; loLab=lo;                          // lo→32%, 0→0%
     } else return null;
-    // make sure the value is visible
-    if(v<dmin) dmin=v-(dmax-v)*0.08;
-    if(v>dmax) dmax=v+(v-dmin)*0.08;
-    var W=dmax-dmin||1;
-    var pct=function(x){ return Math.max(0,Math.min(100,(x-dmin)/W*100)); };
-    return { vp:pct(v), hs:pct(hs), he:pct(he), op:op };
+    return { vp:Math.max(3,Math.min(97,raw)), hs:hs, he:he, op:op,
+             loLab:loLab, hiLab:hiLab, over:raw>100, under:raw<0 };
   }
   function gaugeHTML(r){
     var g=gaugeModel(r); if(!g) return '';
     var st=statusOf(r);
     var bandCls='gauge-band'+(g.op==='lte'?' edge-l':'')+(g.op==='gte'?' edge-r':'');
+    var ticks='';
+    if(g.loLab!=null) ticks+='<span class="gtick'+(g.hs<=1?' edge-start':'')+'" style="left:'+g.hs+'%">'+esc(fmt(g.loLab))+'</span>';
+    if(g.hiLab!=null) ticks+='<span class="gtick'+(g.he>=99?' edge-end':'')+'" style="left:'+g.he+'%">'+esc(fmt(g.hiLab))+'</span>';
+    var arrow=g.over?'<span class="over">▸</span>':(g.under?'<span class="under">◂</span>':'');
     return '<div class="gauge"><div class="gauge-track">'+
-      '<div class="'+bandCls+'" style="left:'+g.hs.toFixed(1)+'%;right:'+(100-g.he).toFixed(1)+'%"></div>'+
-      '<div class="gauge-dot '+st+'" style="left:'+g.vp.toFixed(1)+'%"></div>'+
-      '</div></div>';
+      '<div class="'+bandCls+'" style="left:'+g.hs+'%;right:'+(100-g.he)+'%"></div>'+
+      '<div class="gauge-dot '+st+'" style="left:'+g.vp.toFixed(1)+'%"></div>'+arrow+
+      '</div><div class="gauge-scale">'+ticks+'</div></div>';
   }
 
   function valDisplay(r){
