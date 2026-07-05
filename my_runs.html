@@ -753,6 +753,38 @@
       rerenderWithFilter();
     }
 
+    // Weekly context shown when an activity is expanded: total miles and avg
+    // pace for the SAME activity type across the Mon–Sun week it falls in.
+    function weekLineFor(run) {
+      const d = new Date(run.run_date + 'T00:00:00');
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      monday.setHours(0, 0, 0, 0);
+      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+      const mk = x => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+      const lo = mk(monday), hi = mk(sunday);
+      const act = run.activity_type || 'run';
+      let miles = 0, pMiles = 0, pSec = 0, count = 0;
+      allRunsInRange.forEach(r => {
+        if ((r.activity_type || 'run') !== act) return;
+        if (r.run_date < lo || r.run_date > hi) return;
+        count++;
+        if (r.distance_miles) miles += Number(r.distance_miles);
+        if (r.distance_miles && r.duration_seconds) { pMiles += Number(r.distance_miles); pSec += Number(r.duration_seconds); }
+      });
+      const pace = (pMiles > 0 && pSec > 0) ? pSec / pMiles : null;
+      const label = ACT_LABEL[act] || act;
+      const wkFmt = monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const parts = [`${count} ${count === 1 ? 'activity' : 'activities'}`];
+      if (miles) parts.push(`${formatMiles(miles)} mi`);
+      if (pace) parts.push(`${formatPace(pace)} avg`);
+      return `
+        <div style="margin-bottom:0.85rem;padding:0.6rem 0.85rem;background:var(--black);color:var(--paper);border-radius:3px;">
+          <div style="color:var(--silver);font-size:0.62rem;text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:0.15rem;">Week of ${wkFmt} · ${escapeHtml(label)}</div>
+          <div style="font-size:0.9rem;font-weight:600;">${parts.join(' · ')}</div>
+        </div>`;
+    }
+
     // ---- per-mile splits + cadence/HR charts (from Strava-synced runs) ----
     function renderMileSplits(splits) {
       if (!splits || !splits.length) return '';
@@ -810,6 +842,7 @@
 
     function renderSegmentDetail(segs, run) {
       let body = '';
+      body += weekLineFor(run);
       body += renderMileSplits(run.mile_splits);
       body += renderCharts(run);
       if (segs.length) {
