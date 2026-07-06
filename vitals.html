@@ -28,12 +28,17 @@
     .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
     .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
 
-    .vcard{width:100%;text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:15px 16px;margin-bottom:11px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
-    .vcard:hover{border-color:var(--green);}
+    .vwrap{background:var(--surface);border:1px solid var(--border);border-radius:16px;margin-bottom:11px;overflow:hidden;}
+    .vwrap.open{border-color:var(--green);box-shadow:0 6px 18px rgba(44,69,48,.10);}
+    .vcard{width:100%;text-align:left;background:none;border:none;border-radius:16px;padding:15px 16px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
+    .vwrap:not(.open) .vcard:hover{background:var(--surface-warm);}
+    .vpanel{padding:2px 16px 16px;border-top:1px dashed var(--border);}
     .v-top{display:flex;align-items:center;gap:9px;}
     .v-icon{font-size:18px;}
     .v-label{font-family:var(--f-display);font-weight:600;font-size:15px;color:var(--green-deep);}
     .v-top .pill{margin-left:auto;}
+    .v-chev{margin-left:auto;color:var(--muted);font-size:10px;}
+    .v-top .pill + .v-chev{margin-left:9px;}
     .pill{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
     .pill.in{color:var(--green-deep);background:var(--green-tint);}
     .pill.high{color:#8a4a1f;background:var(--amber-soft);}
@@ -81,7 +86,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="auth.js"></script>
   <script>
-  var S = { loaded:false, userId:null, rows:[], view:'list', detailKind:null, form:null, err:'' };
+  var S = { loaded:false, userId:null, rows:[], openKind:null, form:null, err:'' };
 
   var META = {
     blood_pressure:{label:'Blood Pressure', icon:'🩺', unit:'mmHg', compound:true, guides:[120,80]},
@@ -159,16 +164,19 @@
     h+=ORDER.map(function(kind){
       var rows=byKind(kind); if(!rows.length) return '';
       any=true;
-      var meta=META[kind], latest=rows[0], st=statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null);
+      var meta=META[kind], latest=rows[0], open=S.openKind===kind;
+      var st=statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null);
       var asc=rows.slice().reverse();
       var extra='';
       if(kind==='weight'){ var b=bmi(Number(latest.value)); if(b!=null) extra='<div class="v-extra">BMI '+b+'</div>'; }
-      return '<button class="vcard" onclick="openDetail(\''+kind+'\')">'+
+      var head='<button class="vcard" onclick="toggleV(\''+kind+'\')" aria-expanded="'+open+'">'+
         '<div class="v-top"><span class="v-icon">'+meta.icon+'</span><span class="v-label">'+esc(meta.label)+'</span>'+
-        (statusLabel(st)?'<span class="pill '+st+'">'+statusLabel(st)+'</span>':'')+'</div>'+
+        (statusLabel(st)?'<span class="pill '+st+'">'+statusLabel(st)+'</span>':'')+'<span class="v-chev">'+(open?'▲':'▼')+'</span></div>'+
         '<div class="v-big"><span class="v-val">'+esc(valText(latest))+'</span><span class="v-unit">'+esc(meta.unit)+'</span>'+
         '<span class="v-date">'+esc(shortDate(latest.measured_on))+'</span></div>'+extra+
-        chartSVG(kind, asc, true)+'</button>';
+        (open?'':chartSVG(kind, asc, true))+'</button>';
+      var panel=open?('<div class="vpanel">'+vitalPanel(kind)+'</div>'):'';
+      return '<div class="vwrap'+(open?' open':'')+'">'+head+panel+'</div>';
     }).join('');
     if(!any) h+=emptyState();
     return h;
@@ -178,26 +186,13 @@
       '<button class="btn btn-primary full" style="margin-top:12px" onclick="openForm(null)">+ Add a reading</button></div>';
   }
 
-  // ── render: detail ──────────────────────────────────────────────────────
-  function renderDetail(){
-    var kind=S.detailKind, meta=META[kind], rows=byKind(kind);
-    var asc=rows.slice().reverse(), latest=rows[0];
-    var st=latest?statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null):'flat';
-    var h='<button class="back-link" onclick="closeDetail()">‹ All vitals</button>';
-    h+='<div class="card"><div class="kicker">'+meta.icon+' Vital</div><div class="d-name">'+esc(meta.label)+'</div>';
-    if(latest){
-      h+='<div class="d-big"><span class="v">'+esc(valText(latest))+'</span><span class="u">'+esc(meta.unit)+'</span>'+
-        (statusLabel(st)?'<span class="pill '+st+'" style="align-self:center;margin-left:4px">'+statusLabel(st)+'</span>':'')+'</div>';
-      h+='<div class="v-extra" style="margin-bottom:8px">Latest · '+esc(prettyDate(latest.measured_on));
-      if(kind==='weight'){ var b=bmi(Number(latest.value)); if(b!=null) h+=' · BMI '+b; }
-      h+='</div>';
-    }
-    h+=chartSVG(kind, asc, false);
+  // inline expanded content for a vital (full chart + history + add)
+  function vitalPanel(kind){
+    var meta=META[kind], rows=byKind(kind), asc=rows.slice().reverse();
+    var h='<div class="kicker" style="margin:8px 0 2px">Over time</div>'+chartSVG(kind, asc, false);
     if(meta.compound) h+='<div class="legend"><span><span class="k" style="background:#BE722A"></span>Systolic</span><span><span class="k" style="background:#3E6B8A"></span>Diastolic</span></div>';
     else if(meta.band) h+='<div class="legend"><span><span class="k" style="background:#EBF0E8"></span>Normal '+meta.band[0]+'–'+meta.band[1]+' '+esc(meta.unit)+'</span></div>';
-    h+='</div>';
-
-    h+='<div class="card"><div class="kicker" style="margin-bottom:6px">History</div>';
+    h+='<div class="kicker" style="margin:14px 0 2px">History</div>';
     if(!rows.length){ h+='<p class="empty">No readings yet.</p>'; }
     else h+=rows.map(function(r){
       var s=statusOf(kind,Number(r.value),r.value2!=null?Number(r.value2):null);
@@ -205,7 +200,7 @@
         '<span class="hv">'+(statusLabel(s)?'<span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>':'')+
         esc(valText(r))+' '+esc(meta.unit)+'</span></div>';
     }).join('');
-    h+='<button class="link" onclick="openForm(null,\''+kind+'\')">+ Add a '+esc(meta.label.toLowerCase())+' reading</button></div>';
+    h+='<button class="link" onclick="openForm(null,\''+kind+'\')">+ Add a '+esc(meta.label.toLowerCase())+' reading</button>';
     return h;
   }
 
@@ -216,10 +211,10 @@
     var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Vitals</small></h1></header>';
     var body;
     if(S.form) body=renderForm();
-    else if(S.view==='detail'&&S.detailKind) body=renderDetail();
     else body=renderList();
     app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
   }
+  function toggleV(kind){ S.openKind = S.openKind===kind ? null : kind; S.err=''; render(); }
 
   // ── form ────────────────────────────────────────────────────────────────
   function renderForm(){
@@ -264,9 +259,9 @@
       if(f.id){ var u=await sb.from('vitals').update(row).eq('id',f.id); if(u.error) throw u.error; }
       else{ row.user_id=S.userId; row.source='Manual'; row.import_ref='manual:'+date+':'+f.kind+':'+Math.random().toString(36).slice(2,7);
         var ins=await sb.from('vitals').insert(row); if(ins.error) throw ins.error; }
-      S.form=null; await load();
-      if(S.view!=='detail') S.view='list';
-      render();
+      // keep the relevant card open after saving so the new point shows
+      if(f.kind) S.openKind=f.kind;
+      S.form=null; await load(); render();
     }catch(e){ S.err=e.message; render(); }
   }
   async function deleteReading(id){
@@ -274,9 +269,6 @@
     try{ await sb.from('vitals').delete().eq('id',id); S.form=null; await load(); render(); }
     catch(e){ S.err=e.message; render(); }
   }
-
-  function openDetail(kind){ S.detailKind=kind; S.view='detail'; S.err=''; render(); }
-  function closeDetail(){ S.view='list'; S.detailKind=null; render(); }
 
   async function load(){
     var r=await sb.from('vitals').select('*').order('measured_on',{ascending:false});

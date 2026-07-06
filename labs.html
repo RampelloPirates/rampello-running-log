@@ -52,13 +52,20 @@
     .group-head .gc{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-left:auto;}
 
     /* marker row */
-    .marker{width:100%;text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:13px 14px;margin-bottom:9px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
-    .marker:hover{border-color:var(--green);}
+    .marker-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:9px;overflow:hidden;}
+    .marker-wrap.open{border-color:var(--green);box-shadow:0 6px 18px rgba(44,69,48,.10);}
+    .marker{width:100%;text-align:left;background:none;border:none;border-radius:14px;padding:13px 14px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
+    .marker-wrap:not(.open) .marker:hover{background:var(--surface-warm);}
     .m-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
     .m-name{font-size:14px;font-weight:600;line-height:1.25;}
     .m-val{font-family:var(--f-mono);font-weight:600;font-size:15px;white-space:nowrap;}
     .m-val .u{font-size:11px;color:var(--muted);font-weight:500;margin-left:3px;}
     .m-sub{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:7px;}
+    .m-right{margin-left:auto;display:flex;align-items:center;gap:9px;}
+    .m-chev{color:var(--silver);font-size:10px;transition:transform .15s;}
+    .marker-wrap.open .m-chev{color:var(--green);}
+    .marker-panel{padding:2px 14px 14px;border-top:1px dashed var(--border);margin-top:2px;}
+    .panel-loading{padding:22px;text-align:center;color:var(--muted);font-size:13px;}
     .pill{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
     .pill.in{color:var(--green-deep);background:var(--green-tint);}
     .pill.high{color:#8a4a1f;background:var(--amber-soft);}
@@ -117,7 +124,7 @@
   <script src="auth.js"></script>
   <script>
   var S = { loaded:false, userId:null, reports:[], reportId:null, results:[],
-            filter:'all', view:'list', detail:null, form:null, err:'' };
+            filter:'all', openId:null, openHist:null, openLoading:false, form:null, err:'' };
 
   var CAT_ICON = { 'Lipids':'🫀','CBC':'🩸','Thyroid':'🦋','Hormones':'⚗️',
     'Vitamins & minerals':'💊','Inflammation':'🔥','Heavy metals':'⚙️',
@@ -326,42 +333,37 @@
       (color?'<span class="swatch" style="background:'+color+'"></span>':'')+esc(label)+'<span class="n">'+n+'</span></button>';
   }
   function markerRow(r){
-    var st=statusOf(r), ref=refText(r);
-    return '<button class="marker" onclick="openDetail(\''+esc(r.name).replace(/'/g,"\\'")+'\')">'+
+    var st=statusOf(r), ref=refText(r), open=S.openId===r.id;
+    var head='<button class="marker" onclick="toggle(\''+esc(r.id)+'\')" aria-expanded="'+open+'">'+
       '<div class="m-top"><span class="m-name">'+esc(r.name)+'</span>'+valDisplay(r)+'</div>'+
       gaugeHTML(r)+
       '<div class="m-sub"><span class="pill '+st+'">'+statusLabel(st)+'</span>'+
-      (ref?'<span class="m-ref">'+esc(ref)+'</span>':'')+'</div>'+
+      '<span class="m-right">'+(ref?'<span class="m-ref">'+esc(ref)+'</span>':'')+
+      '<span class="m-chev">'+(open?'▲':'▼')+'</span></span></div>'+
       '</button>';
+    var panel=open?('<div class="marker-panel">'+detailPanel(r)+'</div>'):'';
+    return '<div class="marker-wrap'+(open?' open':'')+'">'+head+panel+'</div>';
   }
 
-  // ── render: detail ──────────────────────────────────────────────────────
-  function renderDetail(){
-    var d=S.detail; var cur=d.cur;
-    var st=statusOf(cur);
-    var h='<button class="back-link" onclick="closeDetail()">‹ All results</button>';
-    h+='<div class="card">';
-    h+='<div class="kicker">'+esc(cur.category||'')+'</div>';
-    h+='<div class="d-name">'+esc(cur.name)+'</div>';
-    h+='<div class="d-big"><span class="v">'+esc(cur.value_text!=null?cur.value_text:fmt(cur.value_num))+'</span>'+(cur.unit?'<span class="u">'+esc(cur.unit)+'</span>':'')+'<span class="pill '+st+'" style="align-self:center;margin-left:4px">'+statusLabel(st)+'</span></div>';
-    var ref=refText(cur); if(ref) h+='<div class="m-ref" style="margin-bottom:8px">Reference '+esc(ref)+'</div>';
-    h+=gaugeHTML(cur);
-    h+='</div>';
-
-    h+='<div class="card"><div class="kicker" style="margin-bottom:8px">Over time</div>'+trendSVG(d.history,cur)+'</div>';
-
-    h+='<div class="card"><div class="kicker" style="margin-bottom:4px">History</div>';
-    if(!d.history.length){ h+='<p class="empty">Just this one reading so far.</p>'; }
-    else h+=d.history.slice().reverse().map(function(x){
-      var s=statusOf(x);
-      return '<div class="hist-row"><span>'+esc(prettyDate(x.date))+'</span>'+
-        '<span class="hv"><span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>'+
-        esc(x.value_text!=null?x.value_text:fmt(x.value_num))+(x.unit?(' '+esc(x.unit)):'')+'</span></div>';
-    }).join('');
-    h+='</div>';
-
-    h+='<div class="btn-row"><button class="btn btn-ghost" onclick="openResultForm(\''+esc(cur.id)+'\')">Edit this reading</button>'+
-       '<button class="btn btn-danger" onclick="deleteResult(\''+esc(cur.id)+'\')">Delete</button></div>';
+  // inline expanded content for a marker (trend + history + edit/delete)
+  function detailPanel(r){
+    var h='';
+    if(S.openLoading || S.openHist===null){
+      h+='<div class="panel-loading">Loading trend…</div>';
+    } else {
+      var hist=S.openHist;
+      h+='<div class="kicker" style="margin:8px 0 4px">Over time</div>'+trendSVG(hist,r);
+      h+='<div class="kicker" style="margin:14px 0 2px">History</div>';
+      if(!hist.length){ h+='<p class="empty">Just this one reading so far.</p>'; }
+      else h+=hist.slice().reverse().map(function(x){
+        var s=statusOf(x);
+        return '<div class="hist-row"><span>'+esc(prettyDate(x.date))+'</span>'+
+          '<span class="hv"><span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>'+
+          esc(x.value_text!=null?x.value_text:fmt(x.value_num))+(x.unit?(' '+esc(x.unit)):'')+'</span></div>';
+      }).join('');
+    }
+    h+='<div class="btn-row"><button class="btn btn-ghost btn-auto" onclick="openResultForm(\''+esc(r.id)+'\')">Edit</button>'+
+       '<button class="btn btn-danger btn-auto" onclick="deleteResult(\''+esc(r.id)+'\')">Delete</button></div>';
     return h;
   }
 
@@ -372,11 +374,9 @@
     var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Lab results</small></h1></header>';
     var body;
     if(S.form) body=renderForm();
-    else if(S.view==='detail'&&S.detail) body=renderDetail();
     else if(!S.reports.length) body=emptyState();
     else body=renderList();
     app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
-    var sel=el('repSel'); // keep native select value in sync
   }
   function emptyState(){
     return '<div class="card"><p class="empty">No lab reports yet.<br><br>'+
@@ -413,8 +413,7 @@
 
   function openReportForm(){ S.form={kind:'report',id:null,date:todayISO(),source:'Manual',fasting:''}; S.err=''; render(); }
   function openResultForm(id){
-    if(id){ var r=S.results.filter(function(x){return x.id===id;})[0]; if(!r){ // maybe from detail
-        r=S.detail&&S.detail.cur; }
+    if(id){ var r=S.results.filter(function(x){return x.id===id;})[0]; if(!r) return;
       S.form={kind:'result',id:id,name:r.name||'',value:(r.value_text!=null?r.value_text:fmt(r.value_num)),
         unit:r.unit||'',lo:r.ref_low!=null?fmt(r.ref_low):'',hi:r.ref_high!=null?fmt(r.ref_high):'',category:r.category||'Other'}; }
     else S.form={kind:'result',id:null,name:'',value:'',unit:'',lo:'',hi:'',category:'Metabolic'};
@@ -437,7 +436,7 @@
   async function deleteReport(id){
     if(!confirm('Delete this entire report and all its results? This cannot be undone.')) return;
     try{ await sb.from('lab_reports').delete().eq('id',id); S.form=null; S.reportId=null;
-      await loadReports(); await loadResults(); S.view='list'; render(); }
+      S.openId=null; S.openHist=null; await loadReports(); await loadResults(); render(); }
     catch(e){ S.err=e.message; render(); }
   }
 
@@ -465,30 +464,41 @@
         row.sort_order=(S.results.length?Math.max.apply(null,S.results.map(function(x){return x.sort_order||0;}))+1:0);
         var ins=await sb.from('lab_results').insert(row); if(ins.error) throw ins.error;
       }
-      S.form=null; await loadResults();
-      if(S.view==='detail'&&S.detail){ await openDetail(name); } else render();
+      S.form=null; await loadResults(); await refreshOpen(); render();
     }catch(e){ S.err=e.message; render(); }
   }
   async function deleteResult(id){
     if(!confirm('Delete this reading?')) return;
-    try{ await sb.from('lab_results').delete().eq('id',id); S.view='list'; S.detail=null; await loadResults(); render(); }
+    try{ await sb.from('lab_results').delete().eq('id',id);
+      if(S.openId===id){ S.openId=null; S.openHist=null; }
+      await loadResults(); render(); }
     catch(e){ S.err=e.message; render(); }
   }
 
   // ── nav ─────────────────────────────────────────────────────────────────
   function setFilter(f){ S.filter=f; render(); }
-  async function pickReport(id){ S.reportId=id; S.view='list'; S.detail=null; await loadResults(); render(); }
-  async function openDetail(name){
-    var cur=S.results.filter(function(r){return r.name===name;})[0];
-    S.detail={cur:cur||{name:name},history:[]}; S.view='detail'; S.err=''; render();
-    var hist=await loadHistory(name);
-    if(!cur){ cur=hist.length?Object.assign({name:name},hist[hist.length-1]):{name:name}; }
-    // a name can recur across specimens (e.g. serum vs urine GLUCOSE) — keep the
-    // trend to readings that share this reading's unit so we don't mix them.
-    if(cur.unit!=null) hist=hist.filter(function(x){ return x.unit===cur.unit; });
-    S.detail={cur:cur,history:hist}; render();
+  async function pickReport(id){ S.reportId=id; S.openId=null; S.openHist=null; await loadResults(); render(); }
+
+  // expand/collapse a marker inline (accordion — one open at a time)
+  async function toggle(id){
+    if(S.openId===id){ S.openId=null; S.openHist=null; render(); return; }
+    var r=S.results.filter(function(x){return x.id===id;})[0]; if(!r) return;
+    S.openId=id; S.openHist=null; S.openLoading=true; S.err=''; render();
+    var hist=await loadHistory(r.name);
+    // a name can recur across specimens (serum vs urine GLUCOSE) — keep the trend
+    // to readings that share this reading's unit so we don't mix them.
+    if(r.unit!=null) hist=hist.filter(function(x){ return x.unit===r.unit; });
+    if(S.openId!==id) return;                 // user collapsed/switched while loading
+    S.openLoading=false; S.openHist=hist; render();
   }
-  function closeDetail(){ S.view='list'; S.detail=null; render(); }
+  async function refreshOpen(){
+    if(!S.openId) return;
+    var r=S.results.filter(function(x){return x.id===S.openId;})[0];
+    if(!r){ S.openId=null; S.openHist=null; return; }
+    var hist=await loadHistory(r.name);
+    if(r.unit!=null) hist=hist.filter(function(x){ return x.unit===r.unit; });
+    S.openHist=hist;
+  }
 
   (async function(){
     var profile=await requireUser(); if(!profile) return;
