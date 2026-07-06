@@ -28,8 +28,14 @@
     .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
     .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:14px;}
     .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
-    .row-between{display:flex;justify-content:space-between;align-items:center;}
-    .progress{font-family:var(--f-mono);font-size:15px;font-weight:600;color:var(--green-deep);}
+    .row-between{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+    .progress{font-family:var(--f-mono);font-size:15px;font-weight:600;color:var(--green-deep);white-space:nowrap;}
+    .day-nav{display:flex;align-items:center;gap:8px;min-width:0;}
+    .day-arrow{width:26px;height:26px;flex-shrink:0;border:1px solid var(--border);background:var(--surface);border-radius:8px;color:var(--green-deep);font-size:16px;line-height:1;cursor:pointer;padding:0;}
+    .day-arrow:hover:not(:disabled){border-color:var(--green);background:var(--green-tint);}
+    .day-arrow:disabled{opacity:.35;cursor:default;}
+    .day-label{min-width:74px;}
+    .day-today{border:none;background:none;color:var(--green);font-weight:600;font-size:12px;cursor:pointer;padding:2px 4px;}
     .supp{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);}
     .supp:last-child{border-bottom:none;}
     .check{flex-shrink:0;width:30px;height:30px;border-radius:50%;border:2px solid var(--border);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff;transition:background .12s,border-color .12s;}
@@ -60,12 +66,14 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="auth.js"></script>
   <script>
-  var S = { loaded:false, userId:null, stack:[], taken:{}, history:[], form:null, err:'' };
+  var S = { loaded:false, userId:null, day:null, stack:[], taken:{}, history:[], form:null, err:'' };
 
   function el(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function pad(n){ return String(n).padStart(2,'0'); }
-  function todayKey(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function dateKey(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function todayKey(){ return dateKey(new Date()); }
+  function addDays(key,n){ var p=key.split('-').map(Number); return dateKey(new Date(p[0],p[1]-1,p[2]+n)); }
   function prettyDate(key){
     var p=key.split('-').map(Number); var dt=new Date(p[0],p[1]-1,p[2]);
     if(key===todayKey()) return 'Today';
@@ -79,8 +87,8 @@
     var r = await sb.from('supplements').select('*').eq('active',true).order('sort_order',{ascending:true}).order('created_at',{ascending:true});
     S.stack = r.data || [];
   }
-  async function loadTakenToday(){
-    var r = await sb.from('supplement_log').select('supplement_id').eq('log_date',todayKey());
+  async function loadTaken(){
+    var r = await sb.from('supplement_log').select('supplement_id').eq('log_date',S.day);
     S.taken = {}; (r.data||[]).forEach(function(x){ S.taken[x.supplement_id]=true; });
   }
   async function loadHistory(){
@@ -93,14 +101,22 @@
   async function toggleTaken(id){
     try{
       if(S.taken[id]){
-        await sb.from('supplement_log').delete().eq('supplement_id',id).eq('log_date',todayKey());
+        await sb.from('supplement_log').delete().eq('supplement_id',id).eq('log_date',S.day);
         delete S.taken[id];
       }else{
-        await sb.from('supplement_log').insert({user_id:S.userId, supplement_id:id, log_date:todayKey()});
+        await sb.from('supplement_log').insert({user_id:S.userId, supplement_id:id, log_date:S.day});
         S.taken[id]=true;
       }
-      render();
+      render(); await loadHistory(); render();
     }catch(e){ S.err=e.message; render(); }
+  }
+  async function changeDay(n){
+    var key=addDays(S.day,n); if(key>todayKey()) return;   // no logging the future
+    S.day=key; await loadTaken(); render();
+  }
+  async function gotoDay(key){
+    if(!key||key>todayKey()) return;
+    S.day=key; await loadTaken(); render();
   }
 
   function openAdd(){ S.form={id:null, name:'', dose:'', timing:'Anytime'}; S.err=''; render(); }
@@ -123,7 +139,7 @@
   }
   async function removeSupp(id){
     if(!confirm('Remove this supplement from your stack? Past history is kept.')) return;
-    try{ await sb.from('supplements').update({active:false}).eq('id',id); await loadStack(); await loadTakenToday(); render(); }
+    try{ await sb.from('supplements').update({active:false}).eq('id',id); await loadStack(); await loadTaken(); render(); }
     catch(e){ S.err=e.message; render(); }
   }
 
@@ -134,7 +150,13 @@
     var h='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Supplements</small></h1></header>';
 
     var takenCount=S.stack.filter(function(s){return S.taken[s.id];}).length;
-    h+='<section class="card"><div class="row-between" style="margin-bottom:6px"><span class="kicker">'+prettyDate(todayKey())+'</span><span class="progress">'+takenCount+' of '+S.stack.length+' taken</span></div>';
+    var isToday=S.day===todayKey();
+    h+='<section class="card"><div class="row-between" style="margin-bottom:10px">'+
+      '<div class="day-nav"><button class="day-arrow" onclick="changeDay(-1)" aria-label="Previous day">‹</button>'+
+      '<span class="kicker day-label">'+prettyDate(S.day)+'</span>'+
+      '<button class="day-arrow" onclick="changeDay(1)"'+(isToday?' disabled':'')+' aria-label="Next day">›</button>'+
+      (isToday?'':'<button class="day-today" onclick="gotoDay(\''+todayKey()+'\')">Today</button>')+
+      '</div><span class="progress">'+takenCount+' of '+S.stack.length+' taken</span></div>';
     if(!S.stack.length){
       h+='<p class="empty">No supplements yet. Add the things you take and check them off each day.</p>';
     }else{
@@ -167,7 +189,8 @@
     h+='<section class="card"><div class="kicker" style="margin-bottom:6px">Last 14 days</div>';
     if(!S.history.length){ h+='<p class="empty">Nothing logged yet.</p>'; }
     else h+=S.history.map(function(d){
-      return '<div class="hist-row"><span>'+prettyDate(d.key)+'</span><span style="font-family:var(--f-mono);color:var(--green-deep);font-weight:600">'+d.count+' taken</span></div>';
+      var sel=d.key===S.day?' style="color:var(--green-deep);font-weight:600"':'';
+      return '<div class="hist-row hist-click" onclick="gotoDay(\''+d.key+'\')"><span'+sel+'>'+prettyDate(d.key)+'</span><span style="font-family:var(--f-mono);color:var(--green-deep);font-weight:600">'+d.count+' taken</span></div>';
     }).join('');
     h+='</section>';
 
@@ -177,7 +200,8 @@
   (async function(){
     var profile = await requireUser(); if(!profile) return;
     S.userId = profile.user.id;
-    await Promise.all([loadStack(), loadTakenToday(), loadHistory()]);
+    S.day = todayKey();
+    await Promise.all([loadStack(), loadTaken(), loadHistory()]);
     S.loaded = true; render();
   })();
   </script>
