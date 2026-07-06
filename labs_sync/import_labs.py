@@ -377,7 +377,9 @@ def parse_portal(reader):
         if skip or (vunit or "").lower().strip() in PORTAL_SKIP_UNITS or not date:
             continue
         ref = portal_range(rng_lines)
-        canon = PORTAL_NAME_MAP.get(nm_up, name.strip())
+        # Quest stores marker names UPPERCASE; fall back to the uppercased portal
+        # name (not its Title Case) so the same marker trends as one line.
+        canon = PORTAL_NAME_MAP.get(nm_up, nm_up)
         grp = by_date.setdefault(date, [])
         grp.append({
             "category": categorize(canon), "panel": None, "name": canon,
