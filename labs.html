@@ -61,6 +61,13 @@
     .m-right{margin-left:auto;display:flex;align-items:center;gap:9px;}
     .m-chev{color:var(--silver);font-size:10px;transition:transform .15s;}
     .marker-wrap.open .m-chev{color:var(--green);}
+    .info-btn{flex-shrink:0;width:17px;height:17px;border-radius:50%;border:1.4px solid var(--silver);color:var(--muted);font-family:Georgia,serif;font-style:italic;font-size:11px;font-weight:700;line-height:14px;text-align:center;cursor:pointer;}
+    .info-btn:hover,.info-btn.on{border-color:var(--green);color:var(--green);background:var(--green-tint);}
+    .marker-info{padding:11px 14px 13px;border-top:1px dashed var(--border);background:var(--surface-warm);}
+    .info-what{margin:0 0 7px;font-size:13px;line-height:1.45;}
+    .info-why{margin:0 0 8px;font-size:13px;line-height:1.45;color:var(--ink);}
+    .info-lbl{display:block;font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:2px;}
+    .info-note{margin:0;font-size:11px;color:var(--muted);font-style:italic;}
     .marker-panel{padding:2px 14px 14px;border-top:1px dashed var(--border);margin-top:2px;}
     .pill{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
     .pill.in{color:var(--green-deep);background:var(--green-tint);}
@@ -120,13 +127,72 @@
   <script src="auth.js"></script>
   <script>
   var S = { loaded:false, userId:null, allRows:[], results:[],
-            filter:'all', openId:null, form:null, err:'' };
+            filter:'all', openId:null, infoId:null, form:null, err:'' };
 
   var CAT_ICON = { 'Lipids':'🫀','CBC':'🩸','Thyroid':'🦋','Hormones':'⚗️',
     'Vitamins & minerals':'💊','Inflammation':'🔥','Heavy metals':'⚙️',
     'Urinalysis':'🧪','Metabolic':'⚡','Fatty acids':'🐟','Other':'🔬' };
   var CAT_ORDER = ['Lipids','Metabolic','CBC','Thyroid','Hormones',
     'Vitamins & minerals','Inflammation','Fatty acids','Heavy metals','Urinalysis','Other'];
+
+  // General educational context per marker (not medical advice). Keyed by the
+  // marker's UPPERCASE name. { what: plain description, why: what abnormal means }.
+  var INFO = {
+    'CHOLESTEROL, TOTAL':{what:'All the cholesterol carried in your blood — LDL, HDL and other particles combined.',why:'Higher totals can raise cardiovascular risk, but the LDL vs. HDL split matters more than the total on its own.'},
+    'LDL-CHOLESTEROL':{what:'“Bad” cholesterol — the particles that deposit cholesterol into artery walls.',why:'Higher LDL is a primary driver of plaque buildup and heart-disease risk; lower is generally better.'},
+    'HDL CHOLESTEROL':{what:'“Good” cholesterol that helps carry cholesterol out of the bloodstream.',why:'Higher HDL is generally protective; low HDL is associated with greater cardiovascular risk.'},
+    'TRIGLYCERIDES':{what:'A fat in the blood, largely from diet, alcohol and excess calories.',why:'High levels are linked to heart disease and — when very high — pancreatitis; often improve with diet, exercise and less alcohol/sugar.'},
+    'NON HDL CHOLESTEROL':{what:'Every cholesterol particle except HDL (total minus HDL).',why:'A strong overall predictor of cardiovascular risk; lower is better.'},
+    'CHOL/HDLC RATIO':{what:'Total cholesterol divided by HDL — a quick summary of lipid balance.',why:'Lower ratios indicate lower cardiovascular risk.'},
+    'APOLIPOPROTEIN B':{what:'A protein found on every artery-clogging particle, so it counts them directly.',why:'Higher ApoB means more particles that can enter artery walls — a refined heart-risk marker.'},
+    'LIPOPROTEIN (a)':{what:'A largely inherited lipoprotein particle.',why:'High levels independently raise cardiovascular risk and are mostly set by genetics.'},
+    'LDL PARTICLE NUMBER':{what:'The actual count of LDL particles, which can differ from LDL cholesterol mass.',why:'A high particle count can raise risk even when standard LDL looks normal.'},
+    'GLUCOSE':{what:'Blood sugar at the moment of the draw (fasting if you fasted).',why:'Elevated fasting glucose can signal prediabetes or diabetes; very low can cause hypoglycemia symptoms.'},
+    'HEMOGLOBIN A1C':{what:'Your average blood sugar over roughly the past 3 months.',why:'5.7–6.4% suggests prediabetes and ≥6.5% diabetes; reflects long-term glucose control.'},
+    'UREA NITROGEN (BUN)':{what:'A waste product from protein breakdown, cleared by the kidneys.',why:'High can reflect reduced kidney function, dehydration or high protein intake.'},
+    'CREATININE':{what:'A muscle waste product filtered out by the kidneys.',why:'Higher levels suggest reduced kidney filtration; also affected by muscle mass and hydration.'},
+    'EGFR':{what:'An estimate of how well your kidneys filter, from creatinine.',why:'Higher is better; values persistently under 60 can indicate chronic kidney disease.'},
+    'SODIUM':{what:'The main electrolyte controlling your body’s fluid balance.',why:'Abnormal levels usually reflect hydration or hormonal issues rather than salt intake.'},
+    'POTASSIUM':{what:'An electrolyte essential for heart rhythm and muscle function.',why:'Both high and low levels can disturb heart rhythm and deserve attention.'},
+    'CHLORIDE':{what:'An electrolyte that works with sodium for fluid and acid–base balance.',why:'Shifts usually track with hydration and acid–base status.'},
+    'CARBON DIOXIDE':{what:'Bicarbonate — reflects your blood’s acid–base balance.',why:'Abnormal values can point to metabolic or breathing-related acid–base issues.'},
+    'CALCIUM':{what:'A mineral vital for bones, nerves and muscle function.',why:'High can relate to parathyroid or other conditions; low affects nerves and muscles.'},
+    'ALBUMIN':{what:'The main blood protein, made by the liver.',why:'Low can indicate liver disease, inflammation or poor nutrition.'},
+    'PROTEIN, TOTAL':{what:'All blood proteins together (albumin plus globulins).',why:'Reflects nutrition, liver and immune status.'},
+    'ALKALINE PHOSPHATASE':{what:'An enzyme from the liver and bones.',why:'High can reflect liver/bile-duct activity or bone turnover.'},
+    'AST':{what:'A liver (and muscle) enzyme released when cells are stressed.',why:'Elevations can indicate liver stress; also rises with muscle injury or hard exercise.'},
+    'ALT':{what:'A liver enzyme, more specific to the liver than AST.',why:'Higher levels suggest liver-cell stress — e.g., fatty liver, alcohol or medications.'},
+    'GGT':{what:'A liver/bile-duct enzyme sensitive to alcohol and bile flow.',why:'Elevations often relate to alcohol, medications or bile-duct issues.'},
+    'BILIRUBIN, TOTAL':{what:'A pigment from red-blood-cell breakdown, processed by the liver.',why:'High can reflect liver or gallbladder issues, or benign Gilbert’s syndrome.'},
+    'URIC ACID':{what:'A waste product of purine metabolism.',why:'High levels can cause gout and kidney stones.'},
+    'WHITE BLOOD CELL COUNT':{what:'Immune cells that fight infection.',why:'High can signal infection or inflammation; low can reflect some illnesses or medications.'},
+    'HEMOGLOBIN':{what:'The oxygen-carrying protein inside red blood cells.',why:'Low means anemia (fatigue, etc.); high can reflect dehydration, smoking or other causes.'},
+    'HEMATOCRIT':{what:'The share of blood volume made up of red cells.',why:'Tracks with hemoglobin — low suggests anemia, high suggests dehydration or other causes.'},
+    'RED BLOOD CELL COUNT':{what:'The number of oxygen-carrying red cells.',why:'Low points to anemia; high can reflect dehydration or other conditions.'},
+    'PLATELET COUNT':{what:'Cell fragments that help your blood clot.',why:'Low raises bleeding risk; high can reflect inflammation or other conditions.'},
+    'MCV':{what:'The average size of your red blood cells.',why:'Helps classify anemia — small cells often mean iron deficiency, large cells B12/folate.'},
+    'RDW':{what:'How much your red-cell size varies.',why:'High values can be an early clue to nutritional anemias.'},
+    'TSH':{what:'The pituitary signal telling your thyroid how hard to work.',why:'High TSH suggests an underactive thyroid; low suggests an overactive one.'},
+    'T4, FREE':{what:'The main thyroid hormone available to your tissues.',why:'Low points to an underactive thyroid, high to an overactive one.'},
+    'T3, FREE':{what:'The active thyroid hormone.',why:'Read together with TSH and T4 to assess thyroid function.'},
+    'TESTOSTERONE, TOTAL, MS':{what:'The primary male sex hormone (also present in women).',why:'Low can cause fatigue, low libido, and mood or muscle changes.'},
+    'TESTOSTERONE, FREE':{what:'The active, unbound portion of testosterone.',why:'Often more informative than total when symptoms don’t match the total level.'},
+    'PSA, TOTAL':{what:'A prostate protein used to screen for prostate conditions.',why:'Higher levels can reflect enlargement, inflammation or, less often, cancer — worth following up.'},
+    'INSULIN':{what:'The hormone that moves glucose into your cells.',why:'High fasting insulin can indicate insulin resistance, a precursor to diabetes.'},
+    'CORTISOL':{what:'Your main stress hormone, naturally highest in the morning.',why:'Interpreted by time of day; persistent abnormalities warrant evaluation.'},
+    'DHEA SULFATE':{what:'An adrenal hormone and precursor to sex hormones.',why:'Naturally declines with age; abnormal levels can reflect adrenal issues.'},
+    'VITAMIN D,25-OH,TOTAL,IA':{what:'Your vitamin D status.',why:'Low levels are common and affect bone, immune and mood health; often corrected with supplements and sun.'},
+    'FERRITIN':{what:'Your body’s stored iron.',why:'Low ferritin is the earliest sign of iron deficiency; high can reflect inflammation or iron overload.'},
+    'IRON, TOTAL':{what:'The iron circulating in your blood right now.',why:'Interpreted with ferritin and TIBC; low can contribute to anemia and fatigue.'},
+    'HOMOCYSTEINE':{what:'An amino acid influenced by your B-vitamin status.',why:'High levels relate to low B12/folate and to cardiovascular risk.'},
+    'MAGNESIUM, RBC':{what:'Magnesium stored inside red cells — a tissue-level measure.',why:'Low can affect muscles, sleep and heart rhythm.'},
+    'ZINC':{what:'A mineral important for immunity and healing.',why:'Low can impair immune function and wound healing.'},
+    'HS CRP':{what:'A sensitive marker of low-grade inflammation.',why:'Higher levels are associated with cardiovascular risk; can also rise with any infection or injury.'},
+    'MERCURY, BLOOD':{what:'Recent mercury exposure, often from fish.',why:'High levels can affect the nervous system.'},
+    'LEAD (VENOUS)':{what:'Your lead exposure.',why:'Elevated lead is toxic to the nervous system and other organs.'},
+    'OMEGA-3 TOTAL':{what:'Your blood level of omega-3 fats (EPA/DHA).',why:'Higher levels are associated with cardiovascular and anti-inflammatory benefits.'}
+  };
+  function infoFor(r){ return INFO[(r.name||'').toUpperCase()] || null; }
 
   function el(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -219,7 +285,8 @@
       if(!latest[k] || x.date>latest[k].date) latest[k]=x;
     });
     S.results=Object.keys(latest).map(function(k){ return latest[k]; })
-      .sort(function(a,b){ return a.name<b.name?-1:(a.name>b.name?1:0); });
+      .sort(function(a,b){ if(a.date!==b.date) return a.date<b.date?1:-1;   // most recent first
+                           return a.name<b.name?-1:(a.name>b.name?1:0); });
   }
   // all readings for a marker (matched by name, and unit when known), oldest→newest
   function historyFor(name, unit){
@@ -301,7 +368,12 @@
       if(S.filter==='out' && !(s==='high'||s==='low')) return;
       (groups[r.category||'Other']=groups[r.category||'Other']||[]).push(r);
     });
-    var cats=Object.keys(groups).sort(function(a,b){ var ia=CAT_ORDER.indexOf(a),ib=CAT_ORDER.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); });
+    // categories ordered by their most recently updated marker
+    var cats=Object.keys(groups).sort(function(a,b){
+      var ma=groups[a].reduce(function(m,r){return r.date>m?r.date:m;},''),
+          mb=groups[b].reduce(function(m,r){return r.date>m?r.date:m;},'');
+      return ma<mb?1:(ma>mb?-1:0);
+    });
     if(!cats.length){ h+='<div class="card"><p class="empty">Nothing matches this filter.</p></div>'; }
     cats.forEach(function(cat){
       h+='<div class="group-head"><span class="gi">'+(CAT_ICON[cat]||'🔬')+'</span><span class="gt">'+esc(cat)+'</span><span class="gc">'+groups[cat].length+'</span></div>';
@@ -316,16 +388,24 @@
       (color?'<span class="swatch" style="background:'+color+'"></span>':'')+esc(label)+'<span class="n">'+n+'</span></button>';
   }
   function markerRow(r){
-    var st=statusOf(r), ref=refText(r), open=S.openId===r.id;
+    var st=statusOf(r), ref=refText(r), open=S.openId===r.id, hasInfo=!!infoFor(r), showInfo=S.infoId===r.id;
+    var infoBtn=hasInfo?('<span class="info-btn'+(showInfo?' on':'')+'" onclick="event.stopPropagation();toggleInfo(\''+esc(r.id)+'\')" title="About this marker" role="button" aria-label="About this marker">i</span>'):'';
     var head='<button class="marker" onclick="toggle(\''+esc(r.id)+'\')" aria-expanded="'+open+'">'+
       '<div class="m-top"><span class="m-name">'+esc(r.name)+'</span>'+valDisplay(r)+'</div>'+
       gaugeHTML(r)+
       '<div class="m-sub"><span class="pill '+st+'">'+statusLabel(st)+'</span>'+
-      '<span class="m-right">'+(ref?'<span class="m-ref">'+esc(ref)+'</span>':'')+
+      '<span class="m-right">'+(ref?'<span class="m-ref">'+esc(ref)+'</span>':'')+infoBtn+
       '<span class="m-chev">'+(open?'▲':'▼')+'</span></span></div>'+
       '</button>';
+    var info=showInfo?('<div class="marker-info">'+infoHTML(r)+'</div>'):'';
     var panel=open?('<div class="marker-panel">'+detailPanel(r)+'</div>'):'';
-    return '<div class="marker-wrap'+(open?' open':'')+'">'+head+panel+'</div>';
+    return '<div class="marker-wrap'+((open||showInfo)?' open':'')+'">'+head+info+panel+'</div>';
+  }
+  function infoHTML(r){
+    var d=infoFor(r); if(!d) return '';
+    return '<p class="info-what">'+esc(d.what)+'</p>'+
+      '<p class="info-why"><span class="info-lbl">What it can mean</span>'+esc(d.why)+'</p>'+
+      '<p class="info-note">General information, not medical advice — discuss your results with your doctor.</p>';
   }
 
   // inline expanded content for a marker (trend + history + edit/delete)
@@ -428,6 +508,7 @@
   function setFilter(f){ S.filter=f; render(); }
   // expand/collapse a marker inline (accordion — one open at a time)
   function toggle(id){ S.openId = S.openId===id ? null : id; S.err=''; render(); }
+  function toggleInfo(id){ S.infoId = S.infoId===id ? null : id; S.err=''; render(); }
 
   (async function(){
     var profile=await requireUser(); if(!profile) return;
