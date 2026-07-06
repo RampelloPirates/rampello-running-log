@@ -2,7 +2,8 @@ name: Oura sync
 
 on:
   schedule:
-    - cron: "30 14 * * *"    # daily 14:30 UTC (~10:30 AM ET), just after Strava
+    - cron: "37 14 * * *"   # daily 14:37 UTC (~10:37 AM ET), just after Strava.
+                            # Odd minute on purpose (GitHub drops round-number crons).
   workflow_dispatch:          # run on demand from the Actions tab
     inputs:
       days:

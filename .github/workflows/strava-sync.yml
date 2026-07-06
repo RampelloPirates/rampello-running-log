@@ -2,7 +2,9 @@ name: Strava sync
 
 on:
   schedule:
-    - cron: "0 14 * * *"    # daily 14:00 UTC (~10:00 AM ET). Adjust as you like.
+    - cron: "17 14 * * *"   # daily 14:17 UTC (~10:17 AM ET). Off the top of the
+                            # hour on purpose — GitHub queues/drops :00 crons under
+                            # load, so an odd minute fires far more reliably.
   workflow_dispatch:          # run on demand from the Actions tab
     inputs:
       days:
