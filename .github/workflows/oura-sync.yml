@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: "37 14 * * *"   # daily 14:37 UTC (~10:37 AM ET), just after Strava.
                             # Odd minute on purpose (GitHub drops round-number crons).
+    - cron: "49 18 * * *"   # backup ~14:49 ET, in case the morning slot is dropped.
+                            # Upserts by day, so a double run is a no-op.
   workflow_dispatch:          # run on demand from the Actions tab
     inputs:
       days:
