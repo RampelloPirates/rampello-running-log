@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Oura — Tally</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--paper:#F4F1E9;--surface:#FFFFFF;--surface-warm:#FBF9F3;--ink:#1E241C;--muted:#71776B;--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--amber-soft:#F1E6D2;--border:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;--blue:#3E6B8A;--blue-tint:#E4EDF2;
+      --f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;}
+    button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    .wrap{max-width:560px;margin:0 auto;padding:0 16px 56px;}
+    header{padding:22px 0 8px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+
+    /* hero */
+    .hero{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px 16px 18px;margin-bottom:14px;}
+    .hero-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;}
+    .hero-day{font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--green-deep);}
+    .hero-when{font-size:11px;color:var(--muted);font-family:var(--f-mono);}
+    .rings{display:flex;gap:10px;justify-content:space-between;}
+    .ring-item{flex:1;text-align:center;}
+    .ring-item svg{width:100%;max-width:96px;height:auto;}
+    .ring-lbl{font-size:11px;color:var(--muted);font-weight:600;margin-top:3px;text-transform:uppercase;letter-spacing:.5px;}
+    .statgrid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:16px;}
+    @media(max-width:460px){.statgrid{grid-template-columns:1fr 1fr;}}
+    .stat{background:var(--surface-warm);border:1px solid var(--border);border-radius:11px;padding:9px 8px;text-align:center;}
+    .stat .sv{font-family:var(--f-mono);font-size:17px;font-weight:600;color:var(--ink);line-height:1.1;}
+    .stat .sl{font-size:10px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.4px;}
+
+    /* metric cards (accordion, matches vitals) */
+    .sec-label{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:6px 2px 9px;}
+    .vwrap{background:var(--surface);border:1px solid var(--border);border-radius:16px;margin-bottom:11px;overflow:hidden;}
+    .vwrap.open{border-color:var(--green);box-shadow:0 6px 18px rgba(44,69,48,.10);}
+    .vcard{width:100%;text-align:left;background:none;border:none;border-radius:16px;padding:15px 16px;cursor:pointer;display:block;font-family:inherit;color:inherit;}
+    .vwrap:not(.open) .vcard:hover{background:var(--surface-warm);}
+    .vpanel{padding:2px 16px 16px;border-top:1px dashed var(--border);}
+    .v-top{display:flex;align-items:center;gap:9px;}
+    .v-icon{font-size:18px;}
+    .v-label{font-family:var(--f-display);font-weight:600;font-size:15px;color:var(--green-deep);}
+    .v-chev{margin-left:auto;color:var(--muted);font-size:10px;}
+    .v-big{display:flex;align-items:baseline;gap:7px;margin:8px 0 2px;}
+    .v-val{font-family:var(--f-mono);font-size:26px;font-weight:600;line-height:1;}
+    .v-unit{font-size:12px;color:var(--muted);}
+    .v-date{font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-left:auto;}
+    .spark{width:100%;height:34px;display:block;margin-top:8px;}
+    .chart{width:100%;height:auto;display:block;margin:6px 0 2px;}
+    .legend{display:flex;gap:14px;font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-top:4px;}
+    .legend .k{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+    .hist-row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13px;}
+    .hist-row:last-child{border-bottom:none;}
+    .hist-row .hv{font-family:var(--f-mono);font-weight:600;}
+    .avg-note{font-size:12px;color:var(--muted);margin:8px 0 0;}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:14px;}
+    .empty{color:var(--muted);font-size:13.5px;line-height:1.6;}
+    .empty code{font-family:var(--f-mono);font-size:12px;background:var(--surface-warm);border:1px solid var(--border);border-radius:5px;padding:1px 5px;}
+    .loading{padding:48px;text-align:center;color:var(--muted);}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  var S = { loaded:false, userId:null, rows:[], openKey:null, err:'' };
+
+  // trend metrics — order shown down the page
+  var METRICS = [
+    {key:'readiness_score', label:'Readiness',      icon:'🔋', unit:'',    score:true,  color:'#3A5A40'},
+    {key:'sleep_score',     label:'Sleep Score',    icon:'😴', unit:'',    score:true,  color:'#3E6B8A'},
+    {key:'avg_hrv',         label:'HRV',            icon:'💗', unit:'ms',  better:'high',color:'#B0568A'},
+    {key:'resting_hr',      label:'Resting HR',     icon:'❤️', unit:'bpm', better:'low', color:'#A8443A'},
+    {key:'total_sleep_seconds', label:'Sleep Duration', icon:'🌙', unit:'h', hours:true, better:'high', color:'#3A5A40', guide:8},
+    {key:'temperature_deviation', label:'Body Temp', icon:'🌡️', unit:'°C', signed:true, color:'#BE722A', guide:0},
+    {key:'activity_score',  label:'Activity',       icon:'🏃', unit:'',    score:true,  color:'#7A8B3F'},
+    {key:'steps',           label:'Steps',          icon:'👟', unit:'',    better:'high',color:'#3A5A40'},
+  ];
+
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function metaOf(k){ return METRICS.filter(function(m){return m.key===k;})[0]; }
+  function shortDate(iso){ if(!iso) return ''; var p=iso.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
+  function prettyDate(iso){ if(!iso) return ''; var p=iso.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
+  function relDay(iso){
+    if(!iso) return '';
+    var t=new Date(); var today=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');
+    if(iso===today) return 'Today';
+    var y=new Date(Date.now()-86400000); var yk=y.getFullYear()+'-'+String(y.getMonth()+1).padStart(2,'0')+'-'+String(y.getDate()).padStart(2,'0');
+    if(iso===yk) return 'Last night';
+    return prettyDate(iso);
+  }
+  function commas(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,','); }
+  function hoursMin(sec){ if(sec==null) return '—'; var h=Math.floor(sec/3600), m=Math.round((sec%3600)/60); return h+'h '+String(m).padStart(2,'0')+'m'; }
+
+  // chart value for a metric (numeric, transformed) from a day row
+  function chartVal(m, row){
+    var v=row[m.key]; if(v==null) return null;
+    return m.hours ? (Number(v)/3600) : Number(v);
+  }
+  // display string for a metric value
+  function dispVal(m, row){
+    var v=row[m.key];
+    if(v==null) return '—';
+    if(m.hours) return hoursMin(Number(v));
+    if(m.signed){ var x=Math.round(Number(v)*10)/10; return (x>0?'+':'')+x; }
+    if(m.key==='steps') return commas(Math.round(Number(v)));
+    if(m.key==='avg_hr'||m.key==='respiratory_rate') return String(Math.round(Number(v)*10)/10);
+    return String(Math.round(Number(v)));
+  }
+  function seriesAsc(m){
+    return S.rows.filter(function(r){return r[m.key]!=null;})
+      .map(function(r){return {day:r.day, v:chartVal(m,r), row:r};})
+      .sort(function(a,b){return a.day<b.day?-1:1;});
+  }
+  function latestRowFor(m){
+    for(var i=0;i<S.rows.length;i++){ if(S.rows[i][m.key]!=null) return S.rows[i]; }
+    return null;
+  }
+  function avgLast(m, n){
+    var s=seriesAsc(m); if(!s.length) return null;
+    var tail=s.slice(-n); var sum=tail.reduce(function(a,p){return a+p.v;},0);
+    return sum/tail.length;
+  }
+
+  function scoreColor(v){ if(v==null) return '#C7C1B3'; return v>=85?'#3A5A40':(v>=70?'#BE722A':'#A8443A'); }
+
+  // ── donut score ring ──
+  function scoreRing(v){
+    var R=42, C=2*Math.PI*R, col=scoreColor(v), frac=v==null?0:Math.max(0,Math.min(100,v))/100;
+    var off=C*(1-frac);
+    return '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">'+
+      '<circle cx="50" cy="50" r="'+R+'" fill="none" stroke="#ECE7DB" stroke-width="9"/>'+
+      '<circle cx="50" cy="50" r="'+R+'" fill="none" stroke="'+col+'" stroke-width="9" stroke-linecap="round" '+
+        'stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 50 50)"/>'+
+      '<text x="50" y="50" text-anchor="middle" dominant-baseline="central" font-family="'+
+        'JetBrains Mono, monospace" font-size="26" font-weight="600" fill="'+(v==null?'#C7C1B3':'#1E241C')+'">'+
+        (v==null?'–':v)+'</text></svg>';
+  }
+
+  // ── line chart (single series, optional guide line) ──
+  function chartSVG(m, sAsc, mini){
+    var pts=sAsc; if(!pts.length) return '';
+    var W=520,H=mini?38:168,padT=mini?4:12,padB=mini?4:24,padL=8,padR=8;
+    var ys=pts.map(function(p){return p.v;});
+    if(!mini && m.guide!=null) ys.push(m.guide);
+    var ymin=Math.min.apply(null,ys), ymax=Math.max.apply(null,ys), sp=(ymax-ymin)||1;
+    ymin-=sp*0.16; ymax+=sp*0.16;
+    var x=function(i){ return pts.length===1?W/2:padL+(W-padL-padR)*i/(pts.length-1); };
+    var y=function(v){ return padT+(H-padT-padB)*(1-(v-ymin)/(ymax-ymin)); };
+    var svg='<svg class="'+(mini?'spark':'chart')+'" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+    if(!mini && m.guide!=null){ var gy=y(m.guide).toFixed(1); svg+='<line x1="0" y1="'+gy+'" x2="'+W+'" y2="'+gy+'" stroke="#D8CFBE" stroke-dasharray="4 4" stroke-width="1"/>'; }
+    if(pts.length>1){
+      var d=pts.map(function(p,i){ return (i?'L':'M')+x(i).toFixed(1)+' '+y(p.v).toFixed(1); }).join(' ');
+      svg+='<path d="'+d+'" fill="none" stroke="'+m.color+'" stroke-width="'+(mini?1.6:2)+'" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    pts.forEach(function(p,i){ svg+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(p.v).toFixed(1)+'" r="'+(mini?1.9:3.4)+'" fill="'+m.color+'" '+(mini?'':'stroke="#fff" stroke-width="1.4"')+'/>'; });
+    if(!mini){
+      [0, Math.floor((pts.length-1)/2), pts.length-1].filter(function(v,i,a){return a.indexOf(v)===i;}).forEach(function(i){
+        var lx=Math.max(16,Math.min(W-16,x(i)));
+        svg+='<text x="'+lx.toFixed(1)+'" y="'+(H-7)+'" font-size="10" fill="#71776B" font-family="monospace" text-anchor="middle">'+esc(shortDate(pts[i].day))+'</text>';
+      });
+    }
+    svg+='</svg>';
+    return svg;
+  }
+
+  // ── hero (latest day) ──
+  function hero(){
+    var latest=S.rows[0]; if(!latest) return '';
+    var rHrv=latestRowFor(metaOf('avg_hrv')), rRhr=latestRowFor(metaOf('resting_hr')),
+        rSlp=latestRowFor(metaOf('total_sleep_seconds')), rTmp=latestRowFor(metaOf('temperature_deviation'));
+    function ring(key, lbl){ var v=latest[key]; return '<div class="ring-item">'+scoreRing(v==null?null:Math.round(v))+'<div class="ring-lbl">'+lbl+'</div></div>'; }
+    function stat(val, lbl){ return '<div class="stat"><div class="sv">'+val+'</div><div class="sl">'+lbl+'</div></div>'; }
+    return '<div class="hero"><div class="hero-top"><span class="hero-day">'+esc(relDay(latest.day))+'</span>'+
+      '<span class="hero-when">'+esc(shortDate(latest.day))+'</span></div>'+
+      '<div class="rings">'+ring('readiness_score','Readiness')+ring('sleep_score','Sleep')+ring('activity_score','Activity')+'</div>'+
+      '<div class="statgrid">'+
+        stat(rHrv?dispVal(metaOf('avg_hrv'),rHrv):'—', 'HRV ms')+
+        stat(rRhr?dispVal(metaOf('resting_hr'),rRhr):'—', 'Rest HR')+
+        stat(rSlp?hoursMin(rSlp.total_sleep_seconds):'—', 'Sleep')+
+        stat(rTmp?dispVal(metaOf('temperature_deviation'),rTmp)+'°':'—', 'Temp °C')+
+      '</div></div>';
+  }
+
+  // ── metric trend card ──
+  function metricCard(m){
+    var sAsc=seriesAsc(m); if(!sAsc.length) return '';
+    var latest=latestRowFor(m), open=S.openKey===m.key;
+    var valColor = m.score ? scoreColor(latest[m.key]) : 'var(--ink)';
+    var head='<button class="vcard" onclick="toggleV(\''+m.key+'\')" aria-expanded="'+open+'">'+
+      '<div class="v-top"><span class="v-icon">'+m.icon+'</span><span class="v-label">'+esc(m.label)+'</span>'+
+      '<span class="v-chev">'+(open?'▲':'▼')+'</span></div>'+
+      '<div class="v-big"><span class="v-val" style="color:'+valColor+'">'+esc(dispVal(m,latest))+'</span>'+
+      (m.unit?'<span class="v-unit">'+esc(m.unit)+'</span>':'')+
+      '<span class="v-date">'+esc(shortDate(latest.day))+'</span></div>'+
+      (open?'':chartSVG(m, sAsc.slice(-30), true))+'</button>';
+    var panel=open?('<div class="vpanel">'+metricPanel(m,sAsc)+'</div>'):'';
+    return '<div class="vwrap'+(open?' open':'')+'">'+head+panel+'</div>';
+  }
+  function metricPanel(m, sAsc){
+    var h='<div class="kicker" style="margin:8px 0 2px">Over time</div>'+chartSVG(m, sAsc, false);
+    if(m.guide!=null) h+='<div class="legend"><span><span class="k" style="background:#D8CFBE"></span>'+(m.key==='temperature_deviation'?'Baseline (0)':'Target '+m.guide+esc(m.unit))+'</span></div>';
+    var a7=avgLast(m,7), a30=avgLast(m,30);
+    if(a7!=null){
+      var f=function(x){ return m.hours?hoursMin(Math.round(x*3600)):(m.signed?((x>0?'+':'')+(Math.round(x*10)/10)):(m.key==='steps'?commas(Math.round(x)):Math.round(x))); };
+      h+='<p class="avg-note">7-day avg <strong>'+f(a7)+(m.unit&&!m.hours?' '+esc(m.unit):'')+'</strong> · 30-day avg '+f(a30)+(m.unit&&!m.hours?' '+esc(m.unit):'')+'</p>';
+    }
+    h+='<div class="kicker" style="margin:14px 0 2px">Recent</div>';
+    var recent=sAsc.slice().reverse().slice(0,14);
+    h+=recent.map(function(p){
+      return '<div class="hist-row"><span>'+esc(prettyDate(p.day))+'</span><span class="hv">'+esc(dispVal(m,p.row))+(m.unit?' '+esc(m.unit):'')+'</span></div>';
+    }).join('');
+    return h;
+  }
+
+  function render(){
+    var app=el('app');
+    if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
+    var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Oura · Sleep &amp; Recovery</small></h1></header>';
+    var body;
+    if(!S.rows.length){
+      body='<div class="card"><p class="empty">No Oura data yet.<br><br>Connect your ring by running <code>oura_sync/oura_auth.py</code> once, then the daily sync fills this in — sleep, readiness and activity scores plus HRV, resting heart rate, sleep duration and body-temperature trends.<br><br>See <code>oura_sync/README.md</code> for setup.</p></div>';
+    }else{
+      body=hero()+'<div class="sec-label">Trends</div>'+METRICS.map(metricCard).join('');
+    }
+    app.innerHTML=head+body+(S.err?'<p class="empty" style="color:var(--danger)">'+esc(S.err)+'</p>':'');
+  }
+  function toggleV(key){ S.openKey = S.openKey===key ? null : key; render(); }
+
+  async function load(){
+    var r=await sb.from('oura_daily').select('*').order('day',{ascending:false});
+    if(r.error){ S.err=r.error.message; S.rows=[]; return; }
+    S.rows=r.data||[];
+  }
+  (async function(){
+    var profile=await requireUser(); if(!profile) return;
+    S.userId=profile.user.id;
+    await load();
+    S.loaded=true; render();
+  })();
+  </script>
+</body>
+</html>
