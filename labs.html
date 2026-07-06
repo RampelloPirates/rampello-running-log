@@ -31,11 +31,8 @@
     .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
     .row-between{display:flex;justify-content:space-between;align-items:center;gap:10px;}
 
-    /* report bar */
-    .repbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
     .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:9px 10px;background:var(--surface);}
     select.field{background:var(--surface);}
-    .rep-meta{font-size:12px;color:var(--muted);font-family:var(--f-mono);}
     .rep-meta .dot{margin:0 6px;opacity:.5;}
 
     /* filter chips */
@@ -65,7 +62,6 @@
     .m-chev{color:var(--silver);font-size:10px;transition:transform .15s;}
     .marker-wrap.open .m-chev{color:var(--green);}
     .marker-panel{padding:2px 14px 14px;border-top:1px dashed var(--border);margin-top:2px;}
-    .panel-loading{padding:22px;text-align:center;color:var(--muted);font-size:13px;}
     .pill{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
     .pill.in{color:var(--green-deep);background:var(--green-tint);}
     .pill.high{color:#8a4a1f;background:var(--amber-soft);}
@@ -123,8 +119,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="auth.js"></script>
   <script>
-  var S = { loaded:false, userId:null, reports:[], reportId:null, results:[],
-            filter:'all', openId:null, openHist:null, openLoading:false, form:null, err:'' };
+  var S = { loaded:false, userId:null, allRows:[], results:[],
+            filter:'all', openId:null, form:null, err:'' };
 
   var CAT_ICON = { 'Lipids':'🫀','CBC':'🩸','Thyroid':'🦋','Hormones':'⚗️',
     'Vitamins & minerals':'💊','Inflammation':'🔥','Heavy metals':'⚙️',
@@ -210,27 +206,36 @@
   }
 
   // ── data ───────────────────────────────────────────────────────────────
-  async function loadReports(){
-    var r=await sb.from('lab_reports').select('*').order('collected_on',{ascending:false});
-    S.reports=r.data||[];
-    if(!S.reportId && S.reports.length) S.reportId=S.reports[0].id;
+  // Load every reading across all reports, then collapse to the latest per
+  // marker (name + unit) for the list. History for a marker is computed locally.
+  async function loadAll(){
+    var r=await sb.from('lab_results').select('*, lab_reports(collected_on)');
+    var rows=(r.data||[]).map(function(x){ x.date=(x.lab_reports&&x.lab_reports.collected_on)||null; return x; })
+      .filter(function(x){ return x.date; });
+    S.allRows=rows;
+    var latest={};
+    rows.forEach(function(x){
+      var k=x.name+'|'+(x.unit||'');
+      if(!latest[k] || x.date>latest[k].date) latest[k]=x;
+    });
+    S.results=Object.keys(latest).map(function(k){ return latest[k]; })
+      .sort(function(a,b){ return a.name<b.name?-1:(a.name>b.name?1:0); });
   }
-  async function loadResults(){
-    if(!S.reportId){ S.results=[]; return; }
-    var r=await sb.from('lab_results').select('*').eq('report_id',S.reportId).order('sort_order',{ascending:true});
-    S.results=r.data||[];
+  // all readings for a marker (matched by name, and unit when known), oldest→newest
+  function historyFor(name, unit){
+    return S.allRows.filter(function(x){ return x.name===name && (unit==null||x.unit===unit); })
+      .map(function(x){ return { value_num:x.value_num, value_text:x.value_text, unit:x.unit, flag:x.flag,
+        ref_operator:x.ref_operator, ref_low:x.ref_low, ref_high:x.ref_high, normal_text:x.normal_text, date:x.date }; })
+      .sort(function(a,b){ return a.date<b.date?-1:1; });
   }
-  async function loadHistory(name){
-    var r=await sb.from('lab_results')
-      .select('value_num,value_text,unit,flag,ref_operator,ref_low,ref_high,normal_text,report_id,lab_reports(collected_on)')
-      .eq('name',name);
-    var rows=(r.data||[]).map(function(x){ return {
-      value_num:x.value_num, value_text:x.value_text, unit:x.unit, flag:x.flag,
-      ref_operator:x.ref_operator, ref_low:x.ref_low, ref_high:x.ref_high, normal_text:x.normal_text,
-      date:(x.lab_reports&&x.lab_reports.collected_on)||null };
-    }).filter(function(x){return x.date;});
-    rows.sort(function(a,b){ return a.date<b.date?-1:1; });
-    return rows;
+  // find an existing report for a date (any source) or make a Manual one
+  async function reportForDate(date){
+    var ex=await sb.from('lab_reports').select('id').eq('collected_on',date).limit(1);
+    if(ex.data && ex.data.length) return ex.data[0].id;
+    var ref='manual:'+date+':'+Math.random().toString(36).slice(2,7);
+    var ins=await sb.from('lab_reports').insert({user_id:S.userId,collected_on:date,source:'Manual',import_ref:ref}).select('id').single();
+    if(ins.error) throw ins.error;
+    return ins.data.id;
   }
 
   // ── trend chart (inline SVG) ────────────────────────────────────────────
@@ -278,29 +283,7 @@
     return c;
   }
   function renderList(){
-    var h='';
-    // report bar
-    h+='<div class="repbar">';
-    if(S.reports.length){
-      h+='<select class="field" id="repSel" onchange="pickReport(this.value)">'+
-        S.reports.map(function(rp){ return '<option value="'+rp.id+'"'+(rp.id===S.reportId?' selected':'')+'>'+esc(prettyDate(rp.collected_on))+(rp.source?(' · '+esc(rp.source)):'')+'</option>'; }).join('')+
-        '</select>';
-    }
-    h+='<button class="link" onclick="openReportForm()" style="padding:9px 4px">+ Report</button>';
-    h+='</div>';
-
-    var rep=S.reports.filter(function(r){return r.id===S.reportId;})[0];
-    if(rep){
-      var bits=[]; if(rep.fasting!=null) bits.push(rep.fasting?'Fasting':'Non-fasting');
-      if(rep.physician) bits.push(rep.physician);
-      if(bits.length) h+='<div class="rep-meta" style="margin:-4px 2px 12px">'+bits.map(esc).join('<span class="dot">•</span>')+'</div>';
-    }
-
-    if(!S.results.length){
-      h+='<div class="card"><p class="empty">No results in this report yet. Import a lab PDF with <code>labs_sync</code>, or add a marker by hand below.</p>'+
-         '<button class="btn btn-ghost full" style="margin-top:10px" onclick="openResultForm(null)">+ Add a result</button></div>';
-      return h;
-    }
+    var h='<p style="font-size:12.5px;color:var(--muted);margin:2px 2px 13px">Each marker shows its latest value — tap for the trend over time.</p>';
 
     // filter chips
     var c=counts();
@@ -347,23 +330,18 @@
 
   // inline expanded content for a marker (trend + history + edit/delete)
   function detailPanel(r){
-    var h='';
-    if(S.openLoading || S.openHist===null){
-      h+='<div class="panel-loading">Loading trend…</div>';
-    } else {
-      var hist=S.openHist;
-      h+='<div class="kicker" style="margin:8px 0 4px">Over time</div>'+trendSVG(hist,r);
-      h+='<div class="kicker" style="margin:14px 0 2px">History</div>';
-      if(!hist.length){ h+='<p class="empty">Just this one reading so far.</p>'; }
-      else h+=hist.slice().reverse().map(function(x){
-        var s=statusOf(x);
-        return '<div class="hist-row"><span>'+esc(prettyDate(x.date))+'</span>'+
-          '<span class="hv"><span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>'+
-          esc(x.value_text!=null?x.value_text:fmt(x.value_num))+(x.unit?(' '+esc(x.unit)):'')+'</span></div>';
-      }).join('');
-    }
-    h+='<div class="btn-row"><button class="btn btn-ghost btn-auto" onclick="openResultForm(\''+esc(r.id)+'\')">Edit</button>'+
-       '<button class="btn btn-danger btn-auto" onclick="deleteResult(\''+esc(r.id)+'\')">Delete</button></div>';
+    var hist=historyFor(r.name, r.unit);
+    var h='<div class="kicker" style="margin:8px 0 4px">Over time</div>'+trendSVG(hist,r);
+    h+='<div class="kicker" style="margin:14px 0 2px">History</div>';
+    if(!hist.length){ h+='<p class="empty">Just this one reading so far.</p>'; }
+    else h+=hist.slice().reverse().map(function(x){
+      var s=statusOf(x);
+      return '<div class="hist-row"><span>'+esc(prettyDate(x.date))+'</span>'+
+        '<span class="hv"><span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>'+
+        esc(x.value_text!=null?x.value_text:fmt(x.value_num))+(x.unit?(' '+esc(x.unit)):'')+'</span></div>';
+    }).join('');
+    h+='<div class="btn-row"><button class="btn btn-ghost btn-auto" onclick="openResultForm(\''+esc(r.id)+'\')">Edit latest</button>'+
+       '<button class="btn btn-danger btn-auto" onclick="deleteResult(\''+esc(r.id)+'\')">Delete latest</button></div>';
     return h;
   }
 
@@ -374,33 +352,24 @@
     var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Lab results</small></h1></header>';
     var body;
     if(S.form) body=renderForm();
-    else if(!S.reports.length) body=emptyState();
+    else if(!S.results.length) body=emptyState();
     else body=renderList();
     app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
   }
   function emptyState(){
-    return '<div class="card"><p class="empty">No lab reports yet.<br><br>'+
-      'Import a Quest / Function Health PDF with the <code>labs_sync</code> script, '+
-      'or start one by hand to enter older bloodwork.</p>'+
-      '<button class="btn btn-primary full" style="margin-top:12px" onclick="openReportForm()">+ Start a report</button></div>';
+    return '<div class="card"><p class="empty">No lab results yet.<br><br>'+
+      'Import a Quest / Function Health or portal PDF with the <code>labs_sync</code> script, '+
+      'or add a result by hand to start tracking a marker over time.</p>'+
+      '<button class="btn btn-primary full" style="margin-top:12px" onclick="openResultForm(null)">+ Add a result</button></div>';
   }
 
   // ── forms ───────────────────────────────────────────────────────────────
   function renderForm(){
     var f=S.form;
-    if(f.kind==='report'){
-      return '<button class="back-link" onclick="closeForm()">‹ Cancel</button>'+
-        '<div class="card"><div class="kicker" style="margin-bottom:10px">New report</div>'+
-        '<label class="lbl">Collection date</label><input id="fDate" type="date" class="field full" value="'+esc(f.date)+'">'+
-        '<label class="lbl">Source</label><input id="fSource" class="field full" placeholder="e.g. LabCorp, Manual" value="'+esc(f.source)+'">'+
-        '<label class="lbl">Fasting?</label><select id="fFast" class="field full"><option value="">—</option><option value="yes"'+(f.fasting==='yes'?' selected':'')+'>Yes</option><option value="no"'+(f.fasting==='no'?' selected':'')+'>No</option></select>'+
-        '<div class="btn-row"><button class="btn btn-primary" onclick="saveReport()">Create report</button>'+
-        (f.id?'<button class="btn btn-danger" onclick="deleteReport(\''+esc(f.id)+'\')">Delete report</button>':'')+'</div></div>';
-    }
-    // result form
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button>'+
       '<div class="card"><div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit reading':'Add a result')+'</div>'+
-      '<label class="lbl">Marker name</label><input id="rName" class="field full" placeholder="e.g. Vitamin B12" value="'+esc(f.name)+'">'+
+      '<label class="lbl">Marker name</label><input id="rName" class="field full" placeholder="e.g. Vitamin B12" value="'+esc(f.name)+'"'+(f.id?' readonly':'')+'>'+
+      '<label class="lbl">Date</label><input id="rDate" type="date" class="field full" value="'+esc(f.date)+'">'+
       '<div class="grid2"><div><label class="lbl">Value</label><input id="rVal" class="field full" placeholder="e.g. 550 or NEGATIVE" value="'+esc(f.value)+'"></div>'+
       '<div><label class="lbl">Unit</label><input id="rUnit" class="field full" placeholder="ng/mL" value="'+esc(f.unit)+'"></div></div>'+
       '<div class="grid2"><div><label class="lbl">Range low</label><input id="rLo" class="field full" inputmode="decimal" placeholder="optional" value="'+esc(f.lo)+'"></div>'+
@@ -411,41 +380,23 @@
       '<p class="empty" style="margin-top:10px">Leave both range fields set for a two-sided gauge. For a one-sided limit (e.g. “under 100”), fill only the high field.</p></div>';
   }
 
-  function openReportForm(){ S.form={kind:'report',id:null,date:todayISO(),source:'Manual',fasting:''}; S.err=''; render(); }
   function openResultForm(id){
     if(id){ var r=S.results.filter(function(x){return x.id===id;})[0]; if(!r) return;
-      S.form={kind:'result',id:id,name:r.name||'',value:(r.value_text!=null?r.value_text:fmt(r.value_num)),
+      S.form={kind:'result',id:id,name:r.name||'',date:r.date||todayISO(),value:(r.value_text!=null?r.value_text:fmt(r.value_num)),
         unit:r.unit||'',lo:r.ref_low!=null?fmt(r.ref_low):'',hi:r.ref_high!=null?fmt(r.ref_high):'',category:r.category||'Other'}; }
-    else S.form={kind:'result',id:null,name:'',value:'',unit:'',lo:'',hi:'',category:'Metabolic'};
+    else S.form={kind:'result',id:null,name:'',date:todayISO(),value:'',unit:'',lo:'',hi:'',category:'Metabolic'};
     S.err=''; render();
   }
   function closeForm(){ S.form=null; render(); }
-
-  async function saveReport(){
-    var date=(el('fDate')||{}).value, source=((el('fSource')||{}).value||'').trim();
-    var fast=(el('fFast')||{}).value;
-    if(!date){ S.err='Pick a date.'; render(); return; }
-    try{
-      var ref='manual:'+date+':'+(source||'').toLowerCase().replace(/\s+/g,'')+':'+Math.random().toString(36).slice(2,7);
-      var ins=await sb.from('lab_reports').insert({user_id:S.userId,collected_on:date,source:source||'Manual',
-        fasting: fast==='yes'?true:(fast==='no'?false:null), import_ref:ref}).select('id').single();
-      if(ins.error) throw ins.error;
-      S.form=null; S.reportId=ins.data.id; await loadReports(); await loadResults(); render();
-    }catch(e){ S.err=e.message; render(); }
-  }
-  async function deleteReport(id){
-    if(!confirm('Delete this entire report and all its results? This cannot be undone.')) return;
-    try{ await sb.from('lab_reports').delete().eq('id',id); S.form=null; S.reportId=null;
-      S.openId=null; S.openHist=null; await loadReports(); await loadResults(); render(); }
-    catch(e){ S.err=e.message; render(); }
-  }
 
   function numOrNull(s){ s=(s||'').trim(); if(!s) return null; var n=Number(s); return isNaN(n)?null:n; }
   async function saveResult(){
     var f=S.form;
     var name=((el('rName')||{}).value||'').trim();
     var val=((el('rVal')||{}).value||'').trim();
+    var date=(el('rDate')||{}).value;
     if(!name){ S.err='Marker name is required.'; render(); return; }
+    if(!date){ S.err='Pick a date.'; render(); return; }
     if(!val){ S.err='Enter a value.'; render(); return; }
     var lo=numOrNull((el('rLo')||{}).value), hi=numOrNull((el('rHi')||{}).value);
     var unit=((el('rUnit')||{}).value||'').trim()||null;
@@ -459,51 +410,29 @@
       if(f.id){
         var u=await sb.from('lab_results').update(row).eq('id',f.id); if(u.error) throw u.error;
       }else{
-        if(!S.reportId){ S.err='Create or pick a report first.'; render(); return; }
-        row.user_id=S.userId; row.report_id=S.reportId;
-        row.sort_order=(S.results.length?Math.max.apply(null,S.results.map(function(x){return x.sort_order||0;}))+1:0);
+        var reportId=await reportForDate(date);   // find or create a report for that date
+        row.user_id=S.userId; row.report_id=reportId; row.sort_order=0;
         var ins=await sb.from('lab_results').insert(row); if(ins.error) throw ins.error;
       }
-      S.form=null; await loadResults(); await refreshOpen(); render();
+      S.form=null; await loadAll(); render();
     }catch(e){ S.err=e.message; render(); }
   }
   async function deleteResult(id){
     if(!confirm('Delete this reading?')) return;
     try{ await sb.from('lab_results').delete().eq('id',id);
-      if(S.openId===id){ S.openId=null; S.openHist=null; }
-      await loadResults(); render(); }
+      S.openId=null; await loadAll(); render(); }
     catch(e){ S.err=e.message; render(); }
   }
 
   // ── nav ─────────────────────────────────────────────────────────────────
   function setFilter(f){ S.filter=f; render(); }
-  async function pickReport(id){ S.reportId=id; S.openId=null; S.openHist=null; await loadResults(); render(); }
-
   // expand/collapse a marker inline (accordion — one open at a time)
-  async function toggle(id){
-    if(S.openId===id){ S.openId=null; S.openHist=null; render(); return; }
-    var r=S.results.filter(function(x){return x.id===id;})[0]; if(!r) return;
-    S.openId=id; S.openHist=null; S.openLoading=true; S.err=''; render();
-    var hist=await loadHistory(r.name);
-    // a name can recur across specimens (serum vs urine GLUCOSE) — keep the trend
-    // to readings that share this reading's unit so we don't mix them.
-    if(r.unit!=null) hist=hist.filter(function(x){ return x.unit===r.unit; });
-    if(S.openId!==id) return;                 // user collapsed/switched while loading
-    S.openLoading=false; S.openHist=hist; render();
-  }
-  async function refreshOpen(){
-    if(!S.openId) return;
-    var r=S.results.filter(function(x){return x.id===S.openId;})[0];
-    if(!r){ S.openId=null; S.openHist=null; return; }
-    var hist=await loadHistory(r.name);
-    if(r.unit!=null) hist=hist.filter(function(x){ return x.unit===r.unit; });
-    S.openHist=hist;
-  }
+  function toggle(id){ S.openId = S.openId===id ? null : id; S.err=''; render(); }
 
   (async function(){
     var profile=await requireUser(); if(!profile) return;
     S.userId=profile.user.id;
-    await loadReports(); await loadResults();
+    await loadAll();
     S.loaded=true; render();
   })();
   </script>
