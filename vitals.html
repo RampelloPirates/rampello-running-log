@@ -94,8 +94,14 @@
     pulse:         {label:'Resting Pulse',  icon:'💓', unit:'bpm', band:[60,100]},
     temperature:   {label:'Temperature',    icon:'🌡️', unit:'°F', band:[97,99]},
     height:        {label:'Height',         icon:'📏', unit:'in'},
+    // Oura-sourced (read-only, synced nightly). No clinic band — a fit resting
+    // HR runs low by design, so we don't flag it against the 60–100 pulse range.
+    resting_hr:    {label:'Resting HR',       icon:'❤️', unit:'bpm', oura:true},
+    hrv:           {label:'HRV',              icon:'💗', unit:'ms',  oura:true},
+    temp_change:   {label:'Body Temp Change', icon:'🌡️', unit:'°C', oura:true, guides:[0]},
   };
   var ORDER = ['blood_pressure','weight','pulse','temperature','height'];
+  var OURA_KINDS = ['resting_hr','hrv','temp_change'];
 
   function el(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -160,26 +166,28 @@
   // ── render: list ──────────────────────────────────────────────────────────
   function renderList(){
     var h='<button class="link" onclick="openForm(null)" style="float:right;margin-top:-2px">+ Add reading</button>';
-    var any=false;
-    h+=ORDER.map(function(kind){
-      var rows=byKind(kind); if(!rows.length) return '';
-      any=true;
-      var meta=META[kind], latest=rows[0], open=S.openKind===kind;
-      var st=statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null);
-      var asc=rows.slice().reverse();
-      var extra='';
-      if(kind==='weight'){ var b=bmi(Number(latest.value)); if(b!=null) extra='<div class="v-extra">BMI '+b+'</div>'; }
-      var head='<button class="vcard" onclick="toggleV(\''+kind+'\')" aria-expanded="'+open+'">'+
-        '<div class="v-top"><span class="v-icon">'+meta.icon+'</span><span class="v-label">'+esc(meta.label)+'</span>'+
-        (statusLabel(st)?'<span class="pill '+st+'">'+statusLabel(st)+'</span>':'')+'<span class="v-chev">'+(open?'▲':'▼')+'</span></div>'+
-        '<div class="v-big"><span class="v-val">'+esc(valText(latest))+'</span><span class="v-unit">'+esc(meta.unit)+'</span>'+
-        '<span class="v-date">'+esc(shortDate(latest.measured_on))+'</span></div>'+extra+
-        (open?'':chartSVG(kind, asc, true))+'</button>';
-      var panel=open?('<div class="vpanel">'+vitalPanel(kind)+'</div>'):'';
-      return '<div class="vwrap'+(open?' open':'')+'">'+head+panel+'</div>';
-    }).join('');
-    if(!any) h+=emptyState();
+    var manual=ORDER.map(vcardHTML).join('');
+    var oura=OURA_KINDS.map(vcardHTML).join('');
+    h+=manual;
+    if(oura) h+='<div class="kicker" style="margin:20px 2px 10px">From your Oura ring</div>'+oura;
+    if(!manual && !oura) h+=emptyState();
     return h;
+  }
+  function vcardHTML(kind){
+    var rows=byKind(kind); if(!rows.length) return '';
+    var meta=META[kind], latest=rows[0], open=S.openKind===kind;
+    var st=statusOf(kind,Number(latest.value),latest.value2!=null?Number(latest.value2):null);
+    var asc=rows.slice().reverse();
+    var extra='';
+    if(kind==='weight'){ var b=bmi(Number(latest.value)); if(b!=null) extra='<div class="v-extra">BMI '+b+'</div>'; }
+    var head='<button class="vcard" onclick="toggleV(\''+kind+'\')" aria-expanded="'+open+'">'+
+      '<div class="v-top"><span class="v-icon">'+meta.icon+'</span><span class="v-label">'+esc(meta.label)+'</span>'+
+      (statusLabel(st)?'<span class="pill '+st+'">'+statusLabel(st)+'</span>':'')+'<span class="v-chev">'+(open?'▲':'▼')+'</span></div>'+
+      '<div class="v-big"><span class="v-val">'+esc(valText(latest))+'</span><span class="v-unit">'+esc(meta.unit)+'</span>'+
+      '<span class="v-date">'+esc(shortDate(latest.measured_on))+'</span></div>'+extra+
+      (open?'':chartSVG(kind, asc, true))+'</button>';
+    var panel=open?('<div class="vpanel">'+vitalPanel(kind)+'</div>'):'';
+    return '<div class="vwrap'+(open?' open':'')+'">'+head+panel+'</div>';
   }
   function emptyState(){
     return '<div class="card"><p class="empty">No vitals yet.<br><br>Import a BayCare portal PDF with <code>labs_sync</code> — it pulls blood pressure, weight, pulse and temperature alongside labs — or add a reading by hand.</p>'+
@@ -191,7 +199,20 @@
     var meta=META[kind], rows=byKind(kind), asc=rows.slice().reverse();
     var h='<div class="kicker" style="margin:8px 0 2px">Over time</div>'+chartSVG(kind, asc, false);
     if(meta.compound) h+='<div class="legend"><span><span class="k" style="background:#BE722A"></span>Systolic</span><span><span class="k" style="background:#3E6B8A"></span>Diastolic</span></div>';
+    else if(meta.oura && meta.guides) h+='<div class="legend"><span><span class="k" style="background:#D8CFBE"></span>Baseline (0)</span></div>';
     else if(meta.band) h+='<div class="legend"><span><span class="k" style="background:#EBF0E8"></span>Normal '+meta.band[0]+'–'+meta.band[1]+' '+esc(meta.unit)+'</span></div>';
+
+    // Oura-sourced metrics are read-only — no edit/add, just a recent list.
+    if(meta.oura){
+      h+='<div class="kicker" style="margin:14px 0 2px">Recent</div>';
+      h+=rows.slice(0,14).map(function(r){
+        return '<div class="hist-row" style="cursor:default"><span>'+esc(prettyDate(r.measured_on))+'</span>'+
+          '<span class="hv">'+esc(valText(r))+' '+esc(meta.unit)+'</span></div>';
+      }).join('');
+      h+='<p class="v-extra" style="margin-top:10px">Synced nightly from your Oura ring — read-only.</p>';
+      return h;
+    }
+
     h+='<div class="kicker" style="margin:14px 0 2px">History</div>';
     if(!rows.length){ h+='<p class="empty">No readings yet.</p>'; }
     else h+=rows.map(function(r){
@@ -273,6 +294,14 @@
   async function load(){
     var r=await sb.from('vitals').select('*').order('measured_on',{ascending:false});
     S.rows=r.data||[];
+    // Fold in Oura daily physiology as read-only pseudo-rows (single source of
+    // truth stays oura_daily; nothing is written back to the vitals table).
+    var o=await sb.from('oura_daily').select('day,resting_hr,avg_hrv,temperature_deviation').order('day',{ascending:false});
+    (o.data||[]).forEach(function(d){
+      if(d.resting_hr!=null)            S.rows.push({id:'oura:'+d.day+':hr',  kind:'resting_hr',  measured_on:d.day, value:d.resting_hr,            unit:'bpm', _oura:true});
+      if(d.avg_hrv!=null)               S.rows.push({id:'oura:'+d.day+':hrv', kind:'hrv',          measured_on:d.day, value:d.avg_hrv,               unit:'ms',  _oura:true});
+      if(d.temperature_deviation!=null) S.rows.push({id:'oura:'+d.day+':tmp', kind:'temp_change',  measured_on:d.day, value:d.temperature_deviation, unit:'°C', _oura:true});
+    });
   }
   (async function(){
     var profile=await requireUser(); if(!profile) return;

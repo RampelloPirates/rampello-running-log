@@ -101,6 +101,7 @@
   var S = {
     view:'today', method:'type', loaded:false, userId:null,
     target:null, log:[], usuals:[], recipes:[], history:[],
+    burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
     draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null, editEntryId:null, editItems:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
     busy:false, err:'', editTarget:false,
@@ -180,6 +181,17 @@
       m.macros.p+=num(e.protein); m.macros.f+=num(e.fat); m.macros.c+=num(e.carbs); m.macros.fib+=num(e.fiber);
     });
     S.history = Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return a.key<b.key?1:-1;});
+  }
+  // Oura total calorie burn per day + yesterday's intake, for the deficit/surplus
+  // read-out. Burn is a lag measure (a day's total is only complete once it's
+  // over), so we anchor the Today card on yesterday.
+  async function loadEnergy(){
+    var ob = await sb.from('oura_daily').select('day,total_calories');
+    S.burnByDay = {};
+    (ob.data||[]).forEach(function(x){ if(x.total_calories!=null) S.burnByDay[x.day]=x.total_calories; });
+    S.yKey = localDateKey(new Date(Date.now()-86400000));
+    var yi = await sb.from('nutrition_entries').select('total_calories').eq('log_date',S.yKey);
+    S.yIntake = (yi.data||[]).reduce(function(s,e){return s+(e.total_calories||0);},0);
   }
   // Expand a history day to show its entries (loaded on demand), or collapse it.
   async function expandHistoryDay(key){
@@ -566,6 +578,8 @@
     if(dm.p||dm.f||dm.c||dm.fib) h += macroGridHTML(dm);
     h += '</section>';
 
+    h += balanceCard();
+
     // add methods
     h += '<section class="card"><div class="seg">';
     [['type','Type a meal'],['label','Photo label'],['barcode','Barcode']].forEach(function(m){
@@ -590,6 +604,34 @@
     }
     h += '</section><p class="fine">Calorie figures are estimates for general tracking, not medical or dietary advice.</p>';
     return h;
+  }
+
+  // Yesterday's intake vs Oura calorie burn → deficit / surplus.
+  function balanceCard(){
+    var burn = S.burnByDay ? S.burnByDay[S.yKey] : null;
+    if(burn==null) return '';                 // no Oura burn synced for yesterday yet
+    var intake = S.yIntake||0;
+    var h = '<section class="card"><div class="row-between" style="margin-bottom:8px">'+
+      '<span class="kicker">Yesterday · energy balance</span>'+
+      '<span style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+prettyDate(S.yKey)+'</span></div>';
+    if(intake<=0){
+      h += '<div style="font-size:13px;color:var(--muted)">Burned <span style="font-family:var(--f-mono);color:var(--ink);font-weight:600">'+burn.toLocaleString()+'</span> cal — no meals logged, so no balance to show.</div>';
+      return h+'</section>';
+    }
+    var net = intake - burn;                  // >0 surplus, <0 deficit
+    var deficit = net < 0;
+    var col = deficit ? 'var(--green)' : 'var(--amber)';
+    var word = deficit ? 'deficit' : 'surplus';
+    h += '<div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">'+
+        '<span style="font-family:var(--f-mono);font-size:16px;font-weight:600">'+intake.toLocaleString()+'</span><span style="font-size:12px;color:var(--muted)">eaten</span>'+
+        '<span style="color:var(--muted);margin:0 2px">−</span>'+
+        '<span style="font-family:var(--f-mono);font-size:16px;font-weight:600">'+burn.toLocaleString()+'</span><span style="font-size:12px;color:var(--muted)">burned</span>'+
+        '<span style="flex:1;min-width:8px"></span>'+
+        '<span style="font-family:var(--f-mono);font-size:24px;font-weight:600;color:'+col+'">'+(deficit?'−':'+')+Math.abs(net).toLocaleString()+'</span>'+
+      '</div>'+
+      '<div style="text-align:right;font-size:12px;font-weight:600;color:'+col+';margin-top:1px">'+Math.abs(net).toLocaleString()+' cal '+word+'</div>'+
+      '<p style="font-size:11px;color:var(--muted);margin:9px 0 0;line-height:1.45">Burn is your Oura total for the last full day. Deficit = you burned more than you ate.</p>';
+    return h+'</section>';
   }
 
   function paneType(){
@@ -803,9 +845,15 @@
     else h += S.history.map(function(d){
       var m=d.macros; var macro=(m.p||m.f||m.c||m.fib)?(' · P'+Math.round(m.p)+' F'+Math.round(m.f)+' C'+Math.round(m.c)+' Fb'+Math.round(m.fib||0)):'';
       var over = S.target && d.total>S.target;
+      var burn = S.burnByDay ? S.burnByDay[d.key] : null;
+      var bal='';
+      if(burn!=null){
+        var net=d.total-burn, def=net<0;
+        bal=' · '+burn.toLocaleString()+' burned · <span style="color:'+(def?'var(--green)':'var(--amber)')+';font-weight:600">'+Math.abs(net).toLocaleString()+' '+(def?'deficit':'surplus')+'</span>';
+      }
       var head = '<div class="row-between" style="padding:12px 0;border-bottom:'+(d.expanded?'none':'1px dashed var(--border)')+';align-items:baseline;cursor:pointer" onclick="expandHistoryDay(\''+d.key+'\')">'+
         '<div><div style="font-size:14px;font-weight:500">'+(d.expanded?'▾ ':'▸ ')+prettyDate(d.key)+'</div>'+
-        '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+d.count+' entr'+(d.count===1?'y':'ies')+macro+(over?' · over goal':'')+'</div></div>'+
+        '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+d.count+' entr'+(d.count===1?'y':'ies')+macro+(over?' · over goal':'')+bal+'</div></div>'+
         '<span style="font-family:var(--f-mono);font-size:18px;font-weight:600;color:'+(over?'var(--danger)':'var(--ink)')+'">'+d.total.toLocaleString()+'</span></div>';
       var body='';
       if(d.expanded && d.entries){
@@ -831,7 +879,7 @@
     S.userId = profile.user.id;
     var st = await sb.from('nutrition_settings').select('calorie_target').eq('user_id',S.userId).maybeSingle();
     S.target = st.data ? st.data.calorie_target : null;
-    await Promise.all([loadLog(), loadUsuals(), loadRecipes()]);
+    await Promise.all([loadLog(), loadUsuals(), loadRecipes(), loadEnergy()]);
     S.loaded = true;
     render();
   })();
