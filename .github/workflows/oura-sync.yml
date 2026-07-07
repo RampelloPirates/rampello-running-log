@@ -2,10 +2,12 @@ name: Oura sync
 
 on:
   schedule:
-    - cron: "37 14 * * *"   # daily 14:37 UTC (~10:37 AM ET), just after Strava.
-                            # Odd minute on purpose (GitHub drops round-number crons).
-    - cron: "49 18 * * *"   # backup ~14:49 ET, in case the morning slot is dropped.
-                            # Upserts by day, so a double run is a no-op.
+    # Front-loaded like the Strava sync (GitHub drops/delays the ~14:00 UTC slot).
+    # Oura upserts by day, so every run after the first is a no-op.
+    - cron: "41 11 * * *"   # ~07:41 ET
+    - cron: "11 13 * * *"   # ~09:11 ET
+    - cron: "37 14 * * *"   # ~10:37 ET (nominal)
+    - cron: "49 18 * * *"   # ~14:49 ET (afternoon backstop)
   workflow_dispatch:          # run on demand from the Actions tab
     inputs:
       days:

@@ -2,11 +2,14 @@ name: Strava sync
 
 on:
   schedule:
-    - cron: "17 14 * * *"   # daily 14:17 UTC (~10:17 AM ET). Off the top of the
-                            # hour on purpose — GitHub queues/drops :00 crons under
-                            # load, so an odd minute fires far more reliably.
-    - cron: "43 18 * * *"   # backup ~14:43 ET, in case GitHub drops the morning
-                            # slot. The sync dedups, so a double run is a no-op.
+    # GitHub's shared cron drops/delays runs by 1-2h, worst around 14:00 UTC
+    # (US market open). So we fire several times, FRONT-LOADED into the early
+    # morning UTC — even a 1-2h-delayed early run still lands in the morning ET.
+    # The sync dedups on import_ref, so every run after the first is a no-op.
+    - cron: "37 11 * * *"   # ~07:37 ET
+    - cron: "7 13 * * *"    # ~09:07 ET
+    - cron: "17 14 * * *"   # ~10:17 ET (nominal)
+    - cron: "43 18 * * *"   # ~14:43 ET (afternoon backstop)
   workflow_dispatch:          # run on demand from the Actions tab
     inputs:
       days:
