@@ -44,6 +44,9 @@
     .pill.high{color:#8a4a1f;background:var(--amber-soft);}
     .pill.low{color:#2f5468;background:var(--blue-tint);}
     .pill.flat{color:var(--muted);background:#ECEAE2;}
+    .ctx{font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:1px 6px;margin-right:6px;white-space:nowrap;}
+    .ctx.clinic{color:#8a4a1f;background:var(--amber-soft);}
+    .ctx.home{color:var(--green-deep);background:var(--green-tint);}
     .v-big{display:flex;align-items:baseline;gap:7px;margin:8px 0 2px;}
     .v-val{font-family:var(--f-mono);font-size:26px;font-weight:600;line-height:1;}
     .v-unit{font-size:12px;color:var(--muted);}
@@ -73,6 +76,9 @@
     .link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:10px 0;}
     .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+    .seg2{display:flex;gap:6px;margin-bottom:2px;}
+    .seg2-btn{flex:1;font-family:var(--f-body);font-size:13px;font-weight:600;padding:9px 4px;border-radius:9px;border:1px solid var(--border);background:var(--surface-warm);color:var(--muted);cursor:pointer;}
+    .seg2-btn.on{background:var(--green);color:#fff;border-color:var(--green);}
     label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:block;margin:8px 0 4px;}
     .full{width:100%;}
     .err{color:var(--danger);font-size:13px;margin:8px 0 0;}
@@ -89,19 +95,21 @@
   var S = { loaded:false, userId:null, rows:[], openKind:null, form:null, err:'' };
 
   var META = {
-    blood_pressure:{label:'Blood Pressure', icon:'🩺', unit:'mmHg', compound:true, guides:[120,80]},
-    weight:        {label:'Weight',         icon:'⚖️', unit:'lb'},
+    blood_pressure:{label:'Blood Pressure', icon:'🩺', unit:'mmHg', compound:true, guides:[120,80], context:true},
+    weight:        {label:'Weight',         icon:'⚖️', unit:'lb', context:true},
     pulse:         {label:'Resting Pulse',  icon:'💓', unit:'bpm', band:[60,100]},
     temperature:   {label:'Temperature',    icon:'🌡️', unit:'°F', band:[97,99]},
     height:        {label:'Height',         icon:'📏', unit:'in'},
-    // Oura-sourced (read-only, synced nightly). No clinic band — a fit resting
-    // HR runs low by design, so we don't flag it against the 60–100 pulse range.
-    resting_hr:    {label:'Resting HR',       icon:'❤️', unit:'bpm', oura:true},
+    // Oura-sourced (read-only, synced nightly). Resting HR is folded into the
+    // Pulse card above (see load()); HRV and temp change are their own cards.
     hrv:           {label:'HRV',              icon:'💗', unit:'ms',  oura:true},
     temp_change:   {label:'Body Temp Change', icon:'🌡️', unit:'°C', oura:true, guides:[0]},
   };
   var ORDER = ['blood_pressure','weight','pulse','temperature','height'];
-  var OURA_KINDS = ['resting_hr','hrv','temp_change'];
+  var OURA_KINDS = ['hrv','temp_change'];
+  // Where a BP / weight reading was taken.
+  var CTX = { clinic:'Clinic', home:'Home' };
+  function ctxBadge(r){ return r && r.context && CTX[r.context] ? '<span class="ctx '+r.context+'">'+CTX[r.context]+'</span>' : ''; }
 
   function el(id){ return document.getElementById(id); }
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -116,7 +124,7 @@
   function statusOf(kind, v, v2){
     if(v==null) return 'flat';
     if(kind==='blood_pressure'){ if(v>=130||v2>=80) return 'high'; if(v<90||v2<60) return 'low'; if(v>=120) return 'high'; return 'in'; }
-    if(kind==='pulse'){ return v>100?'high':(v<60?'low':'in'); }
+    if(kind==='pulse'){ return v>100?'high':(v<45?'low':'in'); }   // low bar set well under athletic resting HR
     if(kind==='temperature'){ return v>=100.4?'high':(v<97?'low':'in'); }
     return 'flat';   // weight, height — no universal range
   }
@@ -151,7 +159,13 @@
         var d=pts.map(function(p,i){ return (p[s.k]==null?'':((i&&pts[i-1][s.k]!=null?'L':'M')+x(i).toFixed(1)+' '+y(Number(p[s.k])).toFixed(1))); }).filter(Boolean).join(' ');
         svg+='<path d="'+d+'" fill="none" stroke="'+s.c+'" stroke-width="'+(mini?1.6:2)+'" stroke-linejoin="round" stroke-linecap="round"/>';
       }
-      pts.forEach(function(p,i){ if(p[s.k]!=null) svg+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(Number(p[s.k])).toFixed(1)+'" r="'+(mini?2:4)+'" fill="'+s.c+'" '+(mini?'':'stroke="#fff" stroke-width="1.5"')+'/>'; });
+      pts.forEach(function(p,i){ if(p[s.k]==null) return;
+        var cx=x(i).toFixed(1), cy=y(Number(p[s.k])).toFixed(1);
+        if(mini){ svg+='<circle cx="'+cx+'" cy="'+cy+'" r="2" fill="'+s.c+'"/>'; return; }
+        // clinic readings drawn hollow, home/unknown filled — see the legend
+        var clinic=meta.context && p.context==='clinic';
+        svg+='<circle cx="'+cx+'" cy="'+cy+'" r="4" fill="'+(clinic?'#fff':s.c)+'" stroke="'+(clinic?s.c:'#fff')+'" stroke-width="'+(clinic?2:1.5)+'"/>';
+      });
     });
     if(!mini){
       [0, Math.floor((pts.length-1)/2), pts.length-1].filter(function(v,i,a){return a.indexOf(v)===i;}).forEach(function(i){
@@ -184,7 +198,8 @@
       '<div class="v-top"><span class="v-icon">'+meta.icon+'</span><span class="v-label">'+esc(meta.label)+'</span>'+
       (statusLabel(st)?'<span class="pill '+st+'">'+statusLabel(st)+'</span>':'')+'<span class="v-chev">'+(open?'▲':'▼')+'</span></div>'+
       '<div class="v-big"><span class="v-val">'+esc(valText(latest))+'</span><span class="v-unit">'+esc(meta.unit)+'</span>'+
-      '<span class="v-date">'+esc(shortDate(latest.measured_on))+'</span></div>'+extra+
+      '<span style="margin-left:auto;display:flex;align-items:center;gap:0">'+(meta.context?ctxBadge(latest):'')+
+      '<span class="v-date">'+esc(shortDate(latest.measured_on))+'</span></span></div>'+extra+
       (open?'':chartSVG(kind, asc, true))+'</button>';
     var panel=open?('<div class="vpanel">'+vitalPanel(kind)+'</div>'):'';
     return '<div class="vwrap'+(open?' open':'')+'">'+head+panel+'</div>';
@@ -201,6 +216,7 @@
     if(meta.compound) h+='<div class="legend"><span><span class="k" style="background:#BE722A"></span>Systolic</span><span><span class="k" style="background:#3E6B8A"></span>Diastolic</span></div>';
     else if(meta.oura && meta.guides) h+='<div class="legend"><span><span class="k" style="background:#D8CFBE"></span>Baseline (0)</span></div>';
     else if(meta.band) h+='<div class="legend"><span><span class="k" style="background:#EBF0E8"></span>Normal '+meta.band[0]+'–'+meta.band[1]+' '+esc(meta.unit)+'</span></div>';
+    if(meta.context) h+='<div class="legend"><span><span class="k" style="background:var(--ink);border-radius:50%"></span>Home</span><span><span class="k" style="background:#fff;border:1.5px solid var(--ink);border-radius:50%"></span>Clinic</span></div>';
 
     // Oura-sourced metrics are read-only — no edit/add, just a recent list.
     if(meta.oura){
@@ -217,8 +233,13 @@
     if(!rows.length){ h+='<p class="empty">No readings yet.</p>'; }
     else h+=rows.map(function(r){
       var s=statusOf(kind,Number(r.value),r.value2!=null?Number(r.value2):null);
+      // Oura-synced points (e.g. nightly resting HR in the Pulse card) are read-only.
+      if(r._oura){
+        return '<div class="hist-row" style="cursor:default"><span>'+esc(prettyDate(r.measured_on))+'</span>'+
+          '<span class="hv"><span class="ctx" style="color:var(--muted);background:#ECEAE2">Oura</span>'+esc(valText(r))+' '+esc(meta.unit)+'</span></div>';
+      }
       return '<div class="hist-row" onclick="openForm(\''+esc(r.id)+'\')"><span>'+esc(prettyDate(r.measured_on))+'</span>'+
-        '<span class="hv">'+(statusLabel(s)?'<span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>':'')+
+        '<span class="hv">'+(meta.context?ctxBadge(r):'')+(statusLabel(s)?'<span class="pill '+s+'" style="margin-right:8px">'+statusLabel(s)+'</span>':'')+
         esc(valText(r))+' '+esc(meta.unit)+'</span></div>';
     }).join('');
     h+='<button class="link" onclick="openForm(null,\''+kind+'\')">+ Add a '+esc(meta.label.toLowerCase())+' reading</button>';
@@ -248,23 +269,31 @@
       ? '<div class="grid2"><div><label class="lbl">Systolic</label><input id="fVal" class="field full" inputmode="decimal" value="'+esc(f.value)+'"></div>'+
         '<div><label class="lbl">Diastolic</label><input id="fVal2" class="field full" inputmode="decimal" value="'+esc(f.value2)+'"></div></div>'
       : '<label class="lbl">Value <span style="font-weight:400">('+esc(META[f.kind].unit)+')</span></label><input id="fVal" class="field full" inputmode="decimal" value="'+esc(f.value)+'">';
+    var ctxField = meta.context
+      ? '<label class="lbl">Where taken</label><div class="seg2">'+
+        Object.keys(CTX).map(function(k){return '<button type="button" class="seg2-btn'+(f.context===k?' on':'')+'" onclick="setCtx(\''+k+'\')">'+CTX[k]+'</button>';}).join('')+'</div>'
+      : '';
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button>'+
       '<div class="card"><div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit reading':'Add a reading')+'</div>'+
       kindSel+
       '<label class="lbl">Date</label><input id="fDate" type="date" class="field full" value="'+esc(f.date)+'">'+
       valFields+
+      ctxField+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveForm()">Save</button>'+
       (f.id?'<button class="btn btn-danger" onclick="deleteReading(\''+esc(f.id)+'\')">Delete</button>':'')+'</div></div>';
   }
+  function setCtx(k){ S.form.value=(el('fVal')||{}).value||''; S.form.value2=(el('fVal2')||{}).value||''; S.form.date=(el('fDate')||{}).value||S.form.date; S.form.context=k; render(); }
   function onKindChange(k){
     // preserve typed values across a type switch
     S.form.value=(el('fVal')||{}).value||''; S.form.value2=(el('fVal2')||{}).value||'';
-    S.form.date=(el('fDate')||{}).value||S.form.date; S.form.kind=k; render();
+    S.form.date=(el('fDate')||{}).value||S.form.date; S.form.kind=k;
+    if(META[k].context && !S.form.context) S.form.context='home';
+    render();
   }
   function openForm(id, kind){
     if(id){ var r=S.rows.filter(function(x){return x.id===id;})[0]; if(!r) return;
-      S.form={id:id, kind:r.kind, date:r.measured_on, value:fmt(r.value), value2:r.value2!=null?fmt(r.value2):''}; }
-    else S.form={id:null, kind:kind||'weight', date:todayISO(), value:'', value2:''};
+      S.form={id:id, kind:r.kind, date:r.measured_on, value:fmt(r.value), value2:r.value2!=null?fmt(r.value2):'', context:r.context||(META[r.kind].context?'home':null)}; }
+    else{ var k=kind||'weight'; S.form={id:null, kind:k, date:todayISO(), value:'', value2:'', context:META[k].context?'home':null}; }
     S.err=''; render();
   }
   function closeForm(){ S.form=null; render(); }
@@ -275,7 +304,7 @@
     var v=numOrNull((el('fVal')||{}).value), v2=meta.compound?numOrNull((el('fVal2')||{}).value):null;
     if(!date){ S.err='Pick a date.'; render(); return; }
     if(v==null){ S.err='Enter a value.'; render(); return; }
-    var row={ kind:f.kind, measured_on:date, value:v, value2:v2, unit:meta.unit };
+    var row={ kind:f.kind, measured_on:date, value:v, value2:v2, unit:meta.unit, context:meta.context?(f.context||'home'):null };
     try{
       if(f.id){ var u=await sb.from('vitals').update(row).eq('id',f.id); if(u.error) throw u.error; }
       else{ row.user_id=S.userId; row.source='Manual'; row.import_ref='manual:'+date+':'+f.kind+':'+Math.random().toString(36).slice(2,7);
@@ -298,7 +327,7 @@
     // truth stays oura_daily; nothing is written back to the vitals table).
     var o=await sb.from('oura_daily').select('day,resting_hr,avg_hrv,temperature_deviation').order('day',{ascending:false});
     (o.data||[]).forEach(function(d){
-      if(d.resting_hr!=null)            S.rows.push({id:'oura:'+d.day+':hr',  kind:'resting_hr',  measured_on:d.day, value:d.resting_hr,            unit:'bpm', _oura:true});
+      if(d.resting_hr!=null)            S.rows.push({id:'oura:'+d.day+':hr',  kind:'pulse',        measured_on:d.day, value:d.resting_hr,            unit:'bpm', _oura:true});
       if(d.avg_hrv!=null)               S.rows.push({id:'oura:'+d.day+':hrv', kind:'hrv',          measured_on:d.day, value:d.avg_hrv,               unit:'ms',  _oura:true});
       if(d.temperature_deviation!=null) S.rows.push({id:'oura:'+d.day+':tmp', kind:'temp_change',  measured_on:d.day, value:d.temperature_deviation, unit:'°C', _oura:true});
     });

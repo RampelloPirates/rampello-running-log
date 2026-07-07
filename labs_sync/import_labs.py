@@ -453,6 +453,8 @@ def parse_portal_vitals(reader):
     for (date, kind), v in found.items():
         rows.append({"measured_on": date, "kind": kind, "value": v["value"],
                      "value2": v["value2"], "unit": v["unit"], "source": "BayCare (portal)",
+                     # portal readings are taken at the office; the app tags BP/weight clinic vs home
+                     "context": "clinic" if kind in ("blood_pressure", "weight") else None,
                      "import_ref": f"portalv:{date}:{kind}"})
     return rows
 

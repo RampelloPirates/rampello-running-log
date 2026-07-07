@@ -81,15 +81,12 @@
   <script>
   var S = { loaded:false, userId:null, rows:[], openKey:null, err:'' };
 
-  // trend metrics — order shown down the page
+  // trend metrics — physiology first (scores intentionally dropped)
   var METRICS = [
-    {key:'readiness_score', label:'Readiness',      icon:'🔋', unit:'',    score:true,  color:'#3A5A40'},
-    {key:'sleep_score',     label:'Sleep Score',    icon:'😴', unit:'',    score:true,  color:'#3E6B8A'},
     {key:'avg_hrv',         label:'HRV',            icon:'💗', unit:'ms',  better:'high',color:'#B0568A'},
     {key:'resting_hr',      label:'Resting HR',     icon:'❤️', unit:'bpm', better:'low', color:'#A8443A'},
     {key:'total_sleep_seconds', label:'Sleep Duration', icon:'🌙', unit:'h', hours:true, better:'high', color:'#3A5A40', guide:8},
     {key:'temperature_deviation', label:'Body Temp', icon:'🌡️', unit:'°C', signed:true, color:'#BE722A', guide:0},
-    {key:'activity_score',  label:'Activity',       icon:'🏃', unit:'',    score:true,  color:'#7A8B3F'},
     {key:'steps',           label:'Steps',          icon:'👟', unit:'',    better:'high',color:'#3A5A40'},
   ];
 
@@ -181,16 +178,14 @@
     return svg;
   }
 
-  // ── hero (latest day) ──
+  // ── hero (latest day) — physiology snapshot, no score rings ──
   function hero(){
     var latest=S.rows[0]; if(!latest) return '';
     var rHrv=latestRowFor(metaOf('avg_hrv')), rRhr=latestRowFor(metaOf('resting_hr')),
         rSlp=latestRowFor(metaOf('total_sleep_seconds')), rTmp=latestRowFor(metaOf('temperature_deviation'));
-    function ring(key, lbl){ var v=latest[key]; return '<div class="ring-item">'+scoreRing(v==null?null:Math.round(v))+'<div class="ring-lbl">'+lbl+'</div></div>'; }
     function stat(val, lbl){ return '<div class="stat"><div class="sv">'+val+'</div><div class="sl">'+lbl+'</div></div>'; }
     return '<div class="hero"><div class="hero-top"><span class="hero-day">'+esc(relDay(latest.day))+'</span>'+
       '<span class="hero-when">'+esc(shortDate(latest.day))+'</span></div>'+
-      '<div class="rings">'+ring('readiness_score','Readiness')+ring('sleep_score','Sleep')+ring('activity_score','Activity')+'</div>'+
       '<div class="statgrid">'+
         stat(rHrv?dispVal(metaOf('avg_hrv'),rHrv):'—', 'HRV ms')+
         stat(rRhr?dispVal(metaOf('resting_hr'),rRhr):'—', 'Rest HR')+
