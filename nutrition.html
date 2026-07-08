@@ -485,7 +485,10 @@
     refreshDraftTotal();
   }
   function draftCal(id,v){ var it=findDraft(id); if(!it) return; var cal=Math.max(0,parseInt(v)||0); it.calories=cal; it.calPerUnit=it.qty>0?cal/it.qty:cal; refreshDraftTotal(); }
-  function refreshDraftTotal(){ var n=el('draftTotal'); if(n) n.textContent=S.draft.items.reduce(function(s,i){return s+i.calories;},0).toLocaleString(); }
+  function refreshDraftTotal(){
+    var n=el('draftTotal'); if(n) n.textContent=S.draft.items.reduce(function(s,i){return s+i.calories;},0).toLocaleString();
+    var m=el('draftMacro'); if(m) m.textContent=macroCompact(sumMacros(S.draft.items));
+  }
   function draftRemove(id){ S.draft.items=S.draft.items.filter(function(x){return x.id!==id;}); render(); }
   function draftAddItem(){ S.draft.items.push({id:uid(),name:'',qty:1,unit:'serving',calories:0,protein:0,fat:0,carbs:0,fiber:0,calPerUnit:0,pPerUnit:0,fPerUnit:0,cPerUnit:0,fibPerUnit:0}); render(); }
 
@@ -519,7 +522,11 @@
   function ingAdd(){ S.recipeDraft.ingredients.push({id:uid(),name:'',qty:'',unit:'',grams:0,calories:0,protein:0,fat:0,carbs:0,fiber:0,calPerG:0,pPerG:0,fPerG:0,cPerG:0,fibPerG:0}); render(); }
   function setFinalWeight(v){ S.recipeDraft.weightOverridden=true; S.recipeDraft.finalWeight=Math.max(0,parseFloat(v)||0); refreshRecipeSummary(); }
 
-  function labelEaten(v){ S.label.servingsEaten=parseFloat(v)||0; var n=el('labelAdds'); if(n) n.textContent=Math.round((S.label.caloriesPerServing||0)*(S.label.servingsEaten||0)).toLocaleString(); }
+  function labelMacroText(L){ var e=L.servingsEaten||0; var g=function(v){return round1((v||0)*e);};
+    return 'P'+g(L.proteinPerServing)+' · F'+g(L.fatPerServing)+' · C'+g(L.carbsPerServing)+' · Fb'+g(L.fiberPerServing); }
+  function labelEaten(v){ S.label.servingsEaten=parseFloat(v)||0;
+    var n=el('labelAdds'); if(n) n.textContent=Math.round((S.label.caloriesPerServing||0)*(S.label.servingsEaten||0)).toLocaleString();
+    var m=el('labelMacros'); if(m) m.textContent=labelMacroText(S.label); }
   function labelName(v){ S.label.productName=v; }
 
   // ── Barcode: photo → OCR the number (edge fn) → Open Food Facts ────────────
@@ -661,7 +668,8 @@
         '<div style="padding-top:4px"><span id="mac-'+it.id+'" class="macro-compact">'+macroCompact(it)+'</span></div></div>';
     }).join('');
     h += '<button class="link" style="padding:8px 0" onclick="draftAddItem()">+ add item</button>';
-    h += '<div class="row-between" style="padding:10px 0;border-top:1px solid var(--border);margin-top:4px;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Meal total</span><span id="draftTotal" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+d.items.reduce(function(s,i){return s+i.calories;},0).toLocaleString()+'</span></div>';
+    h += '<div class="row-between" style="padding:10px 0 2px;border-top:1px solid var(--border);margin-top:4px;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Meal total</span><span id="draftTotal" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+d.items.reduce(function(s,i){return s+i.calories;},0).toLocaleString()+'</span></div>';
+    h += '<div id="draftMacro" style="text-align:right;font-size:12px;color:var(--muted);font-family:var(--f-mono);padding-bottom:8px">'+macroCompact(sumMacros(d.items))+'</div>';
     if(d.note) h += '<p class="note">'+esc(d.note)+'</p>';
     h += '<div class="btn-row"><button class="btn btn-primary" onclick="commitDraft()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="saveUsual()">Save usual</button></div>';
     h += '<button class="link" style="width:100%;color:var(--muted);padding:10px 0 0" onclick="S.draft=null;render()">discard</button>';
@@ -683,7 +691,8 @@
       h += '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin-top:3px">per serving — P'+(L.proteinPerServing!=null?L.proteinPerServing:'?')+' · F'+(L.fatPerServing!=null?L.fatPerServing:'?')+' · C'+(L.carbsPerServing!=null?L.carbsPerServing:'?')+' · Fb'+(L.fiberPerServing!=null?L.fiberPerServing:'?')+'</div>';
     h += '</div>';
     h += '<label style="font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:10px">Servings eaten<input value="'+(L.servingsEaten)+'" inputmode="decimal" oninput="labelEaten(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center"></label>';
-    h += '<div class="row-between" style="padding:14px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:12px 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="labelAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+Math.round((L.caloriesPerServing||0)*(L.servingsEaten||0)).toLocaleString()+'</span></div>';
+    h += '<div class="row-between" style="padding:14px 0 2px;border-top:1px solid var(--border);margin:12px 0 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="labelAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+Math.round((L.caloriesPerServing||0)*(L.servingsEaten||0)).toLocaleString()+'</span></div>';
+    h += '<div id="labelMacros" style="text-align:right;font-size:12px;color:var(--muted);font-family:var(--f-mono);padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px">'+labelMacroText(L)+'</div>';
     h += '<div class="btn-row"><button class="btn btn-amber" onclick="commitLabel()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="S.label=null;render()">Cancel</button></div>';
     return h;
   }

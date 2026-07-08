@@ -37,6 +37,7 @@ const PARSE_PROMPT =
   `You are a nutrition estimator. Break the food description into individual line items.
 For each item give: name, qty (number), unit (short string like "cup","oz","g","piece","slice","serving"), and totals for that quantity: calories (integer), protein (g), fat (g), carbs (g), fiber (g).
 If a quantity isn't stated, assume one typical serving.
+ALWAYS fill calories AND protein, fat, carbs and fiber with your best numeric estimate for the stated quantity. Never leave a macro at 0 unless the food genuinely contains none of it, and never put nutrition numbers only in the note — every number goes in its field.
 Return ONLY valid JSON, no markdown, no commentary, exactly:
 {"items":[{"name":"...","qty":1,"unit":"...","calories":0,"protein":0,"fat":0,"carbs":0,"fiber":0}],"note":"one short sentence on any big assumption, or empty string"}`;
 
