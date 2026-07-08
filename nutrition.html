@@ -539,7 +539,11 @@
     }catch(e){ S.err = e.message || "Couldn't read that barcode."; }
     finally{ S.busy=false; render(); }
   }
-  function barcodeGrams(v){ S.barcode.grams=Math.max(0,parseFloat(v)||0); var n=el('barcodeAdds'); if(n) n.textContent=Math.round((num(S.barcode.cal_100g)*S.barcode.grams)/100).toLocaleString(); }
+  function barcodeMacroText(B){ var g=B.grams||0; var v=function(x){return round1((num(x)||0)*g/100);};
+    return 'P'+v(B.protein_100g)+' · F'+v(B.fat_100g)+' · C'+v(B.carbs_100g)+' · Fb'+v(B.fiber_100g); }
+  function barcodeGrams(v){ S.barcode.grams=Math.max(0,parseFloat(v)||0);
+    var n=el('barcodeAdds'); if(n) n.textContent=Math.round((num(S.barcode.cal_100g)*S.barcode.grams)/100).toLocaleString();
+    var m=el('barcodeMacros'); if(m) m.textContent=barcodeMacroText(S.barcode); }
   async function commitBarcode(){
     var B=S.barcode; var g=B.grams||0; if(g<=0) return;
     var cal=Math.round((num(B.cal_100g)*g)/100);
@@ -713,7 +717,8 @@
       h += '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin-top:3px">per 100g — P'+(B.protein_100g!=null?B.protein_100g:'?')+' · F'+(B.fat_100g!=null?B.fat_100g:'?')+' · C'+(B.carbs_100g!=null?B.carbs_100g:'?')+' · Fb'+(B.fiber_100g!=null?B.fiber_100g:'?')+'</div>';
     h += '</div>';
     h += '<label style="font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:10px">Amount eaten<span style="display:flex;align-items:center;gap:4px"><input value="'+g+'" inputmode="decimal" oninput="barcodeGrams(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center"><span style="font-size:12px;color:var(--muted)">g</span></span></label>';
-    h += '<div class="row-between" style="padding:14px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);margin:12px 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="barcodeAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+cal.toLocaleString()+'</span></div>';
+    h += '<div class="row-between" style="padding:14px 0 2px;border-top:1px solid var(--border);margin:12px 0 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="barcodeAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+cal.toLocaleString()+'</span></div>';
+    h += '<div id="barcodeMacros" style="text-align:right;font-size:12px;color:var(--muted);font-family:var(--f-mono);padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px">'+barcodeMacroText(B)+'</div>';
     h += '<div class="btn-row"><button class="btn btn-amber" onclick="commitBarcode()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="S.barcode=null;render()">Cancel</button></div>';
     return h;
   }
