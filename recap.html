@@ -84,7 +84,13 @@
     .disclaimer{font-size:10.5px;color:var(--muted);line-height:1.5;margin-top:24px;border-top:1px solid var(--border);padding-top:12px;}
     .loading{padding:64px;text-align:center;color:var(--muted);}
 
-    @media (max-width:560px){ .grid2,.lab-grid{grid-template-columns:1fr;} }
+    .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    @media (max-width:560px){
+      .grid2,.lab-grid{grid-template-columns:1fr;}
+      .doc{padding:16px 15px;}
+      table.tbl{font-size:11.5px;}
+      table.tbl th,table.tbl td{padding:5px 6px;}
+    }
 
     @media print{
       @page{size:letter;margin:0.55in;}
@@ -292,7 +298,7 @@
         '<div class="stat"><span class="n">'+runs.length+'</span><span class="u">sessions</span></div>'+
       '</div>';
     h+='<div class="kicker">Hours per week (Mon–Sun)</div>'+weeklyBars(bars, C.green);
-    if(typeRows) h+='<div class="kicker">By activity type</div><table class="tbl"><tbody>'+typeRows+'</tbody></table>';
+    if(typeRows) h+='<div class="kicker">By activity type</div><div class="tbl-wrap"><table class="tbl"><tbody>'+typeRows+'</tbody></table></div>';
     return h+'</div>';
   }
 
@@ -375,7 +381,7 @@
       return '<tr><td><b>'+esc(su.name)+'</b></td><td>'+esc(su.dose||'')+'</td><td>'+esc(su.timing||'')+'</td>'+
         '<td class="num">'+pct+'%</td><td class="num" style="color:var(--muted)">'+taken+'/'+denom+'d</td></tr>';
     }).join('');
-    h+='<table class="tbl"><thead><tr><th>Supplement</th><th>Dose</th><th>Timing</th><th class="num">Adherence</th><th class="num">Days</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    h+='<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Supplement</th><th>Dose</th><th>Timing</th><th class="num">Adherence</th><th class="num">Days</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     h+='<div class="sub" style="font-size:10.5px;color:var(--muted);margin-top:6px">Adherence = days logged as taken over the review window (or since added, if more recent).</div>';
     return h+'</div>';
   }
@@ -384,15 +390,16 @@
     var h='<div class="rsection page-break"><h2>Lab Work</h2>';
     if(!S.labLatest.length){ return h+'<p class="empty">No lab results on file.</p></div>'; }
 
-    // Needs attention: out-of-range, review, or borderline (latest per marker)
-    var flagged=S.labLatest.filter(function(r){ var s=labStatus(r); return s==='high'||s==='low'||s==='review'||isBorderline(r); })
-      .sort(function(a,b){ var rank=function(r){ var s=labStatus(r); return (s==='high'||s==='low')?0:(s==='review'?1:2); }; return rank(a)-rank(b); });
+    // Needs attention: out-of-range or borderline (latest per marker). Markers
+    // with no parseable reference ("Review") are excluded — they aren't actionable.
+    var flagged=S.labLatest.filter(function(r){ var s=labStatus(r); return s==='high'||s==='low'||isBorderline(r); })
+      .sort(function(a,b){ var rank=function(r){ return labStatus(r)==='in'?1:0; }; return rank(a)-rank(b); });   // out-of-range first, then borderline
     if(flagged.length){
       var frows=flagged.map(function(r){
         return '<tr><td><b>'+esc(r.name)+'</b></td><td class="num">'+esc(labVal(r))+(r.unit?' '+esc(r.unit):'')+'</td>'+
           '<td class="num">'+esc(refText(r))+'</td><td>'+statusPill(r)+'</td><td class="num" style="color:var(--muted)">'+esc(monthYear(r.date))+'</td></tr>'; }).join('');
       h+='<div class="callout"><div class="kicker" style="margin:10px 0 6px;color:var(--amber)">Needs attention — out of range or borderline</div>'+
-        '<table class="tbl"><thead><tr><th>Marker</th><th class="num">Latest</th><th class="num">Reference</th><th>Status</th><th class="num">Date</th></tr></thead><tbody>'+frows+'</tbody></table></div>';
+        '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Marker</th><th class="num">Latest</th><th class="num">Reference</th><th>Status</th><th class="num">Date</th></tr></thead><tbody>'+frows+'</tbody></table></div></div>';
     } else {
       h+='<p class="empty">All markers within range on the most recent results. 👍</p>';
     }
