@@ -128,6 +128,19 @@
     if(key===localDateKey(new Date(Date.now()-86400000))) return 'Yesterday';
     return dt.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
   }
+  // Monday-anchored week key for a date key (Mon-Sun weeks).
+  function weekStartKey(key){
+    var p = key.split('-').map(Number); var dt = new Date(p[0],p[1]-1,p[2]);
+    dt.setDate(dt.getDate() - ((dt.getDay()+6)%7));  // getDay: 0=Sun; shift to 0=Mon
+    return localDateKey(dt);
+  }
+  function weekLabel(mondayKey){
+    var p = mondayKey.split('-').map(Number); var mon = new Date(p[0],p[1]-1,p[2]);
+    var sun = new Date(mon); sun.setDate(sun.getDate()+6);
+    var opt = {month:'short',day:'numeric'};
+    if(mondayKey===weekStartKey(localDateKey())) return 'This week';
+    return mon.toLocaleDateString(undefined,opt)+' – '+sun.toLocaleDateString(undefined,opt);
+  }
   function timeOf(ts){ return new Date(ts).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
 
   // ── HTML fragments ────────────────────────────────────────────────────────
@@ -853,8 +866,39 @@
     return h;
   }
 
+  // Roll history days up into Mon-Sun weeks, summing net (intake − Oura burn).
+  // Only days that have an Oura burn synced contribute — a deficit can't be
+  // computed without it.
+  function weeklyBalances(){
+    var wk = {};
+    S.history.forEach(function(d){
+      var burn = S.burnByDay ? S.burnByDay[d.key] : null;
+      if(burn==null) return;
+      var k = weekStartKey(d.key);
+      var w = wk[k] = wk[k] || {key:k, net:0, days:0};
+      w.net += d.total - burn;   // >0 surplus, <0 deficit
+      w.days++;
+    });
+    return Object.keys(wk).map(function(k){return wk[k];}).sort(function(a,b){return a.key<b.key?1:-1;});
+  }
+  function viewWeeklyDeficit(){
+    var weeks = weeklyBalances();
+    if(!weeks.length) return '';
+    var rows = weeks.map(function(w){
+      var def = w.net < 0;
+      var col = def ? 'var(--green)' : 'var(--amber)';
+      return '<div class="row-between" style="padding:11px 0;border-bottom:1px dashed var(--border);align-items:baseline">'+
+        '<div><div style="font-size:14px;font-weight:500">'+weekLabel(w.key)+'</div>'+
+        '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+w.days+' of 7 days tracked</div></div>'+
+        '<div style="text-align:right"><span style="font-family:var(--f-mono);font-size:18px;font-weight:600;color:'+col+'">'+(def?'−':'+')+Math.abs(w.net).toLocaleString()+'</span>'+
+        '<div style="font-size:11px;font-weight:600;color:'+col+'">'+(def?'deficit':'surplus')+'</div></div></div>';
+    }).join('');
+    return '<section class="card"><h2 class="h2">Weekly balance</h2>'+rows+
+      '<p style="font-size:11px;color:var(--muted);margin:9px 0 0;line-height:1.45">Sum of each day\'s intake minus Oura burn, Mon–Sun. Only days with a synced burn count.</p></section>';
+  }
   function viewHistory(){
-    var h = '<section class="card"><h2 class="h2">History</h2>';
+    var h = viewWeeklyDeficit();
+    h += '<section class="card"><h2 class="h2">History</h2>';
     if(!S.history.length){ h += '<p class="empty" style="text-align:left;padding:0">No days logged yet.</p>'; }
     else h += S.history.map(function(d){
       var m=d.macros; var macro=(m.p||m.f||m.c||m.fib)?(' · P'+Math.round(m.p)+' F'+Math.round(m.f)+' C'+Math.round(m.c)+' Fb'+Math.round(m.fib||0)):'';
