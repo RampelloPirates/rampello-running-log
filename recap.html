@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Health Recap — Tally</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--paper:#F4F1E9;--surface:#FFFFFF;--surface-warm:#FBF9F3;--ink:#1E241C;--muted:#71776B;--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--amber-soft:#F1E6D2;--border:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;--blue:#3E6B8A;--blue-tint:#E4EDF2;
+      --f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;}
+    .wrap{max-width:760px;margin:0 auto;padding:0 16px 56px;}
+
+    /* on-screen toolbar (hidden when printing) */
+    .toolbar{display:flex;align-items:center;gap:10px;padding:18px 0 8px;}
+    .home-back{font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;}
+    .home-back:hover{color:var(--green);}
+    .toolbar .spacer{margin-left:auto;}
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:9px 16px;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+
+    /* printed document */
+    .doc{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:26px 28px;}
+    .doc-head{border-bottom:2px solid var(--green-deep);padding-bottom:14px;margin-bottom:18px;}
+    .doc-title{font-family:var(--f-display);font-size:24px;font-weight:700;color:var(--green-deep);margin:0;}
+    .doc-title span{color:var(--amber);}
+    .doc-meta{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:8px;font-size:13px;color:var(--muted);}
+    .doc-meta b{color:var(--ink);font-weight:600;}
+
+    .rsection{margin:22px 0 0;break-inside:avoid;}
+    .rsection h2{font-family:var(--f-display);font-size:15px;font-weight:600;color:var(--green-deep);margin:0 0 10px;padding-bottom:5px;border-bottom:1px solid var(--border);letter-spacing:.2px;}
+    .kicker{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px;}
+
+    .stat-row{display:flex;flex-wrap:wrap;gap:22px;align-items:baseline;margin-bottom:6px;}
+    .stat .n{font-family:var(--f-mono);font-size:30px;font-weight:600;line-height:1;color:var(--green-deep);}
+    .stat .u{font-size:12px;color:var(--muted);margin-left:3px;}
+    .stat .l{font-size:11px;color:var(--muted);margin-top:3px;}
+
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .metric{border:1px solid var(--border);border-radius:12px;padding:12px 13px;background:var(--surface-warm);break-inside:avoid;}
+    .metric .top{display:flex;align-items:baseline;gap:7px;}
+    .metric .icon{font-size:15px;}
+    .metric .name{font-family:var(--f-display);font-size:13px;font-weight:600;color:var(--green-deep);}
+    .metric .avg{margin-left:auto;font-family:var(--f-mono);font-size:19px;font-weight:600;}
+    .metric .avgu{font-size:11px;color:var(--muted);font-weight:400;margin-left:2px;}
+    .metric .sub{font-size:11px;color:var(--muted);margin-top:2px;}
+    .chart{width:100%;height:auto;display:block;margin-top:8px;}
+    .chart-empty{font-size:11.5px;color:var(--muted);padding:14px 0;text-align:center;}
+    .legend{display:flex;gap:14px;font-size:10.5px;color:var(--muted);font-family:var(--f-mono);margin-top:5px;}
+    .legend .k{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+
+    table.tbl{width:100%;border-collapse:collapse;font-size:12.5px;}
+    table.tbl th{text-align:left;font-weight:600;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;padding:5px 8px;border-bottom:1px solid var(--border);}
+    table.tbl td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle;}
+    table.tbl td.num,table.tbl th.num{font-family:var(--f-mono);text-align:right;white-space:nowrap;}
+    table.tbl tr:last-child td{border-bottom:none;}
+
+    .pill{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:2px 8px;white-space:nowrap;}
+    .pill.in{color:var(--green-deep);background:var(--green-tint);}
+    .pill.high{color:#8a4a1f;background:var(--amber-soft);}
+    .pill.low{color:#2f5468;background:var(--blue-tint);}
+    .pill.border{color:#8a4a1f;background:#F6ECD8;}
+    .pill.review{color:var(--muted);background:#ECEAE2;}
+
+    .lab-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .lab-card{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--surface-warm);break-inside:avoid;}
+    .lab-card .ln{font-size:11.5px;font-weight:600;color:var(--ink);line-height:1.25;}
+    .lab-card .lv{font-family:var(--f-mono);font-size:16px;font-weight:600;margin-top:2px;}
+    .lab-card .lv .u{font-size:10px;color:var(--muted);font-weight:400;margin-left:2px;}
+    .lab-card .lr{font-size:10.5px;color:var(--muted);font-family:var(--f-mono);margin-top:1px;}
+    .spark{width:100%;height:30px;display:block;margin-top:5px;}
+
+    .callout{border:1px solid var(--amber);background:#FBF3E6;border-radius:10px;padding:2px 12px;}
+    .empty{color:var(--muted);font-size:12.5px;line-height:1.55;padding:6px 0;}
+    .disclaimer{font-size:10.5px;color:var(--muted);line-height:1.5;margin-top:24px;border-top:1px solid var(--border);padding-top:12px;}
+    .loading{padding:64px;text-align:center;color:var(--muted);}
+
+    @media (max-width:560px){ .grid2,.lab-grid{grid-template-columns:1fr;} }
+
+    @media print{
+      @page{size:letter;margin:0.55in;}
+      body{background:#fff;}
+      .wrap{max-width:none;padding:0;}
+      .toolbar{display:none!important;}
+      .doc{border:none;border-radius:0;padding:0;}
+      .rsection{break-inside:avoid;}
+      .page-break{break-before:page;}
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar">
+      <a href="home.html" class="home-back">‹ Home</a>
+      <span class="spacer"></span>
+      <button class="btn btn-primary" onclick="window.print()">Print / Save PDF</button>
+    </div>
+    <div id="app"><div class="loading">Building your recap…</div></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  var WINDOW_DAYS = 90;
+  var C = { green:'#3A5A40', greenDeep:'#2C4530', amber:'#BE722A', blue:'#3E6B8A', muted:'#71776B', band:'#EBF0E8', ink:'#1E241C', border:'#E2DCCF' };
+
+  var S = { name:'', startISO:'', endISO:'', runs:[], vitals:[], oura:[], supps:[], suppLog:[], labLatest:[], labAll:[] };
+
+  // ── date / number helpers ─────────────────────────────────────────────────
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function localISO(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function parseISO(s){ var p=(s||'').split('-').map(Number); return new Date(p[0],(p[1]||1)-1,p[2]||1); }
+  function isoNDaysAgo(n){ var d=new Date(); d.setDate(d.getDate()-n); return localISO(d); }
+  function shortDate(iso){ if(!iso) return ''; return parseISO(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
+  function longDate(iso){ if(!iso) return ''; return parseISO(iso).toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'}); }
+  function monthYear(iso){ if(!iso) return ''; return parseISO(iso).toLocaleDateString(undefined,{month:'short',year:'numeric'}); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function num(v){ return v==null?null:(isNaN(Number(v))?null:Number(v)); }
+  function avg(a){ var x=a.filter(function(v){return v!=null&&!isNaN(v);}); return x.length?x.reduce(function(s,v){return s+v;},0)/x.length:null; }
+  function round(n,d){ if(n==null||isNaN(n)) return null; var f=Math.pow(10,d||0); return Math.round(n*f)/f; }
+  function fmt(n,d){ var r=round(n,d); return r==null?'—':r.toLocaleString(undefined,{minimumFractionDigits:d||0,maximumFractionDigits:d||0}); }
+  // Monday-anchored week key (Mon–Sun weeks).
+  function weekStart(iso){ var d=parseISO(iso); d.setDate(d.getDate()-((d.getDay()+6)%7)); return localISO(d); }
+  function hoursMin(sec){ if(sec==null) return '—'; var h=Math.floor(sec/3600), m=Math.round((sec%3600)/60); return h+'h '+pad(m)+'m'; }
+
+  // ── charts (inline SVG, print-safe hex colours) ────────────────────────────
+  // series: [{pts:[{date,v}], color}]  ·  opts: {band:[lo,hi], guides:[{v,label}], W, H}
+  function chart(series, opts){
+    opts=opts||{};
+    series.forEach(function(s){ s.pts=(s.pts||[]).filter(function(p){return p.v!=null&&!isNaN(p.v);}); });
+    var all=[]; series.forEach(function(s){ s.pts.forEach(function(p){ all.push(p.v); }); });
+    if(!all.length) return '<div class="chart-empty">No readings in this window</div>';
+    var W=opts.W||520,H=opts.H||120,padL=6,padR=6,padT=10,padB=18;
+    var lo=Math.min.apply(null,all), hi=Math.max.apply(null,all);
+    if(opts.band){ lo=Math.min(lo,opts.band[0]); hi=Math.max(hi,opts.band[1]); }
+    if(opts.guides) opts.guides.forEach(function(g){ lo=Math.min(lo,g.v); hi=Math.max(hi,g.v); });
+    var span=(hi-lo)||Math.abs(hi)*0.2||1; lo-=span*0.12; hi+=span*0.12;
+    var base=series.reduce(function(a,s){ return s.pts.length>a.pts.length?s:a; }, series[0]);
+    var y=function(v){ return padT+(H-padT-padB)*(1-(v-lo)/(hi-lo)); };
+    var x=function(i,len){ return len===1?W/2:padL+(W-padL-padR)*i/(len-1); };
+    var svg='<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+    if(opts.band){ var yb=y(opts.band[1]), yb2=y(opts.band[0]); svg+='<rect x="0" y="'+yb.toFixed(1)+'" width="'+W+'" height="'+Math.max(0,yb2-yb).toFixed(1)+'" fill="'+C.band+'"/>'; }
+    if(opts.guides) opts.guides.forEach(function(g){ svg+='<line x1="0" y1="'+y(g.v).toFixed(1)+'" x2="'+W+'" y2="'+y(g.v).toFixed(1)+'" stroke="#D8CFBE" stroke-dasharray="4 4" stroke-width="1"/>'; });
+    series.forEach(function(s){
+      var len=s.pts.length; if(!len) return;
+      if(len>1){ var d=s.pts.map(function(p,i){ return (i?'L':'M')+x(i,len).toFixed(1)+' '+y(p.v).toFixed(1); }).join(' ');
+        svg+='<path d="'+d+'" fill="none" stroke="'+s.color+'" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>'; }
+      var r=len>45?1.3:2.6;
+      s.pts.forEach(function(p,i){ svg+='<circle cx="'+x(i,len).toFixed(1)+'" cy="'+y(p.v).toFixed(1)+'" r="'+r+'" fill="'+s.color+'"/>'; });
+    });
+    svg+='<text x="'+padL+'" y="'+(H-4)+'" font-size="9" fill="'+C.muted+'" font-family="monospace">'+esc(shortDate(base.pts[0].date))+'</text>';
+    if(base.pts.length>1) svg+='<text x="'+(W-padR)+'" y="'+(H-4)+'" font-size="9" fill="'+C.muted+'" font-family="monospace" text-anchor="end">'+esc(shortDate(base.pts[base.pts.length-1].date))+'</text>';
+    return svg+'</svg>';
+  }
+  function sparkline(pts, color){
+    pts=(pts||[]).filter(function(p){return p.v!=null&&!isNaN(p.v);});
+    if(pts.length<2) return '';
+    var W=200,H=30,pad=3, vals=pts.map(function(p){return p.v;});
+    var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals), span=(hi-lo)||1;
+    var x=function(i){ return pad+(W-2*pad)*i/(pts.length-1); };
+    var y=function(v){ return pad+(H-2*pad)*(1-(v-lo)/span); };
+    var d=pts.map(function(p,i){ return (i?'L':'M')+x(i).toFixed(1)+' '+y(p.v).toFixed(1); }).join(' ');
+    return '<svg class="spark" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">'+
+      '<path d="'+d+'" fill="none" stroke="'+(color||C.green)+'" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>'+
+      '<circle cx="'+x(pts.length-1).toFixed(1)+'" cy="'+y(pts[pts.length-1].v).toFixed(1)+'" r="2.4" fill="'+(color||C.green)+'"/></svg>';
+  }
+  function weeklyBars(bars, color){
+    if(!bars.length) return '<div class="chart-empty">No activity in this window</div>';
+    var W=520,H=120,padL=6,padR=6,padT=10,padB=18, n=bars.length;
+    var max=Math.max.apply(null,bars.map(function(b){return b.v;}))||1, bw=(W-padL-padR)/n, gap=Math.min(4,bw*0.25);
+    var svg='<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">';
+    bars.forEach(function(b,i){ var h=(H-padT-padB)*(b.v/max), xx=padL+i*bw, yy=(H-padB)-h;
+      svg+='<rect x="'+(xx+gap/2).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+Math.max(1,bw-gap).toFixed(1)+'" height="'+Math.max(0,h).toFixed(1)+'" rx="1.5" fill="'+(color||C.green)+'"/>'; });
+    [0, Math.floor((n-1)/2), n-1].filter(function(v,i,a){return a.indexOf(v)===i;}).forEach(function(i){
+      var xx=padL+i*bw+bw/2; svg+='<text x="'+xx.toFixed(1)+'" y="'+(H-4)+'" font-size="9" fill="'+C.muted+'" font-family="monospace" text-anchor="middle">'+esc(shortDate(bars[i].label))+'</text>'; });
+    return svg+'</svg>';
+  }
+
+  // ── labs: status / range / borderline ──────────────────────────────────────
+  function labStatus(r){
+    if(r.flag==='H') return 'high';
+    if(r.flag==='L') return 'low';
+    var op=r.ref_operator, lo=r.ref_low, hi=r.ref_high;
+    if(r.value_num==null){
+      if(r.value_text && r.normal_text){ var v=String(r.value_text).toUpperCase(), n=String(r.normal_text).toUpperCase();
+        return (v===n||v.indexOf(n)>=0||n.indexOf(v)>=0)?'in':'review'; }
+      return 'in';
+    }
+    var val=Number(r.value_num);
+    if(op==='range'||op==='eq'){ if(lo!=null&&val<lo) return 'low'; if(hi!=null&&val>hi) return 'high'; if(lo!=null||hi!=null) return 'in'; }
+    else if(op==='lte'){ if(hi!=null) return val>hi?'high':'in'; }
+    else if(op==='gte'){ if(lo!=null) return val<lo?'low':'in'; }
+    return 'review';
+  }
+  // In-range but close (~within 10% of the span) to an edge.
+  function isBorderline(r){
+    if(labStatus(r)!=='in' || r.value_num==null) return false;
+    var v=Number(r.value_num), op=r.ref_operator, lo=r.ref_low, hi=r.ref_high;
+    if(op==='range'||op==='eq'){ if(lo==null||hi==null||hi<=lo) return false; var m=(hi-lo)*0.1; return v<=lo+m || v>=hi-m; }
+    if(op==='lte'){ if(hi==null||hi<=0) return false; return v>=hi*0.9; }
+    if(op==='gte'){ if(lo==null||lo<=0) return false; return v<=lo*1.1; }
+    return false;
+  }
+  function statusPill(r){
+    if(isBorderline(r)) return '<span class="pill border">Borderline</span>';
+    var s=labStatus(r);
+    return '<span class="pill '+s+'">'+(s==='in'?'In range':s==='high'?'High':s==='low'?'Low':'Review')+'</span>';
+  }
+  function refText(r){
+    var u=r.unit?(' '+r.unit):'';
+    if(r.ref_operator==='range') return fmt(r.ref_low,pref(r.ref_low))+'–'+fmt(r.ref_high,pref(r.ref_high))+u;
+    if(r.ref_operator==='lte') return '≤ '+fmt(r.ref_high,pref(r.ref_high))+u;
+    if(r.ref_operator==='gte') return '≥ '+fmt(r.ref_low,pref(r.ref_low))+u;
+    if(r.ref_operator==='eq') return fmt(r.ref_low,pref(r.ref_low))+u;
+    if(r.normal_text) return 'Normal: '+r.normal_text;
+    return '—';
+  }
+  function pref(n){ return (n!=null && Math.abs(n)<10 && n%1!==0)?1:0; }   // one decimal for small fractional refs
+  function labVal(r){ return r.value_text!=null?String(r.value_text):(r.value_num!=null?fmt(r.value_num,pref(r.value_num)):'—'); }
+
+  // "Key" markers a physician typically scans — matched by pattern against
+  // whatever marker names exist in the data (robust to lab naming quirks).
+  var KEY_PATTERNS=[/CHOLESTEROL/,/\bLDL/,/\bHDL/,/TRIGLYCERIDE/,/NON.?HDL/,/GLUCOSE/,/A1C/,/\bTSH\b/,/THYROID/,/\bT4\b/,/\bT3\b/,
+    /CREATININE/,/\bE?GFR/,/\bBUN\b/,/UREA NITROGEN/,/\bALT\b/,/\bAST\b/,/ALKALINE PHOS/,/BILIRUBIN/,
+    /HEMOGLOBIN/,/HEMATOCRIT/,/\bWBC\b/,/WHITE BLOOD/,/\bRBC\b/,/PLATELET/,
+    /VITAMIN D/,/VITAMIN B.?12/,/\bB12\b/,/FERRITIN/,/\bIRON\b/,/C.?REACTIVE/,/\bH?S?CRP\b/,/HOMOCYSTEINE/,
+    /\bPSA\b/,/TESTOSTERONE/,/\bSODIUM\b/,/POTASSIUM/,/\bCALCIUM\b/,/\bA\/G\b/,/ALBUMIN/,/INSULIN/];
+  function isKeyMarker(name){ var u=String(name||'').toUpperCase(); return KEY_PATTERNS.some(function(re){ return re.test(u); }); }
+
+  // ── data load ───────────────────────────────────────────────────────────────
+  async function loadAll(athleteId){
+    var start=S.startISO;
+    var jobs=[
+      sb.from('runs').select('run_date,activity_type,duration_seconds,distance_miles').eq('athlete_id',athleteId).gte('run_date',start),
+      sb.from('vitals').select('kind,value,value2,measured_on').gte('measured_on',start),
+      sb.from('oura_daily').select('day,resting_hr,avg_hrv,total_sleep_seconds,sleep_score').gte('day',start),
+      sb.from('supplements').select('id,name,dose,timing,sort_order,created_at').eq('active',true).order('sort_order',{ascending:true}),
+      sb.from('supplement_log').select('supplement_id,log_date').gte('log_date',start),
+      sb.from('lab_results').select('*, lab_reports(collected_on)')
+    ];
+    var res=await Promise.all(jobs);
+    S.runs   =(res[0].data||[]);
+    S.vitals =(res[1].data||[]);
+    S.oura   =(res[2].data||[]);
+    S.supps  =(res[3].data||[]);
+    S.suppLog=(res[4].data||[]);
+    var labs=(res[5].data||[]).map(function(x){ x.date=(x.lab_reports&&x.lab_reports.collected_on)||null; return x; }).filter(function(x){ return x.date; });
+    S.labAll=labs;
+    var latest={};
+    labs.forEach(function(x){ var k=x.name+'|'+(x.unit||''); if(!latest[k]||x.date>latest[k].date) latest[k]=x; });
+    S.labLatest=Object.keys(latest).map(function(k){ return latest[k]; });
+  }
+  function labHistory(name, unit){
+    return S.labAll.filter(function(x){ return x.name===name && (unit==null||x.unit===unit) && x.value_num!=null; })
+      .sort(function(a,b){ return a.date<b.date?-1:1; })
+      .map(function(x){ return { date:x.date, v:Number(x.value_num) }; });
+  }
+
+  // ── sections ─────────────────────────────────────────────────────────────
+  function sectionActivity(){
+    var runs=S.runs;
+    var totalSec=runs.reduce(function(s,r){ return s+(num(r.duration_seconds)||0); },0);
+    var weeks=WINDOW_DAYS/7;
+    var avgHrs=totalSec/3600/weeks;
+    // weekly Mon–Sun buckets across the window
+    var buckets={}, wk=weekStart(S.startISO), end=weekStart(S.endISO), guard=0;
+    for(var d=parseISO(wk); localISO(d)<=end && guard<60; d.setDate(d.getDate()+7), guard++) buckets[localISO(d)]=0;
+    runs.forEach(function(r){ var k=weekStart(r.run_date); if(k in buckets) buckets[k]+=(num(r.duration_seconds)||0); });
+    var bars=Object.keys(buckets).sort().map(function(k){ return { label:k, v:buckets[k]/3600 }; });
+    // per activity-type totals
+    var byType={};
+    runs.forEach(function(r){ var t=r.activity_type||'run'; byType[t]=(byType[t]||0)+(num(r.duration_seconds)||0); });
+    var LBL={run:'Running',ride:'Cycling',swim:'Swimming',walk:'Walking',hike:'Hiking',strength:'Strength',workout:'Workout',other:'Other'};
+    var typeRows=Object.keys(byType).sort(function(a,b){ return byType[b]-byType[a]; }).map(function(t){
+      return '<tr><td>'+esc(LBL[t]||t)+'</td><td class="num">'+hoursMin(byType[t])+'</td></tr>'; }).join('');
+
+    var h='<div class="rsection"><h2>Activity</h2>';
+    if(!runs.length){ return h+'<p class="empty">No activity logged in the last '+WINDOW_DAYS+' days.</p></div>'; }
+    h+='<div class="stat-row">'+
+        '<div class="stat"><span class="n">'+fmt(avgHrs,1)+'</span><span class="u">hrs/week</span><div class="l">average over '+WINDOW_DAYS+' days</div></div>'+
+        '<div class="stat"><span class="n">'+hoursMin(totalSec)+'</span><div class="l">total activity time</div></div>'+
+        '<div class="stat"><span class="n">'+runs.length+'</span><span class="u">sessions</span></div>'+
+      '</div>';
+    h+='<div class="kicker">Hours per week (Mon–Sun)</div>'+weeklyBars(bars, C.green);
+    if(typeRows) h+='<div class="kicker">By activity type</div><table class="tbl"><tbody>'+typeRows+'</tbody></table>';
+    return h+'</div>';
+  }
+
+  function metricCard(icon,name,avgHTML,subHTML,chartHTML,legendHTML){
+    return '<div class="metric"><div class="top"><span class="icon">'+icon+'</span><span class="name">'+esc(name)+'</span>'+
+      '<span class="avg">'+avgHTML+'</span></div>'+
+      (subHTML?'<div class="sub">'+subHTML+'</div>':'')+
+      (chartHTML||'')+(legendHTML||'')+'</div>';
+  }
+  function sectionVitals(){
+    var v=S.vitals, o=S.oura;
+    function vit(kind){ return v.filter(function(r){return r.kind===kind;}).sort(function(a,b){return a.measured_on<b.measured_on?-1:1;}); }
+    var bp=vit('blood_pressure'), wt=vit('weight');
+    var ouraAsc=o.slice().sort(function(a,b){return a.day<b.day?-1:1;});
+
+    // Blood pressure
+    var sysPts=bp.map(function(r){return {date:r.measured_on,v:num(r.value)};}).filter(function(p){return p.v!=null;});
+    var diaPts=bp.map(function(r){return {date:r.measured_on,v:num(r.value2)};}).filter(function(p){return p.v!=null;});
+    var bpAvg=(avg(sysPts.map(function(p){return p.v;}))!=null)?(fmt(avg(sysPts.map(function(p){return p.v;})),0)+'/'+fmt(avg(diaPts.map(function(p){return p.v;})),0)):'—';
+    var bpCard=metricCard('🩺','Blood Pressure',
+      bpAvg+'<span class="avgu">mmHg</span>',
+      (sysPts.length?sysPts.length+' reading'+(sysPts.length===1?'':'s')+' · target &lt;120/80':'no readings'),
+      chart([{pts:sysPts,color:C.amber},{pts:diaPts,color:C.blue}],{guides:[{v:120},{v:80}]}),
+      (sysPts.length?'<div class="legend"><span><span class="k" style="background:'+C.amber+'"></span>Systolic</span><span><span class="k" style="background:'+C.blue+'"></span>Diastolic</span></div>':''));
+
+    // Weight
+    var wtPts=wt.map(function(r){return {date:r.measured_on,v:num(r.value)};}).filter(function(p){return p.v!=null;});
+    var wtAvg=avg(wtPts.map(function(p){return p.v;}));
+    var wtSub='no readings';
+    if(wtPts.length){ var chg=wtPts.length>1?(wtPts[wtPts.length-1].v-wtPts[0].v):0;
+      wtSub='latest '+fmt(wtPts[wtPts.length-1].v,1)+' lb'+(wtPts.length>1?' · '+(chg>0?'▲':chg<0?'▼':'±')+fmt(Math.abs(chg),1)+' lb over window':''); }
+    var wtCard=metricCard('⚖️','Weight',
+      (wtAvg!=null?fmt(wtAvg,1)+'<span class="avgu">lb avg</span>':'—'),
+      wtSub, chart([{pts:wtPts,color:C.green}],{}), '');
+
+    // Resting HR (Oura)
+    var rhrPts=ouraAsc.map(function(r){return {date:r.day,v:num(r.resting_hr)};}).filter(function(p){return p.v!=null;});
+    var rhrAvg=avg(rhrPts.map(function(p){return p.v;}));
+    var rhrCard=metricCard('💓','Resting HR',
+      (rhrAvg!=null?fmt(rhrAvg,0)+'<span class="avgu">bpm avg</span>':'—'),
+      (rhrPts.length?rhrPts.length+' nights (Oura)':'no data'),
+      chart([{pts:rhrPts,color:C.green}],{}), '');
+
+    // HRV (Oura)
+    var hrvPts=ouraAsc.map(function(r){return {date:r.day,v:num(r.avg_hrv)};}).filter(function(p){return p.v!=null;});
+    var hrvAvg=avg(hrvPts.map(function(p){return p.v;}));
+    var hrvCard=metricCard('💗','HRV',
+      (hrvAvg!=null?fmt(hrvAvg,0)+'<span class="avgu">ms avg</span>':'—'),
+      (hrvPts.length?hrvPts.length+' nights (Oura)':'no data'),
+      chart([{pts:hrvPts,color:C.blue}],{}), '');
+
+    // Sleep (Oura)
+    var slpPts=ouraAsc.map(function(r){return {date:r.day,v:(num(r.total_sleep_seconds)!=null?num(r.total_sleep_seconds)/3600:null)};}).filter(function(p){return p.v!=null;});
+    var slpAvg=avg(slpPts.map(function(p){return p.v;}));
+    var scoreAvg=avg(ouraAsc.map(function(r){return num(r.sleep_score);}));
+    var slpCard=metricCard('😴','Sleep',
+      (slpAvg!=null?hoursMin(slpAvg*3600)+'<span class="avgu">avg</span>':'—'),
+      (slpPts.length?(scoreAvg!=null?'avg score '+fmt(scoreAvg,0)+' · ':'')+slpPts.length+' nights':'no data'),
+      chart([{pts:slpPts,color:C.green}],{band:[7,9]}), '');
+
+    var h='<div class="rsection"><h2>Vitals &amp; Physiology</h2>';
+    if(!bp.length && !wt.length && !S.oura.length){ return h+'<p class="empty">No vitals or physiology data in the last '+WINDOW_DAYS+' days.</p></div>'; }
+    h+='<div class="grid2">'+bpCard+wtCard+rhrCard+hrvCard+slpCard+'</div>';
+    return h+'</div>';
+  }
+
+  function sectionSupplements(){
+    var h='<div class="rsection"><h2>Supplements</h2>';
+    if(!S.supps.length){ return h+'<p class="empty">No active supplements.</p></div>'; }
+    // adherence per supplement over its own in-window sub-period
+    var takenBy={};
+    S.suppLog.forEach(function(l){ (takenBy[l.supplement_id]=takenBy[l.supplement_id]||{})[l.log_date]=1; });
+    var today=parseISO(S.endISO);
+    var rows=S.supps.map(function(su){
+      var created=su.created_at?localISO(new Date(su.created_at)):S.startISO;
+      var subStart=created>S.startISO?created:S.startISO;
+      var denom=Math.max(1, Math.round((today-parseISO(subStart))/86400000)+1);
+      var taken=Object.keys(takenBy[su.id]||{}).filter(function(dt){ return dt>=subStart; }).length;
+      var pct=Math.round(100*taken/denom);
+      return '<tr><td><b>'+esc(su.name)+'</b></td><td>'+esc(su.dose||'')+'</td><td>'+esc(su.timing||'')+'</td>'+
+        '<td class="num">'+pct+'%</td><td class="num" style="color:var(--muted)">'+taken+'/'+denom+'d</td></tr>';
+    }).join('');
+    h+='<table class="tbl"><thead><tr><th>Supplement</th><th>Dose</th><th>Timing</th><th class="num">Adherence</th><th class="num">Days</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    h+='<div class="sub" style="font-size:10.5px;color:var(--muted);margin-top:6px">Adherence = days logged as taken over the review window (or since added, if more recent).</div>';
+    return h+'</div>';
+  }
+
+  function sectionLabs(){
+    var h='<div class="rsection page-break"><h2>Lab Work</h2>';
+    if(!S.labLatest.length){ return h+'<p class="empty">No lab results on file.</p></div>'; }
+
+    // Needs attention: out-of-range, review, or borderline (latest per marker)
+    var flagged=S.labLatest.filter(function(r){ var s=labStatus(r); return s==='high'||s==='low'||s==='review'||isBorderline(r); })
+      .sort(function(a,b){ var rank=function(r){ var s=labStatus(r); return (s==='high'||s==='low')?0:(s==='review'?1:2); }; return rank(a)-rank(b); });
+    if(flagged.length){
+      var frows=flagged.map(function(r){
+        return '<tr><td><b>'+esc(r.name)+'</b></td><td class="num">'+esc(labVal(r))+(r.unit?' '+esc(r.unit):'')+'</td>'+
+          '<td class="num">'+esc(refText(r))+'</td><td>'+statusPill(r)+'</td><td class="num" style="color:var(--muted)">'+esc(monthYear(r.date))+'</td></tr>'; }).join('');
+      h+='<div class="callout"><div class="kicker" style="margin:10px 0 6px;color:var(--amber)">Needs attention — out of range or borderline</div>'+
+        '<table class="tbl"><thead><tr><th>Marker</th><th class="num">Latest</th><th class="num">Reference</th><th>Status</th><th class="num">Date</th></tr></thead><tbody>'+frows+'</tbody></table></div>';
+    } else {
+      h+='<p class="empty">All markers within range on the most recent results. 👍</p>';
+    }
+
+    // Key markers — latest + trend
+    var key=S.labLatest.filter(function(r){ return isKeyMarker(r.name); })
+      .sort(function(a,b){ return a.name<b.name?-1:(a.name>b.name?1:0); });
+    if(key.length){
+      var cards=key.map(function(r){
+        var hist=labHistory(r.name, r.unit);
+        var spark=sparkline(hist, labStatus(r)==='high'?C.amber:labStatus(r)==='low'?C.blue:C.green);
+        return '<div class="lab-card"><div class="ln">'+esc(r.name)+'</div>'+
+          '<div class="lv">'+esc(labVal(r))+(r.unit?'<span class="u">'+esc(r.unit)+'</span>':'')+' '+statusPill(r)+'</div>'+
+          '<div class="lr">Ref '+esc(refText(r))+' · '+esc(monthYear(r.date))+(hist.length>1?' · '+hist.length+' results':'')+'</div>'+
+          spark+'</div>';
+      }).join('');
+      h+='<div class="kicker">Key markers &amp; trends</div><div class="lab-grid">'+cards+'</div>';
+    }
+    return h+'</div>';
+  }
+
+  function render(){
+    var app=document.getElementById('app');
+    var head='<div class="doc"><div class="doc-head"><h1 class="doc-title">Health Recap<span>.</span></h1>'+
+      '<div class="doc-meta"><span><b>'+esc(S.name||'—')+'</b></span>'+
+      '<span>Period: <b>'+esc(longDate(S.startISO))+' – '+esc(longDate(S.endISO))+'</b> ('+WINDOW_DAYS+' days)</span>'+
+      '<span>Generated '+esc(longDate(S.endISO))+'</span></div></div>';
+    var body=sectionActivity()+sectionVitals()+sectionSupplements()+sectionLabs();
+    var foot='<p class="disclaimer">Generated by Tally, a personal health log, for discussion with your clinician. '+
+      'Figures are self-tracked and device-derived (Oura ring, home/clinic readings, imported lab reports) and are not a diagnostic record. '+
+      'Reference ranges shown are the source lab\'s; vitals targets are general guidelines. Averages cover the '+WINDOW_DAYS+'-day period above.</p></div>';
+    app.innerHTML=head+body+foot;
+  }
+
+  (async function(){
+    var profile=await requireProfile();   // needs an athlete row for runs
+    if(!profile) return;
+    S.name=displayName(profile) || (profile.user.email||'');
+    S.startISO=isoNDaysAgo(WINDOW_DAYS);
+    S.endISO=localISO(new Date());
+    try{ await loadAll(profile.row.id); render(); }
+    catch(e){ document.getElementById('app').innerHTML='<p class="empty" style="padding:40px">Couldn\'t build the recap: '+esc(e.message)+'</p>'; }
+  })();
+  </script>
+</body>
+</html>
