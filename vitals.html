@@ -98,14 +98,12 @@
     blood_pressure:{label:'Blood Pressure', icon:'🩺', unit:'mmHg', compound:true, guides:[120,80], context:true},
     weight:        {label:'Weight',         icon:'⚖️', unit:'lb', context:true},
     pulse:         {label:'Resting Pulse',  icon:'💓', unit:'bpm', band:[60,100]},
-    temperature:   {label:'Temperature',    icon:'🌡️', unit:'°F', band:[97,99]},
-    height:        {label:'Height',         icon:'📏', unit:'in'},
     // Oura-sourced (read-only, synced nightly). Resting HR is folded into the
     // Pulse card above (see load()); HRV and temp change are their own cards.
     hrv:           {label:'HRV',              icon:'💗', unit:'ms',  oura:true},
     temp_change:   {label:'Body Temp Change', icon:'🌡️', unit:'°C', oura:true, guides:[0]},
   };
-  var ORDER = ['blood_pressure','weight','pulse','temperature','height'];
+  var ORDER = ['blood_pressure','weight','pulse'];
   var OURA_KINDS = ['hrv','temp_change'];
   // Where a BP / weight reading was taken.
   var CTX = { clinic:'Clinic', home:'Home' };
@@ -125,8 +123,7 @@
     if(v==null) return 'flat';
     if(kind==='blood_pressure'){ if(v>=130||v2>=80) return 'high'; if(v<90||v2<60) return 'low'; if(v>=120) return 'high'; return 'in'; }
     if(kind==='pulse'){ return v>100?'high':(v<45?'low':'in'); }   // low bar set well under athletic resting HR
-    if(kind==='temperature'){ return v>=100.4?'high':(v<97?'low':'in'); }
-    return 'flat';   // weight, height — no universal range
+    return 'flat';   // weight — no universal range
   }
   function statusLabel(s){ return s==='in'?'In Range':s==='high'?'High':s==='low'?'Low':''; }
 
@@ -179,7 +176,7 @@
 
   // ── render: list ──────────────────────────────────────────────────────────
   function renderList(){
-    var h='<button class="link" onclick="openForm(null)" style="float:right;margin-top:-2px">+ Add reading</button>';
+    var h='<div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="link" onclick="openForm(null)" style="padding:4px 0">+ Add reading</button></div>';
     var manual=ORDER.map(vcardHTML).join('');
     var oura=OURA_KINDS.map(vcardHTML).join('');
     h+=manual;
@@ -205,7 +202,7 @@
     return '<div class="vwrap'+(open?' open':'')+'">'+head+panel+'</div>';
   }
   function emptyState(){
-    return '<div class="card"><p class="empty">No vitals yet.<br><br>Import a BayCare portal PDF with <code>labs_sync</code> — it pulls blood pressure, weight, pulse and temperature alongside labs — or add a reading by hand.</p>'+
+    return '<div class="card"><p class="empty">No vitals yet.<br><br>Import a BayCare portal PDF with <code>labs_sync</code> — it pulls blood pressure, weight and pulse alongside labs — or add a reading by hand.</p>'+
       '<button class="btn btn-primary full" style="margin-top:12px" onclick="openForm(null)">+ Add a reading</button></div>';
   }
 
