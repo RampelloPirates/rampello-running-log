@@ -54,6 +54,7 @@
       display: flex; align-items: baseline; gap: 0.6rem;
       text-decoration: none; color: inherit;
     }
+    .brand .back { font-size: 1.35rem; font-weight: 700; line-height: 1; color: var(--amber); }
     .brand .name { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.3px; font-size: 1.1rem; color: var(--paper); }
     .brand .division { font-size: 0.7rem; color: var(--amber); letter-spacing: 2px; text-transform: uppercase; }
 
@@ -361,6 +362,7 @@
 <body>
   <div class="topbar">
     <a href="home.html" class="brand">
+      <span class="back" aria-hidden="true">‹</span>
       <span class="name">Tally</span>
       <span class="division">Running</span>
     </a>
@@ -370,9 +372,6 @@
         <div class="menu-user" id="user-name">…</div>
         <a class="menu-item" href="home.html" role="menuitem">Home</a>
         <a class="menu-item" href="log_run.html" role="menuitem">Log a run</a>
-        <a class="menu-item" href="import_fit.html" role="menuitem">Import a run (Garmin FIT)</a>
-        <a class="menu-item" href="import.html" role="menuitem">Import history (Strava CSV)</a>
-        <a class="menu-item" href="nutrition.html" role="menuitem">Nutrition</a>
         <button class="menu-item" id="change-pw-btn" role="menuitem">Change password</button>
         <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
       </div>
