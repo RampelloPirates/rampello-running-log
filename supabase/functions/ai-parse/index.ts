@@ -95,10 +95,21 @@ async function callClaude(content: unknown): Promise<string> {
     .join("\n");
 }
 
-// Strip ```json fences and parse.
+// Strip ```json fences and parse. The model usually returns bare JSON, but it
+// sometimes wraps it in prose ("Here is the ...") despite the instructions —
+// so if a straight parse fails, fall back to the outermost {...}/[...] span.
 function parseJSON(text: string): unknown {
   const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
-  return JSON.parse(clean);
+  try {
+    return JSON.parse(clean);
+  } catch {
+    const first = clean.search(/[{[]/);
+    const last = Math.max(clean.lastIndexOf("}"), clean.lastIndexOf("]"));
+    if (first !== -1 && last > first) {
+      return JSON.parse(clean.slice(first, last + 1));
+    }
+    throw new Error("The estimate didn't come back as usable data. Try again.");
+  }
 }
 
 // ── Open Food Facts → foods per-100g shape ──────────────────────────────────
