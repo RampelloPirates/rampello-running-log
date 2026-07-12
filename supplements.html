@@ -123,22 +123,46 @@
     S.day=key; await loadTaken(); render();
   }
 
-  function openAdd(){ S.form={id:null, name:'', dose:'', timing:'Anytime'}; S.err=''; render(); }
-  function openEdit(id){ var s=S.stack.filter(function(x){return x.id===id;})[0]; if(!s) return; S.form={id:s.id, name:s.name||'', dose:s.dose||'', timing:s.timing||'Anytime'}; S.err=''; render(); }
+  // The form does double duty. A prescription carries two things a supplement
+  // doesn't: who put you on it, and when it runs out. Leave the end date blank
+  // for an ongoing medication — that's the difference between a course you're
+  // finishing and something you take indefinitely.
+  function openAdd(kind){
+    S.form={id:null, kind:kind||'supplement', name:'', dose:'', timing:'Anytime',
+            prescriber:'', prescribed_on:todayKey(), ends_on:''};
+    S.err=''; render();
+  }
+  function openEdit(id){
+    var s=S.stack.filter(function(x){return x.id===id;})[0]; if(!s) return;
+    S.form={id:s.id, kind:s.kind||'supplement', name:s.name||'', dose:s.dose||'',
+            timing:s.timing||'Anytime', prescriber:s.prescriber||'',
+            prescribed_on:s.prescribed_on||'', ends_on:s.ends_on||''};
+    S.err=''; render();
+  }
   function closeForm(){ S.form=null; render(); }
   async function saveForm(){
     var name=(el('sName')||{}).value||''; name=name.trim(); if(!name){ S.err='Name is required.'; render(); return; }
     var dose=((el('sDose')||{}).value||'').trim(); var timing=(el('sTiming')||{}).value||'Anytime';
+    var rx = S.form.kind==='prescription';
+    var row = {name:name, dose:dose||null, timing:timing, kind:S.form.kind||'supplement'};
+    if(rx){
+      row.prescriber    = ((el('sPrescriber')||{}).value||'').trim() || null;
+      row.prescribed_on = ((el('sStart')||{}).value||'') || null;
+      // Blank end date = ongoing. Stored as null, and loadStack() keeps anything
+      // with no end date on the list forever, which is exactly right.
+      row.ends_on       = ((el('sEnds')||{}).value||'') || null;
+    }
     try{
       if(S.form.id){
-        var u=await sb.from('supplements').update({name:name,dose:dose||null,timing:timing}).eq('id',S.form.id);
+        var u=await sb.from('supplements').update(row).eq('id',S.form.id);
         if(u.error) throw u.error;
       }else{
-        var order = S.stack.length ? (S.stack[S.stack.length-1].sort_order+1) : 0;
-        var ins=await sb.from('supplements').insert({user_id:S.userId, name:name, dose:dose||null, timing:timing, sort_order:order});
+        row.user_id = S.userId;
+        row.sort_order = S.stack.length ? (S.stack[S.stack.length-1].sort_order+1) : 0;
+        var ins=await sb.from('supplements').insert(row);
         if(ins.error) throw ins.error;
       }
-      S.form=null; await loadStack(); render();
+      S.form=null; await loadStack(); await loadTaken(); render();
     }catch(e){ S.err=e.message; render(); }
   }
   async function removeSupp(id){
@@ -176,6 +200,34 @@
       '<button class="icon-btn" title="Edit" onclick="openEdit(\''+s.id+'\')">✎</button></div>';
   }
 
+  function formHTML(){
+    var rx = S.form.kind==='prescription';
+    var h='<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">'+
+      '<input id="sName" class="field" placeholder="'+(rx?'Name (e.g. Lisinopril)':'Name (e.g. Vitamin D)')+'" value="'+esc(S.form.name)+'" style="margin-bottom:8px">'+
+      '<div style="display:flex;gap:8px">'+
+      '<input id="sDose" class="field" placeholder="'+(rx?'Dose (e.g. 10 mg)':'Dose (e.g. 2000 IU)')+'" value="'+esc(S.form.dose)+'" style="flex:1">'+
+      '<select id="sTiming" class="field" style="width:130px">'+
+      ['Anytime','Morning','Midday','Evening','Bedtime'].map(function(t){return '<option'+(S.form.timing===t?' selected':'')+'>'+t+'</option>';}).join('')+
+      '</select></div>';
+
+    if(rx){
+      h+='<input id="sPrescriber" class="field" placeholder="Prescribed by (optional)" value="'+esc(S.form.prescriber||'')+'" style="margin-top:8px">'+
+        '<div style="display:flex;gap:8px;margin-top:8px">'+
+          '<div style="flex:1"><label class="kicker" style="display:block;margin-bottom:3px">Started</label>'+
+            '<input id="sStart" class="field" type="date" value="'+esc(S.form.prescribed_on||'')+'"></div>'+
+          '<div style="flex:1"><label class="kicker" style="display:block;margin-bottom:3px">Ends</label>'+
+            '<input id="sEnds" class="field" type="date" value="'+esc(S.form.ends_on||'')+'"></div>'+
+        '</div>'+
+        // The whole distinction between a course and a maintenance drug.
+        '<p class="empty" style="margin:6px 0 0;font-size:11.5px">Leave <b>Ends</b> blank if you take it indefinitely. Set it and the prescription counts down, then drops off the list on its own.</p>';
+    }
+
+    h+='<div class="btn-row"><button class="btn btn-primary" onclick="saveForm()">'+(S.form.id?'Save':'Add')+'</button>'+
+      (S.form.id?'<button class="btn btn-ghost btn-auto" onclick="removeSupp(\''+S.form.id+'\')" style="color:var(--danger);border-color:var(--danger)">Remove</button>':'')+
+      '<button class="btn btn-ghost btn-auto" onclick="closeForm()">Cancel</button></div></div>';
+    return h;
+  }
+
   function render(){
     var app=el('app');
     if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
@@ -204,34 +256,41 @@
     }else{
       h+=supps.map(function(s){ return suppRow(s, false); }).join('');
     }
-    if(!S.form){
-      h+='<button class="link" onclick="openAdd()">+ Add a supplement</button>';
+    // The form is shared, but only shows the prescription fields when it's a
+    // prescription — and it renders under whichever section you opened it from.
+    var supplementForm = S.form && S.form.kind!=='prescription';
+    if(!supplementForm){
+      h+='<button class="link" onclick="openAdd(\'supplement\')">+ Add a supplement</button>';
     }else{
-      h+='<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:12px">'+
-        '<input id="sName" class="field" placeholder="Name (e.g. Vitamin D)" value="'+esc(S.form.name)+'" style="margin-bottom:8px">'+
-        '<div style="display:flex;gap:8px">'+
-        '<input id="sDose" class="field" placeholder="Dose (e.g. 2000 IU)" value="'+esc(S.form.dose)+'" style="flex:1">'+
-        '<select id="sTiming" class="field" style="width:130px">'+
-        ['Anytime','Morning','Midday','Evening','Bedtime'].map(function(t){return '<option'+(S.form.timing===t?' selected':'')+'>'+t+'</option>';}).join('')+
-        '</select></div>'+
-        '<div class="btn-row"><button class="btn btn-primary" onclick="saveForm()">'+(S.form.id?'Save':'Add')+'</button>'+
-        (S.form.id?'<button class="btn btn-ghost btn-auto" onclick="removeSupp(\''+S.form.id+'\')" style="color:var(--danger);border-color:var(--danger)">Remove</button>':'')+
-        '<button class="btn btn-ghost btn-auto" onclick="closeForm()">Cancel</button></div></div>';
+      h+=formHTML();
     }
-    if(S.err) h+='<p class="err">'+esc(S.err)+'</p>';
+    if(S.err && supplementForm) h+='<p class="err">'+esc(S.err)+'</p>';
     h+='</section>';
 
     // ── Prescriptions ────────────────────────────────────────────────────────
-    // Only shown when there are any: an empty "Prescriptions" heading on a page
-    // you open every morning is just noise most of the year.
-    if(scrips.length){
+    // Shown whenever you have one OR you're adding one. Prescriptions used to
+    // arrive only from a visit in Medical, which left no way to record the
+    // ongoing medication you were already on.
+    var rxForm = S.form && S.form.kind==='prescription';
+    if(scrips.length || rxForm){
       var doneToday = scrips.filter(function(s){ return S.taken[s.id]; }).length;
       h+='<section class="card"><div class="row-between" style="margin-bottom:10px">'+
         '<div class="kicker">Prescriptions</div>'+
-        '<span class="progress">'+doneToday+' of '+scrips.length+' taken</span></div>'+
-        scrips.map(function(s){ return suppRow(s, true); }).join('')+
-        '<p class="empty" style="margin-top:10px;font-size:11.5px">Logged from a visit in Medical. A course disappears from here on its own once it\'s finished.</p>'+
-        '</section>';
+        (scrips.length?'<span class="progress">'+doneToday+' of '+scrips.length+' taken</span>':'')+
+        '</div>'+
+        scrips.map(function(s){ return suppRow(s, true); }).join('');
+      if(rxForm){
+        h+=formHTML();
+        if(S.err) h+='<p class="err">'+esc(S.err)+'</p>';
+      }else{
+        h+='<button class="link" onclick="openAdd(\'prescription\')">+ Add a prescription</button>'+
+          '<p class="empty" style="margin-top:8px;font-size:11.5px">Added here, or pulled off a visit summary in Medical. A course drops off on its own when it ends; leave the end date blank for an ongoing medication.</p>';
+      }
+      h+='</section>';
+    }else{
+      // No prescriptions and no form — one quiet line, not a whole empty card.
+      h+='<p class="fine" style="text-align:center;margin:-4px 0 14px;font-size:11.5px;color:var(--muted)">'+
+        '<button class="link" onclick="openAdd(\'prescription\')">+ Add a prescription</button></p>';
     }
 
     // history
