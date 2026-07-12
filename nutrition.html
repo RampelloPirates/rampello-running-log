@@ -85,6 +85,15 @@
     .fine{font-size:11px;color:var(--muted);text-align:center;margin-top:16px;line-height:1.5;}
     .h2{font-family:var(--f-display);font-size:15px;margin:2px 0 12px;}
     .recipe-summary{background:var(--green-tint);border-radius:12px;padding:14px;margin-bottom:12px;}
+
+    /* Ingredient library picker */
+    .lib{border:1px solid var(--border);border-radius:12px;padding:10px;margin:8px 0 4px;background:var(--surface-warm);}
+    .libitem{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer;}
+    .libitem:last-child{border-bottom:none;}
+    .libitem:hover{background:var(--green-tint);border-radius:8px;}
+    .libadd{flex-shrink:0;font-size:17px;color:var(--green);font-weight:600;line-height:1;}
+    .libtag{font-family:var(--f-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;
+            background:var(--green-tint);color:var(--green-deep);padding:2px 5px;border-radius:5px;margin-left:4px;}
     .stepper{display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:2px 8px;}
     .stepper input{width:46px;font-family:var(--f-mono);font-size:14px;border:none;background:transparent;text-align:center;padding:6px 0;}
     .pill{background:var(--green-tint);color:var(--green-deep);border:none;border-radius:8px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;font-family:var(--f-body);}
@@ -105,6 +114,8 @@
     burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
     draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null, editEntryId:null, editItems:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
+    libOpen:false, libQ:'',                 // the ingredient library picker
+
     busy:false, err:'', editTarget:false,
   };
 
@@ -416,6 +427,66 @@
     }
   }
   // Add an ingredient by typing it; estimate its weight + nutrition via the parser.
+  // ── The ingredient library ────────────────────────────────────────────────
+  // Everything you've already measured, so you don't re-type "1 lb ground beef"
+  // and pay for a fresh estimate that comes back slightly different. Ingredients
+  // carry per-gram macros, so a library entry rescales exactly to any weight.
+  //
+  // Two kinds of entry:
+  //   · ingredients — every ingredient from every saved recipe, deduped by name
+  //   · recipes     — a saved recipe used AS an ingredient (your chili base in
+  //                   a burrito bowl). Its per-100g is already computed.
+  function ingredientLibrary(){
+    var byName = {};
+
+    S.recipes.forEach(function(r){
+      (r.ingredients||[]).forEach(function(g){
+        var grams = num(g.grams), cal = num(g.calories);
+        if(!grams || !cal) return;                 // can't rescale what wasn't weighed
+        var k = String(g.name||'').trim().toLowerCase();
+        if(!k || byName[k]) return;                // recipes are newest-first, so first wins
+        byName[k] = { key:'i:'+k, kind:'ingredient', name:g.name,
+          calPerG:cal/grams, pPerG:num(g.protein)/grams, fPerG:num(g.fat)/grams,
+          cPerG:num(g.carbs)/grams, fibPerG:num(g.fiber)/grams,
+          grams:grams, qty:(g.qty!=null?g.qty:''), unit:g.unit||'' };
+      });
+    });
+
+    var items = Object.keys(byName).map(function(k){ return byName[k]; });
+
+    S.recipes.forEach(function(r){
+      if(!r.per100 || !r.per100.cal) return;
+      var defG = (r.servings && r.finalWeight) ? Math.round(r.finalWeight/r.servings) : 100;
+      items.push({ key:'r:'+r.id, kind:'recipe', name:r.name,
+        calPerG:r.per100.cal/100, pPerG:r.per100.p/100, fPerG:r.per100.f/100,
+        cPerG:r.per100.c/100, fibPerG:(r.per100.fib||0)/100,
+        grams:defG, qty:'', unit:'g' });
+    });
+
+    return items.sort(function(a,b){ return a.name.localeCompare(b.name); });
+  }
+
+  function ensureRecipeDraft(){
+    if(!S.recipeDraft) S.recipeDraft = {ingredients:[], finalWeight:0, note:'', weightOverridden:false};
+  }
+
+  function addFromLibrary(key){
+    var it = ingredientLibrary().filter(function(x){ return x.key===key; })[0];
+    if(!it) return;
+    ensureRecipeDraft();
+    var g = it.grams || 100;
+    S.recipeDraft.ingredients.push({
+      id:uid(), name:it.name, qty:it.qty, unit:it.unit, grams:g, wUnit:'g',
+      calories:Math.round(it.calPerG*g), protein:round1(it.pPerG*g), fat:round1(it.fPerG*g),
+      carbs:round1(it.cPerG*g), fiber:round1(it.fibPerG*g),
+      calPerG:it.calPerG, pPerG:it.pPerG, fPerG:it.fPerG, cPerG:it.cPerG, fibPerG:it.fibPerG
+    });
+    syncFinalWeight();
+    // Keep the search term: you're usually adding two or three things from the
+    // same corner of the library, and clearing it makes you type it again.
+    render();
+  }
+
   async function addIngredientEstimate(){
     var t = ((el('addIngText')||{}).value || '').trim();
     if(!t){ ingAdd(); return; }
@@ -427,6 +498,51 @@
       else S.err = "Couldn't estimate that — add a blank row and fill it in by hand.";
     }catch(e){ S.err = e.message || "Couldn't estimate that ingredient."; }
     finally{ S.busy=false; render(); }
+  }
+
+  function toggleLib(){ S.libOpen = !S.libOpen; S.libQ=''; render(); }
+
+  // The picker. Rendered inline rather than as a modal: you're mid-recipe, and
+  // a dialog that covers the ingredients you're building is the wrong shape.
+  function libraryHTML(){
+    if(!S.libOpen) return '';
+    var lib = ingredientLibrary();
+    if(!lib.length){
+      return '<div class="lib"><p class="note" style="margin:0">Nothing in the library yet — it fills up from the ingredients of recipes you save.</p></div>';
+    }
+    var q = S.libQ.trim().toLowerCase();
+    var hits = q ? lib.filter(function(x){ return x.name.toLowerCase().indexOf(q)!==-1; }) : lib;
+
+    var h = '<div class="lib">'+
+      '<input class="field" placeholder="Search your ingredients…" value="'+esc(S.libQ)+'" '+
+        'oninput="S.libQ=this.value; var n=el(\'libList\'); if(n) n.innerHTML=libListHTML();" '+
+        'style="padding:8px 10px;font-size:13px;margin-bottom:8px">'+
+      '<div id="libList">'+libListHTML(hits)+'</div>'+
+      '</div>';
+    return h;
+  }
+
+  function libListHTML(pre){
+    var lib = pre || (function(){
+      var all = ingredientLibrary();
+      var q = S.libQ.trim().toLowerCase();
+      return q ? all.filter(function(x){ return x.name.toLowerCase().indexOf(q)!==-1; }) : all;
+    })();
+
+    if(!lib.length) return '<p class="note" style="margin:0">Nothing matches.</p>';
+
+    return lib.slice(0,60).map(function(it){
+      var g = it.grams || 100;
+      return '<div class="libitem" onclick="addFromLibrary(\''+it.key+'\')">'+
+        '<div style="min-width:0;flex:1">'+
+          '<div style="font-size:13.5px;font-weight:500;overflow-wrap:anywhere">'+esc(it.name)+
+            (it.kind==='recipe'?' <span class="libtag">recipe</span>':'')+'</div>'+
+          '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+
+            Math.round(it.calPerG*g)+' cal · '+Math.round(g)+'g'+
+            (it.qty?(' · '+esc(it.qty)+' '+esc(it.unit)):'')+'</div>'+
+        '</div>'+
+        '<span class="libadd">+</span></div>';
+    }).join('');
   }
 
   function recipeTotals(){
@@ -826,6 +942,14 @@
       h += '<div style="text-align:center;margin:10px 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">or</div>';
       h += '<input id="recipePhoto" type="file" accept="image/*" capture="environment" style="display:none" onchange="parseRecipePhoto(this.files&&this.files[0])">';
       h += '<button class="btn btn-ghost" onclick="el(\'recipePhoto\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Reading photo…':'📷 Photo of a recipe')+'</button>';
+      // You can also START from the library — picking an ingredient opens the
+      // builder with it already in. Much of what you cook is made of things
+      // you've already measured once.
+      if(ingredientLibrary().length){
+        h += '<div style="text-align:center;margin:10px 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">or</div>'+
+          '<button class="btn btn-ghost" onclick="toggleLib()">'+(S.libOpen?'Hide library':'📚 Choose from library')+'</button>'+
+          libraryHTML();
+      }
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     }else{
       h += '<div class="row-between" style="margin-bottom:8px;align-items:baseline"><h2 class="h2" style="margin:0">'+esc(S.recipeName.trim()||'Untitled recipe')+'</h2><button class="link" style="color:var(--muted)" onclick="startOverRecipe()">'+(S.recipeEditId?'cancel':'start over')+'</button></div>';
@@ -838,7 +962,11 @@
       h += '<div style="display:flex;gap:6px;margin:8px 0 2px">'+
         '<input id="addIngText" class="field" placeholder="Add an ingredient — e.g. 2 tbsp olive oil" style="flex:1;padding:8px 10px;font-size:13px" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addIngredientEstimate();}">'+
         '<button class="btn btn-quiet btn-auto" style="padding:8px 12px;white-space:nowrap" onclick="addIngredientEstimate()"'+(S.busy?' disabled':'')+'>'+(S.busy?'…':'+ Add')+'</button></div>'+
-        '<button class="link" style="padding:4px 0" onclick="ingAdd()">or add a blank row to fill in by hand</button>';
+        '<div style="display:flex;gap:12px;align-items:center;padding:4px 0">'+
+          '<button class="link" onclick="toggleLib()">'+(S.libOpen?'hide library':'📚 choose from library')+'</button>'+
+          '<button class="link" style="color:var(--muted)" onclick="ingAdd()">or a blank row</button>'+
+        '</div>'+
+        libraryHTML();
       h += '<div style="background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:12px;margin:8px 0 12px"><label style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span style="font-size:13px;font-weight:500">Finished dish weight</span><span style="display:flex;align-items:center;gap:4px"><input id="recipeFinalWeight" value="'+S.recipeDraft.finalWeight+'" inputmode="decimal" oninput="setFinalWeight(this.value)" style="width:72px;font-family:var(--f-mono);font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;text-align:center"><span style="font-size:12px;color:var(--muted)">g</span></span></label><p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.45">Defaults to the raw ingredient total. Weigh the cooked dish and enter it here for an accurate per-100g — cooking changes weight, calories stay the same.</p></div>';
       h += '<div id="recipeSummary">'+recipeSummaryHTML()+'</div>';
       h += '<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px"><span style="font-size:13px;color:var(--muted)">Servings the recipe makes (optional)</span><input value="'+esc(S.recipeServings)+'" inputmode="numeric" placeholder="—" oninput="S.recipeServings=this.value;refreshRecipeSummary();var n=el(\'servingGrams\');if(n)n.textContent=servingGramsText();" style="width:64px;font-family:var(--f-mono);font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;text-align:center"></label>';
