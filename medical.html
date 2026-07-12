@@ -290,7 +290,13 @@
 
   function cancelDraft(){
     S.draft=null; S.draftKind=null; S.draftFiles=[]; S.trip=null;
-    S.editId=null; S.editPaths=[]; S.err=''; render();
+    S.editId=null; S.editPaths=[];
+    // Disarm the pending "link to this visit" instruction. Leaving it armed is
+    // how a LensCrafters receipt ended up filed against a dental visit: the old
+    // dead "File a receipt" button set this and never opened the camera, so it
+    // lay in wait and hijacked the NEXT receipt photographed, days later.
+    S.prefill=null;
+    S.err=''; render();
   }
   function d(k, v){ S.draft[k] = v; }
 
@@ -488,9 +494,40 @@
   function visitMoney(v){
     var linked = S.expenses.filter(function(e){ return e.visit_id===v.id; });
     var paid = linked.reduce(function(s,e){ return s + Number(e.paid_amount||0); }, 0);
-    return { linked:linked, paid:paid,
-             owed: v.amount_owed==null ? null : Number(v.amount_owed),
-             missing: v.amount_owed!=null && paid + 0.005 < Number(v.amount_owed) };
+    var owed = v.amount_owed==null ? null : Number(v.amount_owed);
+    return { linked:linked, paid:paid, owed:owed,
+             missing: owed!=null && paid + 0.005 < owed,
+             // Documented MORE than you owed. Either a second charge, or a
+             // receipt filed against the wrong visit — and an over-claim is the
+             // direction you least want to be wrong in. Flagging only the
+             // shortfall would have hidden this entirely.
+             over: owed!=null && paid > owed + 0.005 };
+  }
+
+  // An unlinked receipt whose amount is exactly a visit's balance is almost
+  // certainly that visit's receipt — the dates on the paperwork often differ
+  // (billed one day, paid another), which is why the automatic match missed it.
+  function candidates(v){
+    if(v.amount_owed==null) return [];
+    var owed = Number(v.amount_owed);
+    return S.expenses.filter(function(e){
+      if(e.visit_id || e.paid_amount==null) return false;
+      return Math.abs(Number(e.paid_amount) - owed) < 0.011;
+    });
+  }
+
+  async function linkExpense(eid, vid){
+    await sb.from('medical_expenses').update({ visit_id:vid }).eq('id', eid);
+    await loadAll();
+    S.msg = 'Linked.';
+    render();
+  }
+
+  async function unlinkExpense(eid){
+    await sb.from('medical_expenses').update({ visit_id:null }).eq('id', eid);
+    await loadAll();
+    S.msg = 'Unlinked.';
+    render();
   }
 
   // File a receipt straight against a visit — pre-links it, pre-fills what we
@@ -690,8 +727,12 @@
 
     // The two things that make a receipt worthless. Both are silent failures if
     // you don't say them out loud at the moment of filing.
-    if(x.doc_kind==='bill'){
-      h += '<div class="flag">This is a <b>bill</b>, not proof of payment. A bill alone doesn\'t substantiate an HSA reimbursement — you\'ll want the receipt or EOB once it\'s paid.</div>';
+    // A bill and a statement are both requests for money, not evidence you paid
+    // it. Only a receipt (or an EOB showing the patient portion settled) does
+    // that — and the largest claim in a shoebox is exactly the one you don't
+    // want resting on the weakest document.
+    if(x.doc_kind==='bill' || x.doc_kind==='statement'){
+      h += '<div class="flag">This is a <b>'+esc(x.doc_kind)+'</b>, not proof of payment — it says what was <i>charged</i>, not that you paid it. A reimbursement is best substantiated by a receipt or an EOB. Worth swapping in the receipt when you have it.</div>';
     }
     if(!x.paid_amount){
       h += '<div class="flag soft">No out-of-pocket amount. Only what <b>you paid</b> counts toward your reimbursable balance — the billed amount doesn\'t.</div>';
@@ -812,23 +853,60 @@
     if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
     h += '</section>';
 
-    // Visits with a balance and no receipt — the claims you'd otherwise lose.
+    // Visits whose money doesn't reconcile — in either direction.
     var owing = S.visits.filter(function(v){ return visitMoney(v).missing; });
-    if(owing.length){
-      h += '<section class="card"><h2 class="h2">Missing receipts</h2>'+
-        '<p class="p">These visits told you what you owed, but nothing here documents paying it. Un-documented is un-reimbursable.</p>'+
-        owing.map(function(v){
-          var m = visitMoney(v);
-          return '<div class="item"><div class="top">'+
-            '<div style="min-width:0">'+
-              '<div class="nm">'+esc(v.provider || label(VISIT_TYPES, v.visit_type))+'</div>'+
-              '<div class="ct">'+fmt(v.visit_date)+' · '+esc(v.person)+
-                (m.paid ? ' · '+money(m.paid)+' of '+money(m.owed)+' documented' : '')+'</div>'+
-            '</div>'+
-            '<div class="amt">'+money(m.owed - m.paid)+'</div></div>'+
-            '<button class="btn btn-ghost btn-sm" style="margin-top:9px" onclick="receiptFor(\''+v.id+'\')">File a receipt for this</button>'+
-            '</div>';
-        }).join('')+'</section>';
+    var overs = S.visits.filter(function(v){ return visitMoney(v).over; });
+
+    if(owing.length || overs.length){
+      h += '<section class="card"><h2 class="h2">Needs attention</h2>';
+
+      if(owing.length){
+        h += '<p class="p">These visits told you what you owed, but nothing documents paying it. Un-documented is un-reimbursable.</p>'+
+          owing.map(function(v){
+            var m = visitMoney(v);
+            var cands = candidates(v);
+            var hh = '<div class="item"><div class="top">'+
+              '<div style="min-width:0">'+
+                '<div class="nm">'+esc(v.provider || label(VISIT_TYPES, v.visit_type))+'</div>'+
+                '<div class="ct">'+fmt(v.visit_date)+' · '+esc(v.person)+
+                  (m.paid ? ' · '+money(m.paid)+' of '+money(m.owed)+' documented' : '')+'</div>'+
+              '</div>'+
+              '<div class="amt">'+money(m.owed - m.paid)+'</div></div>';
+
+            // The receipt is often already filed — just not linked, because the
+            // date on it differs from the date of the visit.
+            cands.forEach(function(c){
+              hh += '<div class="flag soft" style="display:flex;justify-content:space-between;gap:8px;align-items:center">'+
+                '<span>You already filed <b>'+esc(c.provider||'a receipt')+'</b> for exactly '+money(c.paid_amount)+
+                  ' on '+esc(fmt(c.service_date))+'. Same visit?</span>'+
+                '<button class="btn btn-ghost btn-sm" onclick="linkExpense(\''+c.id+'\',\''+v.id+'\')">Link</button>'+
+                '</div>';
+            });
+
+            return hh + '<button class="btn btn-ghost btn-sm" style="margin-top:9px" onclick="receiptFor(\''+v.id+'\')">Photograph a receipt</button></div>';
+          }).join('');
+      }
+
+      if(overs.length){
+        h += '<p class="p" style="margin-top:14px">These have <b>more</b> documented than was owed. Usually a receipt filed against the wrong visit — and over-claiming is the direction you least want to be wrong in.</p>'+
+          overs.map(function(v){
+            var m = visitMoney(v);
+            var hh = '<div class="item"><div class="top">'+
+              '<div style="min-width:0">'+
+                '<div class="nm">'+esc(v.provider || label(VISIT_TYPES, v.visit_type))+'</div>'+
+                '<div class="ct">'+fmt(v.visit_date)+' · owed '+money(m.owed)+', documented '+money(m.paid)+'</div>'+
+              '</div>'+
+              '<div class="amt" style="color:var(--danger)">+'+money(m.paid - m.owed)+'</div></div>';
+            hh += m.linked.map(function(e){
+              return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:7px">'+
+                '<span style="font-size:12.5px;min-width:0">'+esc(e.provider||'—')+' · '+money(e.paid_amount)+' · '+esc(fmt(e.service_date))+'</span>'+
+                '<button class="btn btn-ghost btn-sm" onclick="unlinkExpense(\''+e.id+'\')">Unlink</button></div>';
+            }).join('');
+            return hh + '</div>';
+          }).join('');
+      }
+
+      h += '</section>';
     }
 
     // Mileage: qualified, per-mile, and nobody tracks it because nobody has a
@@ -862,7 +940,7 @@
               (e.reimbursed
                 ? '<span class="pill done">reimbursed '+fmt(e.reimbursed_on)+'</span>'
                 : '<span class="pill open">claimable</span>')+
-              (e.doc_kind==='bill' ? ' <span class="pill warn">bill only</span>' : '')+
+              (e.doc_kind==='bill'||e.doc_kind==='statement' ? ' <span class="pill warn">'+esc(e.doc_kind)+' — not proof of payment</span>' : '')+
               (stale ? ' <span class="pill warn">pre-dates HSA</span>' : '')+
             '</div>'+
           '</div>'+
@@ -911,9 +989,10 @@
     var h = '<header><a href="home.html" class="home-back">‹ Home</a>'+
       '<h1 class="logo">Tally<span>.</span><small>Medical</small></h1></header>';
 
+    // Switching tabs also disarms any pending link — see cancelDraft().
     h += '<div class="tabs">'+
-      '<button class="tab'+(S.tab==='visits'?' on':'')+'" onclick="S.tab=\'visits\';S.err=\'\';S.msg=\'\';render()">Visits</button>'+
-      '<button class="tab'+(S.tab==='hsa'?' on':'')+'" onclick="S.tab=\'hsa\';S.err=\'\';S.msg=\'\';render()">HSA</button>'+
+      '<button class="tab'+(S.tab==='visits'?' on':'')+'" onclick="S.tab=\'visits\';S.err=\'\';S.msg=\'\';S.prefill=null;render()">Visits</button>'+
+      '<button class="tab'+(S.tab==='hsa'?' on':'')+'" onclick="S.tab=\'hsa\';S.err=\'\';S.msg=\'\';S.prefill=null;render()">HSA</button>'+
       '</div>';
 
     // A draft takes over the screen — it's a decision, not a background task.
