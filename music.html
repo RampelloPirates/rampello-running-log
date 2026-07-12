@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Crate — Bands to check out</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Crate">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --paper:#F4F1E9; --surface:#FFFFFF; --surface-warm:#FBF9F3; --ink:#1E241C;
+      --muted:#71776B; --green:#3A5A40; --green-deep:#2C4530; --amber:#BE722A;
+      --border:#E2DCCF; --green-tint:#EBF0E8; --danger:#A8443A; --spotify:#1DB954;
+      --f-display:'Space Grotesk',system-ui,sans-serif;
+      --f-body:'Inter',system-ui,sans-serif;
+      --f-mono:'JetBrains Mono',ui-monospace,monospace;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    html{overflow-x:hidden;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;overflow-x:hidden;}
+    input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    .wrap{max-width:520px;margin:0 auto;padding:0 16px 48px;}
+    header{padding:22px 0 14px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:14px;}
+    .row-between{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+    .h2{font-family:var(--f-display);font-size:15px;margin:2px 0 10px;}
+    .p{font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5;}
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:11px 16px;width:100%;transition:opacity .15s;}
+    .btn:disabled{opacity:.45;cursor:default;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-spotify{background:var(--spotify);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:11px;background:var(--surface-warm);width:100%;}
+    textarea.field{resize:none;}
+    .pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;}
+    .pill.ok{background:var(--green-tint);color:var(--green-deep);}
+    .pill.off{background:#F3E4E2;color:var(--danger);}
+    .key{font-family:var(--f-mono);font-size:11px;word-break:break-all;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:9px;color:var(--muted);line-height:1.5;}
+    .find{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px dashed var(--border);}
+    .find .body{flex:1;min-width:0;}
+    .find .name{font-size:14px;font-weight:600;overflow-wrap:anywhere;}
+    .find .meta{font-size:12px;color:var(--muted);font-family:var(--f-mono);margin-top:2px;overflow-wrap:anywhere;}
+    .x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;padding:0 2px;flex-shrink:0;}
+    .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:26px 10px;line-height:1.5;}
+    .err{color:var(--danger);font-size:13px;margin:10px 0 0;}
+    .ok{color:var(--green-deep);font-size:13px;margin:10px 0 0;font-weight:600;}
+    .loading{padding:40px;text-align:center;color:var(--muted);font-size:14px;}
+    .fine{font-size:11px;color:var(--muted);text-align:center;margin-top:16px;line-height:1.5;}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading your crate…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  var S = { loaded:false, userId:null, connected:false, ingestKey:'', playlistUrl:null,
+            finds:[], text:'', busy:false, err:'', msg:'' };
+
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  // ── Edge function ─────────────────────────────────────────────────────────
+  async function callCrate(payload){
+    var s = (await sb.auth.getSession()).data.session;
+    var res = await fetch(SUPABASE_URL+'/functions/v1/crate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(s?s.access_token:''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(payload),
+    });
+    var data = await res.json().catch(function(){ return null; });
+    if(!res.ok) throw new Error((data&&data.error) || ('Service error ('+res.status+')'));
+    return data;
+  }
+
+  async function loadFinds(){
+    var r = await sb.from('music_finds').select('*').order('created_at',{ascending:false}).limit(100);
+    S.finds = r.data || [];
+  }
+
+  async function refreshStatus(){
+    var st = await callCrate({mode:'status'});
+    S.connected = st.connected;
+    S.ingestKey = st.ingest_key;
+    S.playlistUrl = st.playlist_url;
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  async function connectSpotify(){
+    try{ var r = await callCrate({mode:'auth_url'}); window.location.href = r.url; }
+    catch(e){ S.err = e.message; render(); }
+  }
+
+  async function addFromText(){
+    if(!S.text.trim()||S.busy) return;
+    S.busy=true; S.err=''; S.msg=''; render();
+    try{
+      var out = await callCrate({mode:'ingest', text:S.text.trim()});
+      S.text=''; await afterIngest(out);
+    }catch(e){ S.err=e.message; }
+    finally{ S.busy=false; render(); }
+  }
+
+  async function addFromPhotos(files){
+    if(!files||!files.length||S.busy) return;
+    S.busy=true; S.err=''; S.msg=''; render();
+    try{
+      var imgs = [];
+      for(var i=0;i<files.length;i++){
+        imgs.push(await new Promise(function(res,rej){
+          var r=new FileReader();
+          r.onload=function(){ res(r.result.split(',')[1]); };
+          r.onerror=rej; r.readAsDataURL(files[i]);
+        }));
+      }
+      var out = await callCrate({mode:'ingest', images:imgs, media_type:files[0].type||'image/jpeg'});
+      await afterIngest(out);
+    }catch(e){ S.err=e.message; }
+    finally{ S.busy=false; render(); }
+  }
+
+  async function afterIngest(out){
+    var added = out.added||[], skipped = out.skipped||[];
+    if(out.playlist_url) S.playlistUrl = out.playlist_url;
+    var bits = [];
+    if(added.length){
+      var n = added.reduce(function(s,a){ return s+a.tracks; },0);
+      bits.push('Added '+added.length+' '+(added.length===1?'artist':'artists')+' ('+n+' tracks).');
+    }
+    if(skipped.length) bits.push(skipped.length+' skipped.');
+    S.msg = bits.join(' ') || (out.note || 'Nothing new found.');
+    await loadFinds();
+  }
+
+  // Removing a find only takes it out of the crate list — Spotify playlists are
+  // the user's to prune. Deleting the row also un-dedupes it, so a re-share
+  // will add it again.
+  async function removeFind(id){
+    await sb.from('music_finds').delete().eq('id', id);
+    await loadFinds(); render();
+  }
+
+  function copyKey(){
+    navigator.clipboard.writeText(S.ingestKey).then(function(){
+      S.msg='Ingest key copied.'; render();
+    });
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  function findRow(f){
+    var label = f.album ? (esc(f.artist)+' — '+esc(f.album)) : esc(f.artist);
+    var meta;
+    if(f.status==='added'){
+      meta = f.tracks_added+' track'+(f.tracks_added===1?'':'s')
+           + (f.matched_name && f.matched_name.toLowerCase()!==(f.album?f.artist+' — '+f.album:f.artist).toLowerCase()
+              ? ' · matched "'+esc(f.matched_name)+'"' : '');
+    } else if(f.status==='no_match'){ meta = 'no Spotify match';
+    } else if(f.status==='error'){ meta = esc(f.note||'error');
+    } else { meta = f.status; }
+    return '<div class="find"><div class="body"><div class="name">'+label+'</div>'+
+      '<div class="meta">'+meta+'</div></div>'+
+      '<button class="x" title="Remove" onclick="removeFind('+f.id+')">×</button></div>';
+  }
+
+  function render(){
+    var app = el('app');
+    if(!S.loaded){ app.innerHTML='<div class="loading">Loading your crate…</div>'; return; }
+
+    var h = '<header><a href="home.html" class="home-back">‹ Home</a>'+
+      '<h1 class="logo">Crate<span>.</span><small>Bands to check out</small></h1></header>';
+
+    // Spotify connection
+    h += '<section class="card"><div class="row-between" style="margin-bottom:8px">'+
+      '<span class="kicker">Spotify</span>'+
+      (S.connected ? '<span class="pill ok">connected</span>' : '<span class="pill off">not connected</span>')+
+      '</div>';
+    if(!S.connected){
+      h += '<p class="p">Connect Spotify so Crate can build and fill your playlist.</p>'+
+        '<button class="btn btn-spotify" onclick="connectSpotify()">Connect Spotify</button>';
+    }else{
+      h += '<p class="p">Artist highlights add their top 3 tracks. Album recommendations add the whole album.</p>';
+      if(S.playlistUrl){
+        h += '<a class="btn btn-spotify" style="display:block;text-align:center;text-decoration:none" href="'+S.playlistUrl+'" target="_blank" rel="noopener">Open the playlist</a>';
+      }else{
+        h += '<p class="p" style="margin:0">The playlist is created the first time something lands in it.</p>';
+      }
+    }
+    h += '</section>';
+
+    if(S.connected){
+      // Add something
+      h += '<section class="card"><h2 class="h2">Add to the crate</h2>'+
+        '<p class="p">Screenshot the post — album covers, a blog roundup, a carousel. Send several at once.</p>'+
+        '<input id="photos" type="file" accept="image/*" multiple style="display:none" onchange="addFromPhotos(this.files)">'+
+        '<button class="btn btn-primary" onclick="el(\'photos\').click()"'+(S.busy?' disabled':'')+'>'+
+          (S.busy?'Reading…':'📷 Screenshots')+'</button>'+
+        '<div style="text-align:center;margin:10px 0 8px" class="kicker">or</div>'+
+        '<textarea class="field" rows="2" placeholder="Paste a post caption, or just type: Wednesday, Geese — 3D Country" oninput="S.text=this.value" style="margin-bottom:10px">'+esc(S.text)+'</textarea>'+
+        '<button class="btn btn-ghost" onclick="addFromText()"'+(S.busy||!S.text.trim()?' disabled':'')+'>Add by name</button>';
+      if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
+      if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
+      h += '</section>';
+
+      // Shortcut key
+      h += '<section class="card"><h2 class="h2">iOS Shortcut key</h2>'+
+        '<p class="p">Paste this into the Shortcut\'s <b>x-ingest-key</b> header so sharing a screenshot from TikTok or Instagram lands here without signing in.</p>'+
+        '<div class="key">'+esc(S.ingestKey)+'</div>'+
+        '<button class="btn btn-ghost" style="margin-top:10px" onclick="copyKey()">Copy key</button></section>';
+    }
+
+    // The crate
+    h += '<section class="card"><h2 class="h2">In the crate</h2>';
+    if(!S.finds.length){
+      h += '<p class="empty">Nothing yet. Screenshot a band you want to remember and send it here.</p>';
+    }else{
+      h += S.finds.map(findRow).join('');
+    }
+    h += '</section>';
+
+    h += '<p class="fine">Removing a row here takes it out of the crate and lets it be added again — it doesn\'t touch the Spotify playlist.</p>';
+
+    app.innerHTML = h;
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  (async function(){
+    var u = await requireUser(); if(!u) return;
+    S.userId = u.user.id;
+
+    // Coming back from Spotify's consent screen?
+    var params = new URLSearchParams(window.location.search);
+    var code = params.get('code'), state = params.get('state');
+    if(params.get('error')){
+      S.err = 'Spotify declined: '+params.get('error');
+      history.replaceState({}, '', 'music.html');
+    } else if(code){
+      try{
+        await callCrate({mode:'auth_code', code:code, state:state});
+        S.msg = 'Spotify connected.';
+      }catch(e){ S.err = e.message; }
+      history.replaceState({}, '', 'music.html');
+    }
+
+    try{ await refreshStatus(); }catch(e){ S.err = S.err || e.message; }
+    await loadFinds();
+    S.loaded = true;
+    render();
+  })();
+  </script>
+</body>
+</html>
