@@ -18,7 +18,16 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // Single shared client. Pages reference `sb` directly.
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-function goToSignIn() { window.location.href = 'index.html'; }
+// Remember where they were headed. An installed iOS web app gets its own
+// storage container, separate from Safari's — so Crate, launched from its own
+// home-screen icon, starts with no session and lands here. Without ?next it
+// would sign you in and dump you on Tally's home screen, which looks for all
+// the world like the Crate icon just opens Tally.
+function goToSignIn() {
+  const here = window.location.pathname.split('/').pop() || '';
+  const next = here && here !== 'index.html' ? '?next=' + encodeURIComponent(here) : '';
+  window.location.href = 'index.html' + next;
+}
 
 // ---------------------------------------------------------------------------
 // Profile lookup. The app is individual-use: every signed-in user is a single

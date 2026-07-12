@@ -361,12 +361,20 @@
       messageEl.className = type || '';
     }
 
-    // Send a signed-in user to their home. getProfile() (auth.js) creates the
-    // runner profile on first sign-in, so any signed-in user has a home.
+    // Send a signed-in user where they were going. getProfile() (auth.js)
+    // creates the profile on first sign-in, so any signed-in user has a home.
+    //
+    // ?next is set by goToSignIn() when a page bounced them here. It matters for
+    // Crate: it's installed as its own app, and an iOS home-screen app has its
+    // own storage container, so it always starts signed out. Without honouring
+    // ?next, tapping the Crate icon would sign you in and land you on Tally.
+    // Only same-origin page names are accepted — never an arbitrary URL.
     async function routeByProfile() {
       const p = await getProfile();
       if (!p) return false;
-      window.location.href = 'home.html';
+      const want = new URLSearchParams(window.location.search).get('next') || '';
+      const safe = /^[a-z0-9_-]+\.html$/i.test(want) ? want : 'home.html';
+      window.location.href = safe;
       return true;
     }
 
