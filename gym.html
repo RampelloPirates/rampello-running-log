@@ -125,6 +125,7 @@
             muscle:null, groups:[], note:'',
             session:null, sets:[],           // the workout in progress
             history:[], openId:null,         // past workouts — NOT scoped to a gym
+            kitOpen:false,                   // the equipment list stays folded away once it exists
             newGym:'', kitText:'',
             busy:false, thinking:false, err:'', msg:'' };
 
@@ -243,7 +244,7 @@
   }
 
   async function pickGym(id){
-    S.gymId = id; S.muscle=null; S.groups=[]; S.note=''; S.msg='';
+    S.gymId = id; S.muscle=null; S.groups=[]; S.note=''; S.msg=''; S.kitOpen=false;
     await loadKit(); render();
   }
 
@@ -256,6 +257,7 @@
       for(var i=0;i<files.length;i++) imgs.push(await toBase64(files[i]));
       var out = await callGym({ mode:'inventory', gym_id:S.gymId, images:imgs });
       await loadKit();
+      S.kitOpen = true;   // something landed — show them what
       S.msg = out.added.length
         ? 'Added '+out.added.length+' new '+(out.added.length===1?'item':'items')+'.'
         : 'Nothing new — everything in those photos was already on the list.';
@@ -269,7 +271,7 @@
     try{
       var out = await callGym({ mode:'inventory', gym_id:S.gymId, text:S.kitText.trim() });
       await loadKit();
-      S.kitText='';
+      S.kitText=''; S.kitOpen = true;
       S.msg = 'Added '+out.added.length+' '+(out.added.length===1?'item':'items')+'.';
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
@@ -511,28 +513,40 @@
     if(!S.gymId){ app.innerHTML = h + historyCard(); return; }
 
     // ── Equipment
-    h += '<section class="card"><div class="row-between" style="margin-bottom:10px">'+
+    // Once a gym is inventoried you never want to look at this again — it's
+    // setup, not a daily surface. So it folds shut and stays that way, unless
+    // there's nothing in it yet (then it's the whole point of the screen).
+    var kitOpen = S.kitOpen || !S.kit.length;
+
+    h += '<section class="card">'+
+      '<div class="row-between" style="cursor:pointer"'+
+        (S.kit.length ? ' onclick="S.kitOpen=!S.kitOpen;render()"' : '')+'>'+
       '<h2 class="h2" style="margin:0">What\'s in '+esc(gym(S.gymId).name)+'</h2>'+
-      '<span class="kicker">'+S.kit.length+'</span></div>';
+      '<span class="kicker">'+(S.kit.length
+        ? S.kit.length+' item'+(S.kit.length===1?'':'s')+' '+(kitOpen?'▾':'▸')
+        : 'empty')+'</span></div>';
 
-    if(!S.kit.length){
-      h += '<p class="p">Photograph the gym — a few wide shots covering the racks, the machines, the dumbbells. Claude reads the equipment off them. Get the dumbbell rack in frame if you can: the weight range is what decides whether a suggestion is any use.</p>';
-    }else{
-      h += '<div class="chips">'+S.kit.map(function(k){
-        return '<span class="chip">'+esc(k.name)+
-          (k.detail?' <span class="d">'+esc(k.detail)+'</span>':'')+
-          '<button onclick="removeKit(\''+k.id+'\')" title="Remove">×</button></span>';
-      }).join('')+'</div>';
+    if(kitOpen){
+      h += '<div style="margin-top:12px">';
+      if(!S.kit.length){
+        h += '<p class="p">Photograph the gym — a few wide shots covering the racks, the machines, the dumbbells. Claude reads the equipment off them. Get the dumbbell rack in frame if you can: the weight range is what decides whether a suggestion is any use.</p>';
+      }else{
+        h += '<div class="chips">'+S.kit.map(function(k){
+          return '<span class="chip">'+esc(k.name)+
+            (k.detail?' <span class="d">'+esc(k.detail)+'</span>':'')+
+            '<button onclick="removeKit(\''+k.id+'\')" title="Remove">×</button></span>';
+        }).join('')+'</div>';
+      }
+
+      h += '<input id="photos" type="file" accept="image/*" multiple style="display:none" onchange="inventoryPhotos(this.files)">'+
+        '<button class="btn btn-primary" style="margin-top:14px" onclick="el(\'photos\').click()"'+(S.busy?' disabled':'')+'>'+
+          (S.busy?'Reading the room…':'📷 Photograph the gym')+'</button>'+
+        '<div class="setrow" style="margin-top:10px">'+
+        '<input class="field" placeholder="or type it: dumbbells to 50, a bench, pull-up bar" '+
+          'value="'+esc(S.kitText)+'" oninput="S.kitText=this.value" style="text-align:left">'+
+        '<button class="btn btn-ghost btn-sm" onclick="inventoryText()"'+(S.busy?' disabled':'')+'>Add</button>'+
+        '</div></div>';
     }
-
-    h += '<input id="photos" type="file" accept="image/*" multiple style="display:none" onchange="inventoryPhotos(this.files)">'+
-      '<button class="btn btn-primary" style="margin-top:14px" onclick="el(\'photos\').click()"'+(S.busy?' disabled':'')+'>'+
-        (S.busy?'Reading the room…':'📷 Photograph the gym')+'</button>'+
-      '<div class="setrow" style="margin-top:10px">'+
-      '<input class="field" placeholder="or type it: dumbbells to 50, a bench, pull-up bar" '+
-        'value="'+esc(S.kitText)+'" oninput="S.kitText=this.value" style="text-align:left">'+
-      '<button class="btn btn-ghost btn-sm" onclick="inventoryText()"'+(S.busy?' disabled':'')+'>Add</button>'+
-      '</div>';
     if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
     h += '</section>';
