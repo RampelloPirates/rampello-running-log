@@ -207,7 +207,10 @@
           (S.busy?'Reading…':'📷 Screenshots')+'</button>'+
         '<div style="text-align:center;margin:10px 0 8px" class="kicker">or</div>'+
         '<textarea class="field" rows="2" placeholder="Paste a post caption, or just type: Wednesday, Geese — 3D Country" oninput="S.text=this.value" style="margin-bottom:10px">'+esc(S.text)+'</textarea>'+
-        '<button class="btn btn-ghost" onclick="addFromText()"'+(S.busy||!S.text.trim()?' disabled':'')+'>Add by name</button>';
+        // Gate only on `busy`, never on S.text: this page re-renders by rebuilding
+        // its HTML, so re-rendering per keystroke would eat focus and the caret.
+        // addFromText() already no-ops on empty input.
+        '<button class="btn btn-ghost" onclick="addFromText()"'+(S.busy?' disabled':'')+'>Add by name</button>';
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
       if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
       h += '</section>';
