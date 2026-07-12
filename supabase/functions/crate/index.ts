@@ -111,13 +111,17 @@ const FINDS_SCHEMA = {
     // These become rows in the crate, so a missed record is visible and the
     // user can name it themselves instead of never knowing it was there.
     unidentified: { type: "array", items: { type: "string" } },
+    // Everything about the post that would help someone else look it up: who
+    // published it, the genre/scene, the caption, any date. This is the search
+    // query for the second pass — see identifyCovers().
+    context: { type: "string" },
   },
-  required: ["finds", "unidentified"],
+  required: ["finds", "unidentified", "context"],
   additionalProperties: false,
 };
 
 type Find = { artist: string; album: string | null; confidence?: string };
-type Extraction = { finds: Find[]; unidentified: string[] };
+type Extraction = { finds: Find[]; unidentified: string[]; context: string };
 
 async function extractFinds(content: unknown): Promise<Extraction> {
   const res = await fetch(ANTHROPIC_URL, {
@@ -151,7 +155,114 @@ async function extractFinds(content: unknown): Promise<Extraction> {
     unidentified: (out.unidentified || [])
       .filter((d: string) => d?.trim())
       .map((d: string) => d.trim().slice(0, 140)),
+    context: String(out.context || "").slice(0, 500),
   };
+}
+
+// ── Second pass: web-search the covers the first pass couldn't name ─────────
+//
+// Recognising a wordless cover from memory alone is a bad bet, and a lot of
+// covers are wordless. But these posts are almost always about NEW releases,
+// which means the press exists — and the screenshot itself carries the search
+// terms: the publication's watermark, the caption, and the records we COULD
+// read. "What emo albums did Brooklyn Vegan feature this week" is a findable
+// list, and the unnamed cover is very likely on it.
+//
+// So: hand the model the same image, everything we learned about the post, and
+// a web_search tool, and let it go look. This runs only when the first pass
+// came up short, and only on the background path — it's slow (several searches)
+// but nobody is waiting on it.
+//
+// No output_config here on purpose: server-side tools plus a constrained output
+// format is a combination I can't verify from this box, and a 400 would take
+// the whole ingest down. The tolerant parser below is the cheaper bet.
+async function identifyCovers(
+  images: string[],
+  mediaType: string,
+  unknown: string[],
+  context: string,
+  known: Find[],
+): Promise<Array<{ index: number; artist: string; album: string | null }>> {
+  const today = new Date().toISOString().slice(0, 10);
+  const knownList = known.length
+    ? known.map((f) => (f.album ? `${f.artist} — ${f.album}` : f.artist)).join("; ")
+    : "(none)";
+
+  const prompt =
+`Today is ${today}. Someone screenshotted a music post and I could not name every record in it. Help me name the rest.
+
+What I could tell about the post: ${context}
+Records in it I DID identify: ${knownList}
+
+Covers in the screenshot I could NOT name:
+${unknown.map((d, i) => `${i + 1}. ${d}`).join("\n")}
+
+The screenshot is attached. Use web search to work out what these records are.
+
+How to go about it:
+- These posts are nearly always about NEW releases — records out in the last few weeks. Search for what came out recently in this scene.
+- Try to find the actual post or article. The publication's name, the caption, and the records I already identified are strong search terms — a roundup that includes ${known[0] ? known[0].artist : "these bands"} is probably THE post, and its other entries are your candidates.
+- Then match each unnamed cover to a candidate: check the cover art you find described, the era, the scene, the release date.
+
+Return ONLY a JSON object, no prose:
+{"covers":[{"index":1,"artist":"Band Name","album":"Album Title or null"}]}
+
+- "index" refers to the numbered list above.
+- Use null for "album" only if you're identifying the artist but not a specific record.
+- OMIT a cover entirely if you still can't place it. Do not invent a record to fill a slot — a wrong name is worse than an honest gap here.`;
+
+  const content: unknown[] = images.map((b64) => ({
+    type: "image",
+    source: { type: "base64", media_type: sniffMedia(b64, mediaType), data: b64 },
+  }));
+  content.push({ type: "text", text: prompt });
+
+  const res = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY!,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 8000,
+      thinking: { type: "adaptive" },
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
+      messages: [{ role: "user", content }],
+    }),
+  });
+
+  if (!res.ok) {
+    // A failed second pass is not a failed ingest. The covers stay unidentified
+    // and still surface as rows; we just didn't manage to rescue them.
+    console.error("identifyCovers failed:", res.status, (await res.text()).slice(0, 300));
+    return [];
+  }
+
+  const data = await res.json();
+  const text = (data.content || [])
+    .filter((b: { type: string }) => b.type === "text")
+    .map((b: { text: string }) => b.text)
+    .join("");
+
+  try {
+    const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    const first = clean.search(/[{[]/);
+    const last = clean.lastIndexOf("}");
+    if (first === -1 || last <= first) return [];
+    const out = JSON.parse(clean.slice(first, last + 1));
+    return (out.covers || [])
+      .filter((c: any) => c && c.artist && Number.isFinite(Number(c.index)))
+      .map((c: any) => ({
+        index: Number(c.index),
+        artist: String(c.artist).trim(),
+        album: c.album ? String(c.album).trim() : null,
+      }));
+  } catch {
+    console.error("identifyCovers: unparseable response");
+    return [];
+  }
 }
 
 // The Shortcut can't be trusted to label the image, and Anthropic rejects a
@@ -467,14 +578,34 @@ async function runIngest(
     text: text ? `${EXTRACT_PROMPT}\n\nPost text:\n${text}` : EXTRACT_PROMPT,
   });
 
-  const { finds, unidentified } = await extractFinds(content);
+  const { finds, unidentified, context } = await extractFinds(content);
   const source = images.length ? "screenshot" : "text";
 
-  // A cover Claude saw but couldn't name becomes a row in the crate, not just a
-  // toast. The toast only exists on the web path and only until the next
-  // render; the Shortcut never sees it at all. A row survives both, and the
-  // user can read the description, recognise the record, and add it by name.
-  for (const desc of unidentified) {
+  // Anything the first pass couldn't name gets a second, slower look — this
+  // time with web search, because these posts are about new releases and the
+  // press for them exists. Only worth doing when there's an image to match
+  // against and something actually went unnamed.
+  const stillUnknown = [...unidentified];
+  const rescued: Find[] = [];
+
+  if (unidentified.length && images.length) {
+    const found = await identifyCovers(images, mediaType, unidentified, context, finds);
+    // Walk highest-index-first so the splices don't shift the ones behind them.
+    for (const c of found.sort((a, b) => b.index - a.index)) {
+      const i = c.index - 1;
+      if (i < 0 || i >= stillUnknown.length) continue;
+      stillUnknown.splice(i, 1);
+      rescued.push({ artist: c.artist, album: c.album, confidence: "guess" });
+    }
+  }
+
+  const all = [...finds, ...rescued];
+
+  // A cover we still can't name becomes a row in the crate, not just a toast.
+  // The toast only exists on the web path and only until the next render; the
+  // Shortcut never sees it. A row survives both, and the description is often
+  // enough for a human to go "that's Joyce Manor" and add it by name.
+  for (const desc of stillUnknown) {
     await admin.from("music_finds").insert({
       user_id: row.user_id,
       artist: desc,
@@ -485,11 +616,11 @@ async function runIngest(
     });   // a duplicate description just bounces off the dedupe index
   }
 
-  const missed = unidentified.length
-    ? `Couldn't identify ${unidentified.length} cover${unidentified.length === 1 ? "" : "s"} — see the crate.`
+  const missed = stillUnknown.length
+    ? `Couldn't identify ${stillUnknown.length} cover${stillUnknown.length === 1 ? "" : "s"} — see the crate.`
     : null;
 
-  if (!finds.length) {
+  if (!all.length) {
     return { added: [], skipped: [], note: missed || "No artists found in that." };
   }
 
@@ -499,7 +630,7 @@ async function runIngest(
   const added: unknown[] = [];
   const skipped: unknown[] = [];
 
-  for (const f of finds) {
+  for (const f of all) {
     const artist = f.artist.trim();
     const album = f.album?.trim() || null;
     const guessed = f.confidence === "guess";
@@ -508,7 +639,7 @@ async function runIngest(
     // without us having to query for them.
     const claim = await admin.from("music_finds").insert({
       user_id: row.user_id, artist, album, source, status: "pending",
-      note: guessed ? "Recognised from the cover art." : null,
+      note: guessed ? "Cover had no text — identified from the artwork." : null,
     }).select("id").single();
 
     if (claim.error) {

@@ -176,7 +176,10 @@
     if(f.status==='added'){
       meta = f.tracks_added+' track'+(f.tracks_added===1?'':'s')
            + (f.matched_name && f.matched_name.toLowerCase()!==(f.album?f.artist+' — '+f.album:f.artist).toLowerCase()
-              ? ' · matched "'+esc(f.matched_name)+'"' : '');
+              ? ' · matched "'+esc(f.matched_name)+'"' : '')
+           // Flag the ones that came from a wordless cover — those are inferred,
+           // not read, so they're the ones worth a second look.
+           + (f.note ? ' · '+esc(f.note) : '');
     } else if(f.status==='no_match'){ meta = 'no Spotify match';
     } else if(f.status==='error'){ meta = esc(f.note||'error');
     } else { meta = f.status; }
