@@ -148,10 +148,46 @@
   }
 
   // ── render ──
+  // One row renderer, two readings. For a supplement the interesting facts are
+  // the dose and when to take it. For a prescription they're who put you on it
+  // and how much of the course is left — that's the number you're actually
+  // tracking, and it's the whole reason the two are listed separately.
+  function suppRow(s, rx){
+    var on=!!S.taken[s.id];
+    var meta=[];
+    if(s.dose) meta.push(esc(s.dose));
+
+    var left=null;
+    if(rx && s.ends_on){
+      left = Math.round((new Date(s.ends_on+'T12:00:00') - new Date(S.day+'T12:00:00'))/86400000) + 1;
+    }
+    if(rx){
+      if(left!=null) meta.push(left<=1 ? 'last dose' : left+' days left');
+      else meta.push('ongoing');
+      if(s.prescriber) meta.push(esc(s.prescriber));
+    }
+
+    return '<div class="supp"><button class="check'+(on?' on':'')+'" onclick="toggleTaken(\''+s.id+'\')" aria-label="Toggle taken">'+(on?'✓':'')+'</button>'+
+      '<div class="body"><div class="name">'+esc(s.name)+
+        (s.timing&&s.timing!=='Anytime'?'<span class="badge">'+esc(s.timing)+'</span>':'')+
+        (rx&&left!=null&&left<=3?'<span class="badge" style="background:#F3E4E2;color:var(--danger)">'+(left<=1?'finishing':left+'d')+'</span>':'')+
+      '</div>'+
+      (meta.length?('<div class="meta">'+meta.join(' · ')+'</div>'):'')+'</div>'+
+      '<button class="icon-btn" title="Edit" onclick="openEdit(\''+s.id+'\')">✎</button></div>';
+  }
+
   function render(){
     var app=el('app');
     if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
     var h='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Supplements</small></h1></header>';
+
+    // A supplement is a standing habit with no end; a prescription is a finite
+    // course you are trying to FINISH. Same daily check-off, different purpose —
+    // so they get their own sections. Mixing them meant the thing you most need
+    // to know about a prescription ("four days left") was buried in a list of
+    // vitamins that will never run out.
+    var supps = S.stack.filter(function(s){ return s.kind!=='prescription'; });
+    var scrips = S.stack.filter(function(s){ return s.kind==='prescription'; });
 
     var takenCount=S.stack.filter(function(s){return S.taken[s.id];}).length;
     var isToday=S.day===todayKey();
@@ -161,28 +197,12 @@
       '<button class="day-arrow" onclick="changeDay(1)"'+(isToday?' disabled':'')+' aria-label="Next day">›</button>'+
       (isToday?'':'<button class="day-today" onclick="gotoDay(\''+todayKey()+'\')">Today</button>')+
       '</div><span class="progress">'+takenCount+' of '+S.stack.length+' taken</span></div>';
-    if(!S.stack.length){
+
+    h+='<div class="kicker" style="margin-bottom:8px">Supplements</div>';
+    if(!supps.length){
       h+='<p class="empty">No supplements yet. Add the things you take and check them off each day.</p>';
     }else{
-      h+=S.stack.map(function(s){
-        var on=!!S.taken[s.id];
-        var rx = s.kind==='prescription';
-        // A prescription needs to look different from a vitamin, and needs to
-        // say when it runs out — otherwise you can't tell what you're finishing.
-        var meta = [];
-        if(s.dose) meta.push(esc(s.dose));
-        if(rx && s.prescriber) meta.push('Rx · '+esc(s.prescriber));
-        if(rx && s.ends_on){
-          var left = Math.round((new Date(s.ends_on+'T12:00:00') - new Date().setHours(12,0,0,0))/86400000);
-          meta.push(left<=0 ? 'last day' : left+' day'+(left===1?'':'s')+' left');
-        }
-        return '<div class="supp"><button class="check'+(on?' on':'')+'" onclick="toggleTaken(\''+s.id+'\')" aria-label="Toggle taken">'+(on?'✓':'')+'</button>'+
-          '<div class="body"><div class="name">'+esc(s.name)+
-            (rx?'<span class="badge">Rx</span>':'')+
-            (s.timing&&s.timing!=='Anytime'?'<span class="badge">'+esc(s.timing)+'</span>':'')+'</div>'+
-          (meta.length?('<div class="meta">'+meta.join(' · ')+'</div>'):'')+'</div>'+
-          '<button class="icon-btn" title="Edit" onclick="openEdit(\''+s.id+'\')">✎</button></div>';
-      }).join('');
+      h+=supps.map(function(s){ return suppRow(s, false); }).join('');
     }
     if(!S.form){
       h+='<button class="link" onclick="openAdd()">+ Add a supplement</button>';
@@ -200,6 +220,19 @@
     }
     if(S.err) h+='<p class="err">'+esc(S.err)+'</p>';
     h+='</section>';
+
+    // ── Prescriptions ────────────────────────────────────────────────────────
+    // Only shown when there are any: an empty "Prescriptions" heading on a page
+    // you open every morning is just noise most of the year.
+    if(scrips.length){
+      var doneToday = scrips.filter(function(s){ return S.taken[s.id]; }).length;
+      h+='<section class="card"><div class="row-between" style="margin-bottom:10px">'+
+        '<div class="kicker">Prescriptions</div>'+
+        '<span class="progress">'+doneToday+' of '+scrips.length+' taken</span></div>'+
+        scrips.map(function(s){ return suppRow(s, true); }).join('')+
+        '<p class="empty" style="margin-top:10px;font-size:11.5px">Logged from a visit in Medical. A course disappears from here on its own once it\'s finished.</p>'+
+        '</section>';
+    }
 
     // history
     h+='<section class="card"><div class="kicker" style="margin-bottom:6px">Last 14 days</div>';
