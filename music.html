@@ -4,10 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Crate — Bands to check out</title>
-  <meta name="theme-color" content="#3A5A40">
-  <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2C4530">
+  <!-- Crate installs as its own app, with its own record icon and manifest —
+       it is deliberately NOT part of Tally's manifest, so "Add to Home Screen"
+       here gives you a separate icon rather than a second door into Tally. -->
+  <link rel="icon" type="image/svg+xml" href="crate-icon.svg">
+  <link rel="apple-touch-icon" href="crate-touch-icon.png">
+  <link rel="manifest" href="crate-manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Crate">
@@ -192,7 +195,9 @@
     var app = el('app');
     if(!S.loaded){ app.innerHTML='<div class="loading">Loading your crate…</div>'; return; }
 
-    var h = '<header><a href="home.html" class="home-back">‹ Home</a>'+
+    // No "‹ Home" link — Crate is its own installed app, not a room inside
+    // Tally. A back-link would dump you into a different app's home screen.
+    var h = '<header>'+
       '<h1 class="logo">Crate<span>.</span><small>Bands to check out</small></h1></header>';
 
     // Spotify connection
@@ -221,11 +226,11 @@
         '<button class="btn btn-primary" onclick="el(\'photos\').click()"'+(S.busy?' disabled':'')+'>'+
           (S.busy?'Reading…':'📷 Screenshots')+'</button>'+
         '<div style="text-align:center;margin:10px 0 8px" class="kicker">or</div>'+
-        '<textarea class="field" rows="2" placeholder="Paste a post caption, or just type: Wednesday, Geese — 3D Country" oninput="S.text=this.value" style="margin-bottom:10px">'+esc(S.text)+'</textarea>'+
+        '<textarea class="field" rows="3" placeholder="Or just ask: the last 3 singles by Colby Acuff · the new MJ Lenderman record · Geese — 3D Country · Wednesday" oninput="S.text=this.value" style="margin-bottom:10px">'+esc(S.text)+'</textarea>'+
         // Gate only on `busy`, never on S.text: this page re-renders by rebuilding
         // its HTML, so re-rendering per keystroke would eat focus and the caret.
         // addFromText() already no-ops on empty input.
-        '<button class="btn btn-ghost" onclick="addFromText()"'+(S.busy?' disabled':'')+'>Add by name</button>';
+        '<button class="btn btn-ghost" onclick="addFromText()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Working…':'Add')+'</button>';
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
       if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
       h += '</section>';

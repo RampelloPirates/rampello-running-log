@@ -59,7 +59,6 @@
     .feature.labs .icon { background: #F1DEDA; }
     .feature.vitals .icon { background: #E6EEF2; }
     .feature.oura .icon { background: #EDE4EE; }
-    .feature.crate .icon { background: #DCEFE0; }
     .feature.recap .icon { background: #E9EDE6; }
 
     .footnote { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2rem; }
@@ -136,14 +135,9 @@
         <span class="chev">›</span>
       </a>
 
-      <a class="feature crate" href="music.html">
-        <span class="icon">🎧</span>
-        <span class="copy">
-          <span class="title">Crate</span>
-          <span class="desc">Bands to check out → Spotify</span>
-        </span>
-        <span class="chev">›</span>
-      </a>
+      <!-- Crate is not listed here on purpose: it's a separate installed app
+           (crate-manifest.json), not a section of Tally. It lives at
+           music.html and gets its own home-screen icon. -->
 
       <a class="feature recap" href="recap.html">
         <span class="icon">📋</span>

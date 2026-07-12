@@ -1,0 +1,15 @@
+{
+  "name": "Crate",
+  "short_name": "Crate",
+  "description": "Screenshot a music post, get the records in your Spotify crate.",
+  "start_url": "/music.html",
+  "scope": "/music.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F1E9",
+  "theme_color": "#2C4530",
+  "icons": [
+    { "src": "/crate-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/crate-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

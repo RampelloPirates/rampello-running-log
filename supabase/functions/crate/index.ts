@@ -120,7 +120,7 @@ const FINDS_SCHEMA = {
   additionalProperties: false,
 };
 
-type Find = { artist: string; album: string | null; confidence?: string };
+type Find = { artist: string; album: string | null; confidence?: string; count?: number };
 type Extraction = { finds: Find[]; unidentified: string[]; context: string };
 
 async function extractFinds(content: unknown): Promise<Extraction> {
@@ -369,7 +369,7 @@ async function sp(token: string, path: string, init: RequestInit = {}) {
 // for Development Mode apps (Feb 2026), and stripped `popularity` from track
 // objects, so relevance-ranked search is the best available stand-in for "top
 // tracks". Search `limit` is capped at 10 as of the same change.
-async function resolveArtist(token: string, artist: string) {
+async function resolveArtist(token: string, artist: string, count = TOP_TRACKS_PER_ARTIST) {
   const q = encodeURIComponent(`artist:"${artist}"`);
   const r = await sp(token, `/search?q=${q}&type=track&limit=10`);
   const tracks = r?.tracks?.items || [];
@@ -381,7 +381,9 @@ async function resolveArtist(token: string, artist: string) {
   const own = tracks.filter((t: any) =>
     (t.artists || []).some((a: any) => a.name.toLowerCase() === wanted)
   );
-  const picked = (own.length ? own : tracks).slice(0, TOP_TRACKS_PER_ARTIST);
+  // Search caps at 10 results in Development Mode, so that's the ceiling on how
+  // many tracks anyone can ask for.
+  const picked = (own.length ? own : tracks).slice(0, count);
   if (!picked.length) return null;
 
   return {
@@ -591,6 +593,28 @@ async function runIngest(
   mediaType: string,
   text: string,
 ) {
+  const source = images.length ? "screenshot" : "text";
+  const token = await accessTokenFor(row);
+  const playlistId = await ensurePlaylist(token, row);
+
+  // Typing into the box is not the same as sharing a screenshot. A screenshot
+  // is a list of records to read off; typed text is a REQUEST — "the last 3
+  // singles by Colby Acuff", "Wednesday's latest album", "five Geese songs".
+  // So the two go down different paths: images get read, text gets understood.
+  if (!images.length && text) {
+    const reqs = await parseRequests(text);
+    const finds = await expandRequests(token, reqs);
+    if (!finds.length) {
+      return { added: [], skipped: [], note: "Couldn't work out what to add from that." };
+    }
+    const r = await resolveAndAdd(row, token, playlistId, finds, source);
+    return {
+      ...r,
+      note: null,
+      playlist_url: `https://open.spotify.com/playlist/${playlistId}`,
+    };
+  }
+
   const content: unknown[] = images.map((b64) => ({
     type: "image",
     source: { type: "base64", media_type: sniffMedia(b64, mediaType), data: b64 },
@@ -601,10 +625,6 @@ async function runIngest(
   });
 
   const { finds, unidentified, context } = await extractFinds(content);
-  const source = images.length ? "screenshot" : "text";
-
-  const token = await accessTokenFor(row);
-  const playlistId = await ensurePlaylist(token, row);
 
   const { added, skipped } = await resolveAndAdd(row, token, playlistId, finds, source);
 
@@ -649,6 +669,160 @@ async function runIngest(
   };
 }
 
+// ── Typed text → a request we can actually carry out ───────────────────────
+//
+// "Add the last 3 singles released by Colby Acuff" is not an artist name and
+// not an album title, and shoving it through the screenshot extractor turned it
+// into "Colby Acuff, top 3 tracks" — quietly ignoring what was asked for. This
+// parses the ask instead.
+const REQUEST_PROMPT =
+  `Turn what the user typed into a list of things to add to their music crate.
+
+For each artist they mention:
+- "artist": the artist or band name.
+- "want": what they asked for —
+    "album"        — a specific named album ("Geese - 3D Country", "add Cody by Joyce Manor")
+    "latest_album" — their newest record ("the new Wednesday album", "latest from Turnstile")
+    "singles"      — recent singles ("the last 3 singles by Colby Acuff")
+    "top_tracks"   — a taste of the artist, the default when they just name a band
+- "album": the album title if want is "album". Otherwise null.
+- "count": how many they asked for, if they said a number. Otherwise null.
+
+Examples:
+"Colby Acuff" → artist: Colby Acuff, want: top_tracks, album: null, count: null
+"add the last 3 singles released by Colby Acuff" → artist: Colby Acuff, want: singles, album: null, count: 3
+"Geese - 3D Country" → artist: Geese, want: album, album: 3D Country, count: null
+"the new MJ Lenderman record" → artist: MJ Lenderman, want: latest_album, album: null, count: null
+"give me 5 Wednesday songs and the latest Hotline TNT" → two entries: Wednesday (top_tracks, count 5), Hotline TNT (latest_album)
+
+Do not invent artists. If you genuinely can't find an artist in the text, return an empty list.`;
+
+const REQUEST_SCHEMA = {
+  type: "object",
+  properties: {
+    requests: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          artist: { type: "string" },
+          want: { enum: ["album", "latest_album", "singles", "top_tracks"] },
+          album: { anyOf: [{ type: "string" }, { type: "null" }] },
+          count: { anyOf: [{ type: "integer" }, { type: "null" }] },
+        },
+        required: ["artist", "want", "album", "count"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["requests"],
+  additionalProperties: false,
+};
+
+type Req = { artist: string; want: string; album: string | null; count: number | null };
+
+async function parseRequests(text: string): Promise<Req[]> {
+  const res = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY!,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 2000,
+      output_config: { format: { type: "json_schema", schema: REQUEST_SCHEMA } },
+      messages: [{ role: "user", content: `${REQUEST_PROMPT}\n\nThey typed:\n${text}` }],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Anthropic ${res.status} — ${(await res.text()).slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const out = JSON.parse(
+    (data.content || [])
+      .filter((b: { type: string }) => b.type === "text")
+      .map((b: { text: string }) => b.text)
+      .join(""),
+  );
+  return (out.requests || []).filter((r: Req) => r.artist?.trim());
+}
+
+// A request → concrete records. "Last 3 singles" becomes three named singles,
+// so they land in the crate with real titles you can recognise, rather than one
+// opaque "Colby Acuff (singles)" row.
+async function expandRequests(token: string, reqs: Req[]): Promise<Find[]> {
+  const finds: Find[] = [];
+
+  for (const r of reqs) {
+    const artist = r.artist.trim();
+    const n = r.count && r.count > 0 ? Math.min(r.count, 20) : null;
+
+    if (r.want === "album" && r.album) {
+      finds.push({ artist, album: r.album.trim() });
+    } else if (r.want === "latest_album") {
+      const names = await recentReleases(token, artist, "album", 1);
+      // No luck reading their discography? Fall back to a taste of the artist
+      // rather than dropping the request on the floor.
+      if (names.length) finds.push({ artist, album: names[0] });
+      else finds.push({ artist, album: null, count: n || TOP_TRACKS_PER_ARTIST });
+    } else if (r.want === "singles") {
+      const names = await recentReleases(token, artist, "single", n || 3);
+      if (names.length) for (const name of names) finds.push({ artist, album: name });
+      else finds.push({ artist, album: null, count: n || TOP_TRACKS_PER_ARTIST });
+    } else {
+      finds.push({ artist, album: null, count: n || TOP_TRACKS_PER_ARTIST });
+    }
+  }
+
+  return finds;
+}
+
+async function artistId(token: string, artist: string): Promise<string | null> {
+  const q = encodeURIComponent(`artist:"${artist}"`);
+  const r = await sp(token, `/search?q=${q}&type=artist&limit=10`);
+  const items = r?.artists?.items || [];
+  const exact = items.find((a: any) => a.name.toLowerCase() === artist.toLowerCase());
+  return (exact || items[0])?.id || null;
+}
+
+// The newest `n` releases of a given kind ("album" or "single"), newest first.
+async function recentReleases(
+  token: string,
+  artist: string,
+  group: "album" | "single",
+  n: number,
+): Promise<string[]> {
+  const id = await artistId(token, artist);
+  if (!id) return [];
+
+  let items: any[] = [];
+  try {
+    const r = await sp(token, `/artists/${id}/albums?include_groups=${group}&limit=50`);
+    items = r?.items || [];
+  } catch {
+    // Spotify has been culling endpoints for Development Mode apps, and this one
+    // may be next. Fall back to search, which we know still works.
+    const q = encodeURIComponent(`artist:"${artist}"`);
+    const r = await sp(token, `/search?q=${q}&type=album&limit=10`);
+    items = (r?.albums?.items || []).filter((a: any) => a.album_type === group);
+  }
+
+  const seen = new Set<string>();
+  return items
+    .filter((a: any) => a?.name && a?.release_date)
+    .sort((a: any, b: any) => String(b.release_date).localeCompare(String(a.release_date)))
+    .filter((a: any) => {
+      const k = a.name.toLowerCase();
+      if (seen.has(k)) return false;    // deluxe/remaster reissues duplicate names
+      seen.add(k);
+      return true;
+    })
+    .slice(0, n)
+    .map((a: any) => a.name as string);
+}
+
 // ── Finds → Spotify → playlist ─────────────────────────────────────────────
 // Shared by the first pass and the web-search rescue, so a record found either
 // way lands in the crate the same.
@@ -682,7 +856,7 @@ async function resolveAndAdd(
     try {
       const hit = album
         ? await resolveAlbum(token, artist, album)
-        : await resolveArtist(token, artist);
+        : await resolveArtist(token, artist, f.count || TOP_TRACKS_PER_ARTIST);
 
       if (!hit) {
         await admin.from("music_finds").update({
