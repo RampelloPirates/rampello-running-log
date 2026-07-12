@@ -81,12 +81,16 @@
     <h1 class="greeting" id="greeting">Welcome</h1>
     <p class="sub">What would you like to do?</p>
 
+    <!-- Order is deliberate: the things you touch daily first (vitals,
+         nutrition, supplements), then the training you do (run log, gym), then
+         the things you read rather than enter (labs, oura), with the recap —
+         which is a report ABOUT all of the above — last. -->
     <div class="cards">
-      <a class="feature run" href="my_runs.html">
-        <span class="icon">🏃</span>
+      <a class="feature vitals" href="vitals.html">
+        <span class="icon">🩺</span>
         <span class="copy">
-          <span class="title">Run Log</span>
-          <span class="desc">Log runs, see your week and trends</span>
+          <span class="title">Vitals</span>
+          <span class="desc">BP, weight, pulse over time</span>
         </span>
         <span class="chev">›</span>
       </a>
@@ -100,15 +104,6 @@
         <span class="chev">›</span>
       </a>
 
-      <a class="feature gym" href="gym.html">
-        <span class="icon">🏋️</span>
-        <span class="copy">
-          <span class="title">Gym</span>
-          <span class="desc">Your gyms, their kit, what to do there</span>
-        </span>
-        <span class="chev">›</span>
-      </a>
-
       <a class="feature supplements" href="supplements.html">
         <span class="icon">💊</span>
         <span class="copy">
@@ -118,20 +113,29 @@
         <span class="chev">›</span>
       </a>
 
+      <a class="feature run" href="my_runs.html">
+        <span class="icon">🏃</span>
+        <span class="copy">
+          <span class="title">Run Log</span>
+          <span class="desc">Log runs, see your week and trends</span>
+        </span>
+        <span class="chev">›</span>
+      </a>
+
+      <a class="feature gym" href="gym.html">
+        <span class="icon">🏋️</span>
+        <span class="copy">
+          <span class="title">Gym</span>
+          <span class="desc">Your gyms, their kit, what to do there</span>
+        </span>
+        <span class="chev">›</span>
+      </a>
+
       <a class="feature labs" href="labs.html">
         <span class="icon">🩸</span>
         <span class="copy">
           <span class="title">Labs</span>
           <span class="desc">Bloodwork & results over time</span>
-        </span>
-        <span class="chev">›</span>
-      </a>
-
-      <a class="feature vitals" href="vitals.html">
-        <span class="icon">🩺</span>
-        <span class="copy">
-          <span class="title">Vitals</span>
-          <span class="desc">BP, weight, pulse over time</span>
         </span>
         <span class="chev">›</span>
       </a>
