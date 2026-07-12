@@ -105,6 +105,13 @@
     .flag.soft{background:var(--amber-tint);color:#8A5219;border-left-color:var(--amber);}
     .thumb{margin-top:9px;}
     .thumb a{font-size:12px;color:var(--green);font-weight:600;text-decoration:none;}
+
+    /* Pages staged before reading */
+    .pages{display:flex;flex-wrap:wrap;gap:6px;}
+    .page{display:inline-flex;align-items:center;gap:4px;background:var(--green-tint);color:var(--green-deep);
+          border-radius:8px;padding:6px 6px 6px 10px;font-size:12.5px;font-weight:600;font-family:var(--f-mono);}
+    .page button{background:none;border:none;color:var(--green-deep);opacity:.5;cursor:pointer;font-size:14px;line-height:1;padding:0 3px;}
+    .page button:hover{opacity:1;color:var(--danger);}
   </style>
 </head>
 <body>
@@ -129,7 +136,9 @@
 
   var S = { loaded:false, userId:null, tab:'visits',
             visits:[], expenses:[], hsa:{ established_on:null, mileage_rate:0.21 },
-            draft:null, draftKind:null, draftFile:null,   // the reviewed-before-save extraction
+            pages:[], pageKind:null,                      // pages staged before reading
+            draft:null, draftKind:null, draftFiles:[],    // the reviewed-before-save extraction
+            prefill:null,                                 // set when filing a receipt against a visit
             openId:null, busy:false, err:'', msg:'' };
 
   function el(id){ return document.getElementById(id); }
@@ -193,43 +202,116 @@
     return path;
   }
 
+  async function uploadAll(files){
+    var paths = [];
+    for(var i=0;i<files.length;i++) paths.push(await upload(files[i]));
+    return paths;
+  }
+
   async function viewImage(path){
     var r = await sb.storage.from('medical').createSignedUrl(path, 3600);
     if(r.data && r.data.signedUrl) window.open(r.data.signedUrl, '_blank');
   }
 
+  // ── Pages ─────────────────────────────────────────────────────────────────
+  // A visit summary is routinely three pages and an itemised bill is worse. You
+  // stage every page first, then read them as ONE document — the visit date is
+  // often on page 1 and the prescriptions on page 3, so reading them separately
+  // would produce three broken half-records instead of one good one.
+  function addPages(kind, files){
+    if(!files || !files.length) return;
+    if(S.pageKind !== kind){ S.pages = []; S.pageKind = kind; }
+    for(var i=0;i<files.length;i++) S.pages.push(files[i]);
+    S.err=''; S.msg='';
+    render();
+  }
+  function dropPage(i){ S.pages.splice(i,1); if(!S.pages.length) S.pageKind=null; render(); }
+  function clearPages(){ S.pages=[]; S.pageKind=null; render(); }
+
   // ── Snap → extract → review ───────────────────────────────────────────────
   // Never save straight from the extraction. This is a medical record and a tax
   // document; a misread date or a billed-vs-paid mixup is exactly what you'd
   // want to catch, and you can only catch it if you're shown it first.
-  async function snap(kind, file){
-    if(!file || S.busy) return;
+  async function readPages(kind){
+    if(!S.pages.length || S.busy) return;
     S.busy=true; S.err=''; S.msg=''; render();
     try{
-      var b64 = await toBase64(file);
-      var out = await callMedical({ mode:kind, image:b64 });
-      S.draft = out; S.draftKind = kind; S.draftFile = file;
+      var imgs = [];
+      for(var i=0;i<S.pages.length;i++) imgs.push(await toBase64(S.pages[i]));
+      var out = await callMedical({ mode:kind, images:imgs });
+      S.draft = out; S.draftKind = kind; S.draftFiles = S.pages.slice();
       if(!S.draft.person) S.draft.person = 'Me';
+
+      if(kind==='expense'){
+        // Came here from "File a receipt" on a visit? That link is explicit —
+        // it wins over anything guessed from the page.
+        if(S.prefill){
+          Object.keys(S.prefill).forEach(function(k){
+            if(S.prefill[k]!=null && S.draft[k]==null) S.draft[k] = S.prefill[k];
+          });
+          S.draft.visit_id = S.prefill.visit_id;
+          S.prefill = null;
+        }
+        // Otherwise guess: a receipt almost always belongs to a visit you've
+        // already logged, and matching it by hand is the kind of chore that
+        // makes people stop filing receipts.
+        if(!S.draft.visit_id){
+          var g = S.visits.find(function(v){
+            return v.visit_date === S.draft.service_date;
+          }) || S.visits.find(function(v){
+            return S.draft.provider && v.provider &&
+                   v.provider.toLowerCase().indexOf(S.draft.provider.toLowerCase().slice(0,8)) !== -1;
+          });
+          if(g) S.draft.visit_id = g.id;
+        }
+      }
+      S.pages=[]; S.pageKind=null;
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
   }
 
-  function cancelDraft(){ S.draft=null; S.draftKind=null; S.draftFile=null; S.err=''; render(); }
+  function cancelDraft(){ S.draft=null; S.draftKind=null; S.draftFiles=[]; S.err=''; render(); }
   function d(k, v){ S.draft[k] = v; }
+
+  // The staging strip: pages you've added, before you commit to reading them.
+  function pageStrip(kind){
+    var n = (S.pageKind===kind) ? S.pages.length : 0;
+    var h = '<input id="pf-'+kind+'" type="file" accept="image/*" multiple style="display:none" '+
+      'onchange="addPages(\''+kind+'\', this.files); this.value=\'\'">';
+
+    if(!n){
+      return h + '<button class="btn btn-primary" onclick="el(\'pf-'+kind+'\').click()"'+(S.busy?' disabled':'')+'>'+
+        '📷 '+(kind==='visit'?'Photograph the summary':'Photograph the receipt')+'</button>';
+    }
+
+    h += '<div class="pages">'+S.pages.map(function(f,i){
+      return '<span class="page">Page '+(i+1)+
+        '<button onclick="dropPage('+i+')" title="Remove">×</button></span>';
+    }).join('')+'</div>'+
+    '<div style="display:flex;gap:8px;margin-top:10px">'+
+      '<button class="btn btn-primary" onclick="readPages(\''+kind+'\')"'+(S.busy?' disabled':'')+'>'+
+        (S.busy?'Reading '+n+' page'+(n===1?'':'s')+'…':'Read '+n+' page'+(n===1?'':'s'))+'</button>'+
+      '<button class="btn btn-ghost" onclick="el(\'pf-'+kind+'\').click()"'+(S.busy?' disabled':'')+'>+ Page</button>'+
+    '</div>'+
+    '<p class="fine" style="text-align:left;margin-top:8px">All '+n+' page'+(n===1?'':'s')+
+      ' are read as one document. <a href="#" onclick="clearPages();return false" style="color:var(--muted)">Start over</a></p>';
+    return h;
+  }
 
   async function saveVisit(){
     var v = S.draft;
     if(!v.visit_date){ S.err='A visit needs a date.'; render(); return; }
     S.busy=true; S.err=''; render();
     try{
-      var path = await upload(S.draftFile);
+      var paths = await uploadAll(S.draftFiles);
       var r = await sb.from('medical_visits').insert({
         user_id:S.userId, person:v.person||'Me', visit_date:v.visit_date,
         visit_type:v.visit_type, provider:v.provider, specialty:v.specialty,
         facility:v.facility, reason:v.reason, diagnosis:v.diagnosis,
         treatment:v.treatment, instructions:v.instructions, referrals:v.referrals,
         follow_up_on:v.follow_up_on||null, follow_up_note:v.follow_up_note,
-        image_path:path
+        amount_owed:v.amount_owed||null,
+        image_path:paths[0], image_paths:paths
       }).select('*').single();
       if(r.error) throw r.error;
 
@@ -267,7 +349,7 @@
       }
 
       await loadAll();
-      S.draft=null; S.draftFile=null;
+      S.draft=null; S.draftFiles=[];
       S.msg = 'Visit saved.' + (extra.length ? ' ' + extra.join(', ') + '.' : '');
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
@@ -278,19 +360,43 @@
     if(!x.service_date){ S.err='An expense needs a date of service.'; render(); return; }
     S.busy=true; S.err=''; render();
     try{
-      var path = await upload(S.draftFile);
+      var paths = await uploadAll(S.draftFiles);
       var r = await sb.from('medical_expenses').insert({
         user_id:S.userId, person:x.person||'Me', service_date:x.service_date,
         provider:x.provider, category:x.category, doc_kind:x.doc_kind,
         billed_amount:x.billed_amount, paid_amount:x.paid_amount,
-        note:x.note, image_path:path
+        visit_id:x.visit_id||null,
+        note:x.note, image_path:paths[0], image_paths:paths
       });
       if(r.error) throw r.error;
       await loadAll();
-      S.draft=null; S.draftFile=null;
+      S.draft=null; S.draftFiles=[];
       S.msg = 'Expense filed.';
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
+  }
+
+  // What a visit actually cost, and whether it's documented. The visit summary
+  // says what you OWE; a receipt says what you PAID. A visit with a balance and
+  // no receipt is precisely the HSA claim you'd lose track of.
+  function visitMoney(v){
+    var linked = S.expenses.filter(function(e){ return e.visit_id===v.id; });
+    var paid = linked.reduce(function(s,e){ return s + Number(e.paid_amount||0); }, 0);
+    return { linked:linked, paid:paid,
+             owed: v.amount_owed==null ? null : Number(v.amount_owed),
+             missing: v.amount_owed!=null && paid + 0.005 < Number(v.amount_owed) };
+  }
+
+  // File a receipt straight against a visit — pre-links it and pre-fills the
+  // fields we already know from the visit.
+  function receiptFor(id){
+    var v = S.visits.find(function(x){ return x.id===id; });
+    if(!v) return;
+    S.tab='hsa'; S.openId=null; S.pages=[]; S.pageKind=null;
+    S.prefill = { visit_id:v.id, service_date:v.visit_date, provider:v.provider,
+                  person:v.person, paid_amount:v.amount_owed };
+    S.msg = 'Photograph the receipt for '+(v.provider||'this visit')+'.';
+    render();
   }
 
   async function toggleReimbursed(id){
@@ -382,7 +488,11 @@
       '<div class="grid2">'+
         '<div><label class="lb">Follow-up due</label><input class="field" type="date" value="'+esc(v.follow_up_on||'')+'" onchange="d(\'follow_up_on\',this.value)"></div>'+
         '<div><label class="lb">Follow-up note</label><input class="field" value="'+esc(v.follow_up_note||'')+'" oninput="d(\'follow_up_note\',this.value)"></div>'+
-      '</div>';
+      '</div>'+
+      // The summary says what you OWE. The receipt will say what you PAID.
+      // Recording it here is what lets the app later ask "where's the receipt?"
+      '<label class="lb">Amount owed (if the summary says)</label>'+
+      '<input class="field" type="number" step="0.01" value="'+(v.amount_owed==null?'':v.amount_owed)+'" oninput="d(\'amount_owed\', this.value===\'\'?null:parseFloat(this.value))">';
 
     if((v.vitals||[]).length){
       h += '<div class="flag soft"><b>'+v.vitals.length+' vital'+(v.vitals.length===1?'':'s')+'</b> on this summary — '+
@@ -434,6 +544,15 @@
         '<div><label class="lb">Billed</label><input class="field" type="number" step="0.01" value="'+(x.billed_amount==null?'':x.billed_amount)+'" oninput="d(\'billed_amount\', this.value===\'\'?null:parseFloat(this.value))"></div>'+
         '<div><label class="lb">You paid</label><input class="field" type="number" step="0.01" value="'+(x.paid_amount==null?'':x.paid_amount)+'" oninput="d(\'paid_amount\', this.value===\'\'?null:parseFloat(this.value))"></div>'+
       '</div>'+
+      '<label class="lb">For which visit?</label>'+
+      '<select class="field" onchange="d(\'visit_id\', this.value||null)">'+
+        '<option value="">Not tied to a logged visit</option>'+
+        S.visits.map(function(v){
+          return '<option value="'+v.id+'"'+(x.visit_id===v.id?' selected':'')+'>'+
+            esc(fmt(v.visit_date))+' — '+esc(v.provider||label(VISIT_TYPES,v.visit_type))+
+            ' ('+esc(v.person)+')</option>';
+        }).join('')+
+      '</select>'+
       '<label class="lb">Note</label><input class="field" value="'+esc(x.note||'')+'" oninput="d(\'note\',this.value)">';
 
     // The two things that make a receipt worthless. Both are silent failures if
@@ -475,10 +594,8 @@
     }
 
     h += '<section class="card"><h2 class="h2">Log a visit</h2>'+
-      '<p class="p">Photograph the after-visit summary. Vitals and prescriptions on it get pulled out and sent where they belong.</p>'+
-      '<input id="vfile" type="file" accept="image/*" style="display:none" onchange="snap(\'visit\', this.files[0])">'+
-      '<button class="btn btn-primary" onclick="el(\'vfile\').click()"'+(S.busy?' disabled':'')+'>'+
-        (S.busy?'Reading…':'📷 Photograph the summary')+'</button>';
+      '<p class="p">Photograph the after-visit summary — <b>every page</b>. They\'re read as one document. Vitals and prescriptions on them get pulled out and sent where they belong.</p>'+
+      pageStrip('visit');
     if(S.err && !S.draft) h += '<p class="err">'+esc(S.err)+'</p>';
     if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
     h += '</section>';
@@ -499,15 +616,39 @@
           '</div>'+
           '<span class="ct">'+(open?'▾':'▸')+'</span></div>';
         if(open){
+          var m = visitMoney(v);
           hh += '<div class="dl">'+
             (v.reason?'<div><b>Reason:</b> '+esc(v.reason)+'</div>':'')+
             (v.diagnosis?'<div><b>Diagnosis:</b> '+esc(v.diagnosis)+'</div>':'')+
             (v.treatment?'<div><b>Treatment:</b> '+esc(v.treatment)+'</div>':'')+
             (v.instructions?'<div><b>Instructions:</b> '+esc(v.instructions)+'</div>':'')+
             (v.referrals?'<div><b>Referrals:</b> '+esc(v.referrals)+'</div>':'')+
-            '</div>'+
-            (v.image_path?'<div class="thumb"><a href="#" onclick="viewImage(\''+v.image_path+'\');return false">View the summary →</a></div>':'')+
-            '<div style="margin-top:10px"><button class="btn btn-danger btn-sm" onclick="removeVisit(\''+v.id+'\')">Delete</button></div>';
+            '</div>';
+
+          // The money picture: owed (from the summary) against documented (from
+          // receipts filed for it). This is the join the HSA half depends on.
+          if(m.owed!=null || m.linked.length){
+            hh += '<div class="dl" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'+
+              (m.owed!=null?'<div><b>You owed:</b> '+money(m.owed)+'</div>':'')+
+              '<div><b>Documented:</b> '+money(m.paid)+' across '+m.linked.length+' receipt'+(m.linked.length===1?'':'s')+'</div>'+
+              '</div>';
+            if(m.missing){
+              hh += '<div class="flag soft">'+money(m.owed - m.paid)+' of this visit isn\'t documented. Without a receipt it can\'t be reimbursed from the HSA.</div>';
+            }
+          }
+
+          // Every page of the summary, not just the first.
+          var pgs = (v.image_paths && v.image_paths.length) ? v.image_paths : (v.image_path?[v.image_path]:[]);
+          if(pgs.length){
+            hh += '<div class="thumb">'+pgs.map(function(p,i){
+              return '<a href="#" onclick="viewImage(\''+p+'\');return false" style="margin-right:12px">'+
+                (pgs.length===1?'View the summary →':'Page '+(i+1)+' →')+'</a>';
+            }).join('')+'</div>';
+          }
+
+          hh += '<div style="display:flex;gap:8px;margin-top:10px">'+
+            '<button class="btn btn-ghost btn-sm" onclick="receiptFor(\''+v.id+'\')">File a receipt</button>'+
+            '<button class="btn btn-danger btn-sm" onclick="removeVisit(\''+v.id+'\')">Delete</button></div>';
         }
         return hh+'</div>';
       }).join('');
@@ -529,13 +670,30 @@
         (undocumented ? ' · '+undocumented+' with no paid amount' : '')+'</div></div>';
 
     h += '<section class="card"><h2 class="h2">File a receipt</h2>'+
-      '<p class="p">A receipt or EOB showing what <b>you paid</b>. The photo is kept — extracted text isn\'t what substantiates a claim, the document is.</p>'+
-      '<input id="efile" type="file" accept="image/*" style="display:none" onchange="snap(\'expense\', this.files[0])">'+
-      '<button class="btn btn-primary" onclick="el(\'efile\').click()"'+(S.busy?' disabled':'')+'>'+
-        (S.busy?'Reading…':'📷 Photograph the receipt')+'</button>';
+      '<p class="p">A receipt or EOB showing what <b>you paid</b> — every page. The photos are kept: extracted text isn\'t what substantiates a claim, the document is.</p>'+
+      pageStrip('expense');
     if(S.err && !S.draft) h += '<p class="err">'+esc(S.err)+'</p>';
     if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
     h += '</section>';
+
+    // Visits with a balance and no receipt — the claims you'd otherwise lose.
+    var owing = S.visits.filter(function(v){ return visitMoney(v).missing; });
+    if(owing.length){
+      h += '<section class="card"><h2 class="h2">Missing receipts</h2>'+
+        '<p class="p">These visits told you what you owed, but nothing here documents paying it. Un-documented is un-reimbursable.</p>'+
+        owing.map(function(v){
+          var m = visitMoney(v);
+          return '<div class="item"><div class="top">'+
+            '<div style="min-width:0">'+
+              '<div class="nm">'+esc(v.provider || label(VISIT_TYPES, v.visit_type))+'</div>'+
+              '<div class="ct">'+fmt(v.visit_date)+' · '+esc(v.person)+
+                (m.paid ? ' · '+money(m.paid)+' of '+money(m.owed)+' documented' : '')+'</div>'+
+            '</div>'+
+            '<div class="amt">'+money(m.owed - m.paid)+'</div></div>'+
+            '<button class="btn btn-ghost btn-sm" style="margin-top:9px" onclick="receiptFor(\''+v.id+'\')">File a receipt for this</button>'+
+            '</div>';
+        }).join('')+'</section>';
+    }
 
     // Mileage: qualified, per-mile, and nobody tracks it because nobody has a
     // place to put it. You do now.
@@ -577,7 +735,11 @@
           '<div style="display:flex;gap:8px;margin-top:9px;align-items:center">'+
             '<button class="btn btn-ghost btn-sm" onclick="toggleReimbursed(\''+e.id+'\')">'+
               (e.reimbursed?'Mark un-reimbursed':'Mark reimbursed')+'</button>'+
-            (e.image_path?'<a href="#" style="font-size:12px;color:var(--green);font-weight:600;text-decoration:none" onclick="viewImage(\''+e.image_path+'\');return false">View →</a>':'')+
+            ((e.image_paths&&e.image_paths.length?e.image_paths:(e.image_path?[e.image_path]:[]))
+              .map(function(p,i,arr){
+                return '<a href="#" style="font-size:12px;color:var(--green);font-weight:600;text-decoration:none" onclick="viewImage(\''+p+'\');return false">'+
+                  (arr.length===1?'View →':'p'+(i+1)+' →')+'</a>';
+              }).join(' '))+
           '</div>'+
           '</div>';
       }).join('');

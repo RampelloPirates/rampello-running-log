@@ -57,26 +57,40 @@ Also pull anything measured or prescribed at the visit:
 - "vitals": blood pressure, weight, pulse, temperature — whatever's on the page. Use the units printed. Blood pressure goes in as systolic/diastolic.
 - "prescriptions": drugs prescribed AT THIS VISIT. Include dose and how long for. If it says "10 days" or "30 day supply", put that in "duration_days" as a number — it's what stops a finished course sitting in a daily checklist forever. Null if it's ongoing/indefinite.
 
+And the money, if it's there:
+- "amount_owed": what the patient is told they owe / their responsibility. Summaries often carry it. 0 if it isn't shown.
+
 Rules:
-- Anything genuinely not on the page is null. Do NOT infer a plausible value — a made-up diagnosis in a medical record is worse than a blank one.
+- These may be SEVERAL PAGES of one visit. Read them as one document — the date might be on page 1 and the prescriptions on page 3. Don't return one visit per page.
+- Anything genuinely not on the page: empty string "" for text, 0 for numbers. Do NOT infer a plausible value — a made-up diagnosis in a medical record is worse than a blank one.
 - Don't copy the boilerplate (patient rights, billing notices, "how did we do?").`;
 
+// NO NULL UNIONS ANYWHERE IN HERE. The obvious way to write this schema is
+// `anyOf: [{type:"string"},{type:"null"}]` on every optional field — and with
+// ~17 of them the API rejects the whole request:
+//   "Schemas contains too many parameters with union types … exponential compilation"
+// So: everything is a plain string, "" means "not on the page", 0 means "no
+// number given", and normalise() below turns those back into nulls. Same
+// contract, no unions.
 const VISIT_SCHEMA = {
   type: "object",
   properties: {
-    visit_date: { anyOf: [{ type: "string" }, { type: "null" }] },
-    visit_type: { anyOf: [{ enum: VISIT_TYPES }, { type: "null" }] },
-    provider: { anyOf: [{ type: "string" }, { type: "null" }] },
-    specialty: { anyOf: [{ type: "string" }, { type: "null" }] },
-    facility: { anyOf: [{ type: "string" }, { type: "null" }] },
-    person: { anyOf: [{ type: "string" }, { type: "null" }] },
-    reason: { anyOf: [{ type: "string" }, { type: "null" }] },
-    diagnosis: { anyOf: [{ type: "string" }, { type: "null" }] },
-    treatment: { anyOf: [{ type: "string" }, { type: "null" }] },
-    instructions: { anyOf: [{ type: "string" }, { type: "null" }] },
-    referrals: { anyOf: [{ type: "string" }, { type: "null" }] },
-    follow_up_on: { anyOf: [{ type: "string" }, { type: "null" }] },
-    follow_up_note: { anyOf: [{ type: "string" }, { type: "null" }] },
+    visit_date: { type: "string" },      // YYYY-MM-DD, "" if not printed
+    visit_type: { enum: VISIT_TYPES },   // 'other' when unclear
+    provider: { type: "string" },
+    specialty: { type: "string" },
+    facility: { type: "string" },
+    person: { type: "string" },
+    reason: { type: "string" },
+    diagnosis: { type: "string" },
+    treatment: { type: "string" },
+    instructions: { type: "string" },
+    referrals: { type: "string" },
+    follow_up_on: { type: "string" },
+    follow_up_note: { type: "string" },
+    // What the patient is told they owe. Often on the summary, and it's the
+    // number the receipt will later have to match.
+    amount_owed: { type: "number" },     // 0 if not shown
     vitals: {
       type: "array",
       items: {
@@ -84,8 +98,8 @@ const VISIT_SCHEMA = {
         properties: {
           kind: { enum: ["blood_pressure", "weight", "pulse", "temperature"] },
           value: { type: "number" },
-          value2: { anyOf: [{ type: "number" }, { type: "null" }] },  // diastolic
-          unit: { anyOf: [{ type: "string" }, { type: "null" }] },
+          value2: { type: "number" },    // diastolic; 0 when not applicable
+          unit: { type: "string" },
         },
         required: ["kind", "value", "value2", "unit"],
         additionalProperties: false,
@@ -97,8 +111,8 @@ const VISIT_SCHEMA = {
         type: "object",
         properties: {
           name: { type: "string" },
-          dose: { anyOf: [{ type: "string" }, { type: "null" }] },
-          duration_days: { anyOf: [{ type: "integer" }, { type: "null" }] },
+          dose: { type: "string" },
+          duration_days: { type: "integer" },   // 0 = ongoing / not stated
         },
         required: ["name", "dose", "duration_days"],
         additionalProperties: false,
@@ -108,7 +122,7 @@ const VISIT_SCHEMA = {
   required: [
     "visit_date", "visit_type", "provider", "specialty", "facility", "person",
     "reason", "diagnosis", "treatment", "instructions", "referrals",
-    "follow_up_on", "follow_up_note", "vitals", "prescriptions",
+    "follow_up_on", "follow_up_note", "amount_owed", "vitals", "prescriptions",
   ],
   additionalProperties: false,
 };
@@ -127,29 +141,45 @@ Only paid_amount is reimbursable, and confusing the two is the mistake that matt
 - "category": office_visit, prescription, dental, vision, lab, imaging, procedure, otc, other.
 - "person": the patient's name if printed.
 
-Anything not on the page is null. Do not guess an amount.`;
+These may be SEVERAL PAGES of one bill — read them as one document, not one expense per page.
 
+Anything not on the page: empty string "" for text, 0 for amounts. Do not guess an amount.`;
+
+// Same rule as above: no unions. "" and 0 mean "not on the page".
 const EXPENSE_SCHEMA = {
   type: "object",
   properties: {
-    service_date: { anyOf: [{ type: "string" }, { type: "null" }] },
-    provider: { anyOf: [{ type: "string" }, { type: "null" }] },
-    person: { anyOf: [{ type: "string" }, { type: "null" }] },
+    service_date: { type: "string" },
+    provider: { type: "string" },
+    person: { type: "string" },
     category: {
-      anyOf: [{
-        enum: ["office_visit", "prescription", "dental", "vision", "lab",
-               "imaging", "procedure", "otc", "other"],
-      }, { type: "null" }],
+      enum: ["office_visit", "prescription", "dental", "vision", "lab",
+             "imaging", "procedure", "otc", "other"],
     },
-    doc_kind: { anyOf: [{ enum: ["receipt", "eob", "bill", "statement"] }, { type: "null" }] },
-    billed_amount: { anyOf: [{ type: "number" }, { type: "null" }] },
-    paid_amount: { anyOf: [{ type: "number" }, { type: "null" }] },
-    note: { anyOf: [{ type: "string" }, { type: "null" }] },
+    doc_kind: { enum: ["receipt", "eob", "bill", "statement"] },
+    billed_amount: { type: "number" },   // 0 if not shown
+    paid_amount: { type: "number" },     // 0 if no evidence the patient paid
+    note: { type: "string" },
   },
   required: ["service_date", "provider", "person", "category", "doc_kind",
              "billed_amount", "paid_amount", "note"],
   additionalProperties: false,
 };
+
+// Turn the schema's sentinels back into the nulls the app expects. Doing this
+// here rather than in the page keeps the "" / 0 convention an implementation
+// detail of the extractor.
+// deno-lint-ignore no-explicit-any
+function normalise(o: any): any {
+  const out: any = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (v === "" ) out[k] = null;
+    else if (Array.isArray(v)) out[k] = v.map((x) => (typeof x === "object" ? normalise(x) : x));
+    else if (typeof v === "number" && v === 0 && k !== "value") out[k] = null;
+    else out[k] = v;
+  }
+  return out;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -209,7 +239,7 @@ Deno.serve(async (req) => {
       .filter((b: { type: string }) => b.type === "text")
       .map((b: { text: string }) => b.text)
       .join("");
-    return json(JSON.parse(text));   // schema-constrained
+    return json(normalise(JSON.parse(text)));   // schema-constrained; "" / 0 → null
   } catch (e) {
     return json({ error: (e as Error).message || "Couldn't read that." }, 502);
   }
