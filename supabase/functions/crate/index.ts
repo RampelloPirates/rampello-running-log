@@ -420,90 +420,24 @@ Deno.serve(async (req) => {
       const text = String(body.text || "").trim();
       if (!images.length && !text) return json({ error: "Send an image or some text." }, 400);
 
-      const content: unknown[] = images.map((b64) => ({
-        type: "image",
-        source: { type: "base64", media_type: sniffMedia(b64, mediaType), data: b64 },
-      }));
-      content.push({
-        type: "text",
-        text: text ? `${EXTRACT_PROMPT}\n\nPost text:\n${text}` : EXTRACT_PROMPT,
-      });
-
-      const { finds, unidentified, unidentified_note } = await extractFinds(content);
-
-      // A cover Claude saw but couldn't name still gets reported — the whole
-      // point of the `unidentified` count is that nothing disappears silently.
-      const missed = unidentified > 0
-        ? `Couldn't identify ${unidentified} cover${unidentified === 1 ? "" : "s"}` +
-          (unidentified_note ? ` (${unidentified_note})` : "") + "."
-        : null;
-
-      if (!finds.length) {
-        return json({ added: [], skipped: [], note: missed || "No artists found in that." });
+      // A full ingest is slow — Claude reads the image, then every artist costs
+      // a Spotify search and a tracklist fetch. 30–60s is normal. An iOS
+      // share-sheet extension will not wait that long; it drops the socket and
+      // reports "the network connection was lost", even though the work was
+      // fine. So the Shortcut gets an instant 202 and we finish the job after
+      // the response has already been sent. The web page still waits (it wants
+      // the added/skipped list to render), which it can afford to.
+      if (key && body.wait !== true) {
+        // deno-lint-ignore no-explicit-any
+        (globalThis as any).EdgeRuntime?.waitUntil(
+          runIngest(row, images, mediaType, text).catch((e) =>
+            console.error("background ingest failed:", (e as Error).message)
+          )
+        );
+        return json({ ok: true, queued: true, note: "Sent to the crate." }, 202);
       }
 
-      const token = await accessTokenFor(row);
-      const playlistId = await ensurePlaylist(token, row);
-      const source = images.length ? "screenshot" : "text";
-
-      const added: unknown[] = [];
-      const skipped: unknown[] = [];
-
-      for (const f of finds) {
-        const artist = f.artist.trim();
-        const album = f.album?.trim() || null;
-
-        // Dedupe first — a bare insert lets the unique index reject repeats
-        // without us having to query for them.
-        const guessed = f.confidence === "guess";
-
-        const claim = await admin.from("music_finds").insert({
-          user_id: row.user_id, artist, album, source, status: "pending",
-          note: guessed ? "Recognised from the cover art." : null,
-        }).select("id").single();
-
-        if (claim.error) {
-          skipped.push({ artist, album, why: "already in the crate" });
-          continue;
-        }
-
-        try {
-          const hit = album
-            ? await resolveAlbum(token, artist, album)
-            : await resolveArtist(token, artist);
-
-          if (!hit) {
-            await admin.from("music_finds").update({
-              status: "no_match", note: "Spotify had no match.",
-            }).eq("id", claim.data.id);
-            skipped.push({ artist, album, why: "no Spotify match" });
-            continue;
-          }
-
-          await addTracks(token, playlistId, hit.uris);
-          await admin.from("music_finds").update({
-            status: "added",
-            tracks_added: hit.uris.length,
-            matched_name: hit.matched,
-            spotify_artist_id: (hit as any).artistId || null,
-            spotify_album_id: (hit as any).albumId || null,
-          }).eq("id", claim.data.id);
-
-          added.push({ artist, album, matched: hit.matched, tracks: hit.uris.length });
-        } catch (e) {
-          await admin.from("music_finds").update({
-            status: "error", note: (e as Error).message.slice(0, 300),
-          }).eq("id", claim.data.id);
-          skipped.push({ artist, album, why: (e as Error).message });
-        }
-      }
-
-      return json({
-        added,
-        skipped,
-        note: missed,
-        playlist_url: `https://open.spotify.com/playlist/${playlistId}`,
-      });
+      return json(await runIngest(row, images, mediaType, text));
     }
 
     return json({ error: `Unknown mode: ${body.mode}` }, 400);
@@ -511,3 +445,97 @@ Deno.serve(async (req) => {
     return json({ error: (e as Error).message || "Something went wrong." }, 502);
   }
 });
+
+// ── The actual work: image/text → Claude → Spotify → playlist ───────────────
+// Split out of the handler so it can either be awaited (web page) or run past
+// the end of the response via EdgeRuntime.waitUntil (iOS Shortcut).
+async function runIngest(
+  row: Record<string, any>,
+  images: string[],
+  mediaType: string,
+  text: string,
+) {
+  const content: unknown[] = images.map((b64) => ({
+    type: "image",
+    source: { type: "base64", media_type: sniffMedia(b64, mediaType), data: b64 },
+  }));
+  content.push({
+    type: "text",
+    text: text ? `${EXTRACT_PROMPT}\n\nPost text:\n${text}` : EXTRACT_PROMPT,
+  });
+
+  const { finds, unidentified, unidentified_note } = await extractFinds(content);
+
+  // A cover Claude saw but couldn't name still gets reported — the whole
+  // point of the `unidentified` count is that nothing disappears silently.
+  const missed = unidentified > 0
+    ? `Couldn't identify ${unidentified} cover${unidentified === 1 ? "" : "s"}` +
+      (unidentified_note ? ` (${unidentified_note})` : "") + "."
+    : null;
+
+  if (!finds.length) {
+    return { added: [], skipped: [], note: missed || "No artists found in that." };
+  }
+
+  const token = await accessTokenFor(row);
+  const playlistId = await ensurePlaylist(token, row);
+  const source = images.length ? "screenshot" : "text";
+
+  const added: unknown[] = [];
+  const skipped: unknown[] = [];
+
+  for (const f of finds) {
+    const artist = f.artist.trim();
+    const album = f.album?.trim() || null;
+    const guessed = f.confidence === "guess";
+
+    // Dedupe first — a bare insert lets the unique index reject repeats
+    // without us having to query for them.
+    const claim = await admin.from("music_finds").insert({
+      user_id: row.user_id, artist, album, source, status: "pending",
+      note: guessed ? "Recognised from the cover art." : null,
+    }).select("id").single();
+
+    if (claim.error) {
+      skipped.push({ artist, album, why: "already in the crate" });
+      continue;
+    }
+
+    try {
+      const hit = album
+        ? await resolveAlbum(token, artist, album)
+        : await resolveArtist(token, artist);
+
+      if (!hit) {
+        await admin.from("music_finds").update({
+          status: "no_match", note: "Spotify had no match.",
+        }).eq("id", claim.data.id);
+        skipped.push({ artist, album, why: "no Spotify match" });
+        continue;
+      }
+
+      await addTracks(token, playlistId, hit.uris);
+      await admin.from("music_finds").update({
+        status: "added",
+        tracks_added: hit.uris.length,
+        matched_name: hit.matched,
+        spotify_artist_id: (hit as any).artistId || null,
+        spotify_album_id: (hit as any).albumId || null,
+      }).eq("id", claim.data.id);
+
+      added.push({ artist, album, matched: hit.matched, tracks: hit.uris.length });
+    } catch (e) {
+      await admin.from("music_finds").update({
+        status: "error", note: (e as Error).message.slice(0, 300),
+      }).eq("id", claim.data.id);
+      skipped.push({ artist, album, why: (e as Error).message });
+    }
+  }
+
+  return {
+    added,
+    skipped,
+    note: missed,
+    playlist_url: `https://open.spotify.com/playlist/${playlistId}`,
+  };
+}
