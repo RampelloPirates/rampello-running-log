@@ -116,6 +116,7 @@ Give them every worthwhile exercise for that muscle group that this gym can actu
 
 Hard rules:
 - ONLY use equipment on the list. This is the whole point. If there's no cable machine, there are no cable exercises — not one, not as a "if available" note.
+- STAY ON the muscle they asked for. If they said "Quads", give quad work — not a general leg day. Compounds that hit it hard are welcome (a squat is quad work), but an exercise whose main job is elsewhere is not: no leg curls under "Quads", no calf raises, no "while you're here". "Hamstrings" means hamstrings. "Triceps" means triceps. The whole reason they picked a specific muscle is that they didn't want the whole limb.
 - Bodyweight is always available, whatever the list says. Include bodyweight work under an "Bodyweight" equipment group where it's genuinely useful for this muscle group.
 - Respect the "detail" notes. If the dumbbells stop at 50 lb, don't prescribe a movement that only works past that for most people. If a rack has no safety bars, don't program to failure under a loaded bar.
 - If the gym is too sparse to train this muscle group well, SAY SO in "note" and give the best available compromise. Do not pad the list with things that don't work here.

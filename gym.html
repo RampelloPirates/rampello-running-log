@@ -72,6 +72,9 @@
     .chip button:hover{opacity:1;color:var(--danger);}
 
     /* Muscle group buttons */
+    .msec{margin-bottom:14px;}
+    .msec:last-child{margin-bottom:0;}
+    .msec .kicker{display:block;margin-bottom:7px;}
     .muscles{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
     .muscle{font-family:var(--f-body);font-size:13.5px;font-weight:600;padding:13px 10px;border-radius:11px;
             border:1px solid var(--border);background:var(--surface-warm);color:var(--ink);cursor:pointer;}
@@ -106,9 +109,16 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="auth.js"></script>
   <script>
-  // Muscle groups you'd actually organise a session around. Deliberately not a
-  // full anatomy chart — "Chest" is a training day, "pectoralis minor" isn't.
-  var MUSCLES = ['Chest','Back','Shoulders','Arms','Legs','Glutes','Core','Full body'];
+  // What you'd actually organise a session around. Specific enough to be useful
+  // — "Legs" is a week of training, not a workout, and the exercises for quads
+  // and calves have nothing to do with each other. The "(all)" options are still
+  // there for the days you just want to hit the whole thing.
+  var MUSCLES = [
+    { label:'Push', items:['Chest','Shoulders','Triceps'] },
+    { label:'Pull', items:['Back','Biceps','Forearms'] },
+    { label:'Legs', items:['Quads','Hamstrings','Glutes','Calves','Legs (all)'] },
+    { label:'Everything else', items:['Core','Full body'] }
+  ];
 
   var S = { loaded:false, userId:null,
             gyms:[], gymId:null, kit:[],
@@ -529,10 +539,13 @@
 
     // ── Muscle group
     h += '<section class="card"><h2 class="h2">Train what?</h2>'+
-      '<div class="muscles">'+MUSCLES.map(function(m){
-        return '<button class="muscle'+(S.muscle===m?' sel':'')+'" onclick="pickMuscle('+
-          JSON.stringify(m).replace(/"/g,'&quot;')+')"'+(S.thinking?' disabled':'')+'>'+esc(m)+'</button>';
-      }).join('')+'</div></section>';
+      MUSCLES.map(function(sec){
+        return '<div class="msec"><span class="kicker">'+esc(sec.label)+'</span>'+
+          '<div class="muscles">'+sec.items.map(function(m){
+            return '<button class="muscle'+(S.muscle===m?' sel':'')+'" onclick="pickMuscle('+
+              JSON.stringify(m).replace(/"/g,'&quot;')+')"'+(S.thinking?' disabled':'')+'>'+esc(m)+'</button>';
+          }).join('')+'</div></div>';
+      }).join('')+'</section>';
 
     // ── The menu
     if(S.thinking){
