@@ -139,7 +139,10 @@
       bits.push('Added '+added.length+' '+(added.length===1?'artist':'artists')+' ('+n+' tracks).');
     }
     if(skipped.length) bits.push(skipped.length+' skipped.');
-    S.msg = bits.join(' ') || (out.note || 'Nothing new found.');
+    // out.note is where a cover Claude saw but couldn't name shows up. Append it
+    // rather than falling back to it, or a partial read looks like a clean one.
+    if(out.note) bits.push(out.note);
+    S.msg = bits.join(' ') || 'Nothing new found.';
     await loadFinds();
   }
 

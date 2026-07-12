@@ -58,19 +58,33 @@ const json = (body: unknown, status = 200) =>
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
 // ── Claude: read artists + albums off a screenshot / page / caption ─────────
+//
+// The first version of this prompt said "if you can't read a name confidently,
+// leave it out", which quietly turned this into an OCR job: a cover that is
+// pure artwork with no type on it — a photo, a painting — got dropped without a
+// word. Half the covers in an emo roundup have no text. So now: recognise the
+// record from the artwork, say so with confidence:"guess", and if you truly
+// can't place it, COUNT it in `unidentified` rather than vanishing it. A wrong
+// guess is cheap (Spotify just won't match it); a silent drop is not.
 const EXTRACT_PROMPT =
   `You are reading a music recommendation — a social post, a screenshot of one, or a music blog's roundup.
 
-List every musical artist mentioned. For each one:
-- "artist": the artist or band name.
-- "album": the album title, ONLY if this specific album is what's being recommended. If the post is highlighting the artist generally, or you can't tell which album, use null.
+First scan the whole image and count the records being recommended: every album cover shown, every artist named. Then account for every single one of them. If you see two covers, you must return two entries (or explain the shortfall in "unidentified").
 
-Rules:
-- One entry per artist. If a post shows ten album covers, return ten entries.
-- Read album-cover art carefully — the artist name and album title are often both printed on the cover, in stylized type.
-- Do NOT invent artists. If you can't read a name confidently, leave it out.
-- Ignore the poster, the blog, the playlist curator, and any DJ/host — they are not recommendations.
-- Ignore UI text (likes, comments, "follow", usernames, hashtags).`;
+For each recommendation:
+- "artist": the artist or band name.
+- "album": the album title, ONLY if that specific album is what's being recommended. An album cover displayed IS an album recommendation. If the post highlights the artist generally, or you can't tell which record, use null.
+- "confidence": "sure" if you read the name off the image or its caption; "guess" if you recognised the record from the artwork alone.
+
+About album covers:
+- Many covers have the artist and title printed on them, often in stylised type. Read them carefully.
+- Many covers have NO text at all — just a photograph, a painting, an illustration. This does NOT mean you skip it. Try to recognise the record from the artwork itself and return it with confidence "guess".
+- If a cover is genuinely unplaceable, do NOT invent a name. Instead add 1 to "unidentified" and, if you can, describe it in "unidentified_note" ("a 90s snapshot of two people at a party").
+
+Do NOT return:
+- The poster, the blog, the playlist curator, the DJ or host — they aren't recommendations.
+- Posters, prints, records or art visible in the background of a room. That's decor, not a recommendation.
+- UI chrome: like/comment counts, "Follow", usernames, hashtags, watermarks.`;
 
 // Structured outputs: the API constrains the response to this schema, so we
 // never have to fish JSON out of prose. (This is the bug class that bit
@@ -85,19 +99,25 @@ const FINDS_SCHEMA = {
         properties: {
           artist: { type: "string" },
           album: { anyOf: [{ type: "string" }, { type: "null" }] },
+          confidence: { enum: ["sure", "guess"] },
         },
-        required: ["artist", "album"],
+        required: ["artist", "album", "confidence"],
         additionalProperties: false,
       },
     },
+    // Covers it saw but could not put a name to. Surfaced to the user so a
+    // missed record is visible instead of silently absent.
+    unidentified: { type: "integer" },
+    unidentified_note: { anyOf: [{ type: "string" }, { type: "null" }] },
   },
-  required: ["finds"],
+  required: ["finds", "unidentified", "unidentified_note"],
   additionalProperties: false,
 };
 
-type Find = { artist: string; album: string | null };
+type Find = { artist: string; album: string | null; confidence?: string };
+type Extraction = { finds: Find[]; unidentified: number; unidentified_note: string | null };
 
-async function extractFinds(content: unknown): Promise<Find[]> {
+async function extractFinds(content: unknown): Promise<Extraction> {
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -124,7 +144,21 @@ async function extractFinds(content: unknown): Promise<Find[]> {
     .map((b: { text: string }) => b.text)
     .join("");
   const out = JSON.parse(text); // schema-constrained — safe to parse directly
-  return (out.finds || []).filter((f: Find) => f.artist?.trim());
+  return {
+    finds: (out.finds || []).filter((f: Find) => f.artist?.trim()),
+    unidentified: Number(out.unidentified) || 0,
+    unidentified_note: out.unidentified_note || null,
+  };
+}
+
+// The Shortcut can't be trusted to label the image, and Anthropic rejects a
+// mismatched media_type outright. Sniff it from the base64 magic bytes instead.
+function sniffMedia(b64: string, fallback: string): string {
+  if (b64.startsWith("/9j/")) return "image/jpeg";
+  if (b64.startsWith("iVBORw0KGgo")) return "image/png";
+  if (b64.startsWith("R0lGOD")) return "image/gif";
+  if (b64.startsWith("UklGR")) return "image/webp";
+  return fallback;
 }
 
 // ── Spotify: token plumbing ────────────────────────────────────────────────
@@ -388,15 +422,25 @@ Deno.serve(async (req) => {
 
       const content: unknown[] = images.map((b64) => ({
         type: "image",
-        source: { type: "base64", media_type: mediaType, data: b64 },
+        source: { type: "base64", media_type: sniffMedia(b64, mediaType), data: b64 },
       }));
       content.push({
         type: "text",
         text: text ? `${EXTRACT_PROMPT}\n\nPost text:\n${text}` : EXTRACT_PROMPT,
       });
 
-      const finds = await extractFinds(content);
-      if (!finds.length) return json({ added: [], skipped: [], note: "No artists found in that." });
+      const { finds, unidentified, unidentified_note } = await extractFinds(content);
+
+      // A cover Claude saw but couldn't name still gets reported — the whole
+      // point of the `unidentified` count is that nothing disappears silently.
+      const missed = unidentified > 0
+        ? `Couldn't identify ${unidentified} cover${unidentified === 1 ? "" : "s"}` +
+          (unidentified_note ? ` (${unidentified_note})` : "") + "."
+        : null;
+
+      if (!finds.length) {
+        return json({ added: [], skipped: [], note: missed || "No artists found in that." });
+      }
 
       const token = await accessTokenFor(row);
       const playlistId = await ensurePlaylist(token, row);
@@ -411,8 +455,11 @@ Deno.serve(async (req) => {
 
         // Dedupe first — a bare insert lets the unique index reject repeats
         // without us having to query for them.
+        const guessed = f.confidence === "guess";
+
         const claim = await admin.from("music_finds").insert({
           user_id: row.user_id, artist, album, source, status: "pending",
+          note: guessed ? "Recognised from the cover art." : null,
         }).select("id").single();
 
         if (claim.error) {
@@ -454,6 +501,7 @@ Deno.serve(async (req) => {
       return json({
         added,
         skipped,
+        note: missed,
         playlist_url: `https://open.spotify.com/playlist/${playlistId}`,
       });
     }
