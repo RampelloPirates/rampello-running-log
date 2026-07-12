@@ -55,10 +55,25 @@
     .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
     .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--border);}
     .btn-sm{width:auto;padding:7px 12px;font-size:13px;}
-    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
+    /* min-width:0 and max-width:100% are load-bearing, not decoration. A date
+       input has a big intrinsic width (iOS especially), and a grid item defaults
+       to min-width:auto — so without these it refuses to shrink below its
+       natural size and spills over the column next to it. */
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);
+           border-radius:10px;padding:10px;background:var(--surface-warm);
+           width:100%;min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;}
+    input[type="date"].field{min-height:42px;}   /* iOS collapses these without it */
+    select.field{-webkit-appearance:none;appearance:none;
+                 background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+                 background-position:calc(100% - 16px) 19px, calc(100% - 11px) 19px;
+                 background-size:5px 5px, 5px 5px;background-repeat:no-repeat;padding-right:30px;}
     textarea.field{resize:vertical;min-height:64px;}
     label.lb{display:block;font-family:var(--f-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:10px 0 4px;}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .grid2>*{min-width:0;}
+    /* Two date/number fields side by side get genuinely cramped on a narrow
+       phone. Below 380px they stack rather than fight. */
+    @media (max-width:379px){ .grid2{grid-template-columns:1fr;} }
 
     /* The HSA headline */
     .headline{background:var(--green-deep);color:#fff;border-radius:16px;padding:20px;margin-bottom:14px;}
@@ -68,9 +83,13 @@
 
     .item{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;background:var(--surface-warm);}
     .item .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
+    /* A long provider name ("Bay Area Orthopaedic Associates") must wrap rather
+       than shove the amount and the × off the edge. */
+    .item .top>div:first-child{flex:1;min-width:0;}
     .item .nm{font-weight:600;font-size:14px;min-width:0;overflow-wrap:anywhere;}
-    .item .ct{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:3px;}
+    .item .ct{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere;}
     .item .amt{font-family:var(--f-mono);font-size:14px;font-weight:600;white-space:nowrap;}
+    .pill{white-space:nowrap;}
     .item .dl{font-size:12.5px;margin-top:8px;line-height:1.5;}
     .item .dl b{font-weight:600;}
     .x{background:none;border:none;color:var(--muted);font-size:19px;line-height:1;cursor:pointer;padding:2px 6px;flex-shrink:0;}
