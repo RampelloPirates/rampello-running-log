@@ -474,6 +474,8 @@
         provider:x.provider, category:x.category, doc_kind:x.doc_kind,
         billed_amount:x.billed_amount, paid_amount:x.paid_amount,
         visit_id:x.visit_id||null,
+        reimbursed:!!x.reimbursed, reimbursed_on:x.reimbursed?(x.reimbursed_on||null):null,
+        tax_deducted:!!x.tax_deducted,
         note:x.note, image_path:paths[0]||null, image_paths:paths
       };
       var r = S.editId
@@ -547,14 +549,25 @@
     if(i) i.click();
   }
 
+  // Marking something reimbursed defaults to today, but today is almost never
+  // when the money actually left the HSA — you tick the box when you get round
+  // to it, not the day the withdrawal cleared. The date is editable everywhere
+  // it appears.
   async function toggleReimbursed(id){
     var x = S.expenses.find(function(e){ return e.id===id; });
     var now = !x.reimbursed;
-    await sb.from('medical_expenses').update({
-      reimbursed: now, reimbursed_on: now ? new Date().toISOString().slice(0,10) : null
-    }).eq('id', id);
-    x.reimbursed = now;
-    x.reimbursed_on = now ? new Date().toISOString().slice(0,10) : null;
+    var when = now ? new Date().toISOString().slice(0,10) : null;
+    await sb.from('medical_expenses').update({ reimbursed:now, reimbursed_on:when }).eq('id', id);
+    x.reimbursed = now; x.reimbursed_on = when;
+    render();
+  }
+
+  async function setReimbursedOn(id, when){
+    if(!when) return;
+    await sb.from('medical_expenses').update({ reimbursed_on:when }).eq('id', id);
+    var x = S.expenses.find(function(e){ return e.id===id; });
+    if(x) x.reimbursed_on = when;
+    S.msg = 'Reimbursement date set to '+fmt(when)+'.';
     render();
   }
 
@@ -723,7 +736,26 @@
             ' ('+esc(v.person)+')</option>';
         }).join('')+
       '</select>'+
-      '<label class="lb">Note</label><input class="field" value="'+esc(x.note||'')+'" oninput="d(\'note\',this.value)">';
+      '<label class="lb">Note</label><input class="field" value="'+esc(x.note||'')+'" oninput="d(\'note\',this.value)">'+
+      // The two flags that decide whether this is still claimable. tax_deducted
+      // had no UI at all until now — which meant the "can't do both" rule was
+      // enforced by a column nobody could set.
+      '<label class="lb">Status</label>'+
+      '<div style="display:flex;gap:9px;align-items:center;margin-bottom:8px">'+
+        '<input type="checkbox" id="rb" '+(x.reimbursed?'checked':'')+' onchange="d(\'reimbursed\',this.checked); render()">'+
+        '<label for="rb" style="font-size:13px;cursor:pointer">Already reimbursed from the HSA</label>'+
+      '</div>'+
+      (x.reimbursed
+        ? '<label class="lb">Date the money left the HSA</label>'+
+          '<input class="field" type="date" value="'+esc(x.reimbursed_on||'')+'" onchange="d(\'reimbursed_on\',this.value||null)">'
+        : '')+
+      '<div style="display:flex;gap:9px;align-items:center;margin-top:10px">'+
+        '<input type="checkbox" id="td" '+(x.tax_deducted?'checked':'')+' onchange="d(\'tax_deducted\',this.checked)">'+
+        '<label for="td" style="font-size:13px;cursor:pointer">Claimed as an itemised tax deduction</label>'+
+      '</div>'+
+      (x.tax_deducted
+        ? '<div class="flag">Deducted on your taxes, so it can\'t <i>also</i> be reimbursed from the HSA. It won\'t count toward your claimable balance.</div>'
+        : '');
 
     // The two things that make a receipt worthless. Both are silent failures if
     // you don't say them out loud at the moment of filing.
@@ -938,7 +970,7 @@
             })())+'</div>' : '')+
             '<div style="margin-top:6px">'+
               (e.reimbursed
-                ? '<span class="pill done">reimbursed '+fmt(e.reimbursed_on)+'</span>'
+                ? '<span class="pill done">reimbursed</span>'
                 : '<span class="pill open">claimable</span>')+
               (e.doc_kind==='bill'||e.doc_kind==='statement' ? ' <span class="pill warn">'+esc(e.doc_kind)+' — not proof of payment</span>' : '')+
               (stale ? ' <span class="pill warn">pre-dates HSA</span>' : '')+
@@ -951,6 +983,15 @@
           '</div>'+
           '<button class="x" onclick="removeExpense(\''+e.id+'\')" title="Delete">×</button>'+
           '</div>'+
+          // When it was reimbursed is editable in place: you tick the box when you
+          // get round to it, not on the day the withdrawal cleared.
+          (e.reimbursed
+            ? '<div style="display:flex;gap:8px;margin-top:9px;align-items:center">'+
+                '<span class="lbl" style="font-family:var(--f-mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Withdrawn</span>'+
+                '<input class="field" type="date" style="padding:6px;font-size:13px;width:auto" value="'+esc(e.reimbursed_on||'')+'" '+
+                  'onchange="setReimbursedOn(\''+e.id+'\', this.value)">'+
+              '</div>'
+            : '')+
           '<div style="display:flex;gap:8px;margin-top:9px;align-items:center;flex-wrap:wrap">'+
             '<button class="btn btn-ghost btn-sm" onclick="editExpense(\''+e.id+'\')">Edit</button>'+
             '<button class="btn btn-ghost btn-sm" onclick="toggleReimbursed(\''+e.id+'\')">'+
