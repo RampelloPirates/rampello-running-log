@@ -140,6 +140,7 @@
             pages:[], pageKind:null,                      // pages staged before reading
             draft:null, draftKind:null, draftFiles:[],    // the reviewed-before-save extraction
             prefill:null,                                 // set when filing a receipt against a visit
+            editId:null, editPaths:[],                    // editing an existing row, and its pages
             openId:null, busy:false, err:'', msg:'' };
 
   function el(id){ return document.getElementById(id); }
@@ -287,8 +288,69 @@
     S.tripBusy=false; render();
   }
 
-  function cancelDraft(){ S.draft=null; S.draftKind=null; S.draftFiles=[]; S.trip=null; S.err=''; render(); }
+  function cancelDraft(){
+    S.draft=null; S.draftKind=null; S.draftFiles=[]; S.trip=null;
+    S.editId=null; S.editPaths=[]; S.err=''; render();
+  }
   function d(k, v){ S.draft[k] = v; }
+
+  // ── Editing an existing record ────────────────────────────────────────────
+  // Same form as the review-before-save draft. A record you can't correct is
+  // worse than useless here: the parser WILL miss an address or misread a date,
+  // and without an edit path the only fix was delete-and-rephotograph.
+  function pagesOf(row){
+    return (row.image_paths && row.image_paths.length) ? row.image_paths
+         : (row.image_path ? [row.image_path] : []);
+  }
+
+  function editVisit(id){
+    var v = S.visits.find(function(x){ return x.id===id; });
+    if(!v) return;
+    S.draft = JSON.parse(JSON.stringify(v));
+    S.draftKind='visit'; S.draftFiles=[]; S.editId=id; S.editPaths=pagesOf(v);
+    S.trip=null; S.addTrip=false;   // never re-file mileage on an edit unless asked
+    S.err=''; S.msg='';
+    render();
+    // If it has an address but no mileage claim yet, offer it now — this is the
+    // main way a visit whose address you just typed in gets its mileage.
+    if(!S.expenses.some(function(e){ return e.visit_id===id && e.category==='mileage'; })){
+      computeTrip();
+    }
+  }
+
+  function editExpense(id){
+    var x = S.expenses.find(function(e){ return e.id===id; });
+    if(!x) return;
+    S.draft = JSON.parse(JSON.stringify(x));
+    S.draftKind='expense'; S.draftFiles=[]; S.editId=id; S.editPaths=pagesOf(x);
+    S.err=''; S.msg='';
+    render();
+  }
+
+  function addDraftPages(files){
+    if(!files || !files.length) return;
+    for(var i=0;i<files.length;i++) S.draftFiles.push(files[i]);
+    render();
+  }
+  function dropDraftPage(i){ S.draftFiles.splice(i,1); render(); }
+
+  // Pages already stored on the record, plus any you're adding right now.
+  function draftPages(){
+    var h = '<label class="lb">Pages</label>';
+    if(S.editPaths.length){
+      h += '<div class="thumb" style="margin:0 0 8px">'+S.editPaths.map(function(p,i){
+        return '<a href="#" onclick="viewImage(\''+p+'\');return false" style="margin-right:12px">Page '+(i+1)+' →</a>';
+      }).join('')+'</div>';
+    }
+    if(S.draftFiles.length && S.editId){
+      h += '<div class="pages">'+S.draftFiles.map(function(f,i){
+        return '<span class="page">New '+(i+1)+'<button onclick="dropDraftPage('+i+')">×</button></span>';
+      }).join('')+'</div>';
+    }
+    h += '<input id="dpf" type="file" accept="image/*" multiple style="display:none" onchange="addDraftPages(this.files); this.value=\'\'">'+
+      '<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="el(\'dpf\').click()">+ Add a page</button>';
+    return h;
+  }
 
   // The staging strip: pages you've added, before you commit to reading them.
   function pageStrip(kind){
@@ -320,16 +382,20 @@
     if(!v.visit_date){ S.err='A visit needs a date.'; render(); return; }
     S.busy=true; S.err=''; render();
     try{
-      var paths = await uploadAll(S.draftFiles);
-      var r = await sb.from('medical_visits').insert({
+      var paths = S.editPaths.concat(await uploadAll(S.draftFiles));
+      var row = {
         user_id:S.userId, person:v.person||'Me', visit_date:v.visit_date,
         visit_type:v.visit_type, provider:v.provider, specialty:v.specialty,
         facility:v.facility, reason:v.reason, diagnosis:v.diagnosis,
         treatment:v.treatment, instructions:v.instructions, referrals:v.referrals,
         follow_up_on:v.follow_up_on||null, follow_up_note:v.follow_up_note,
         amount_owed:v.amount_owed||null, facility_address:v.facility_address,
-        image_path:paths[0], image_paths:paths
-      }).select('*').single();
+        image_path:paths[0]||null, image_paths:paths
+      };
+
+      var r = S.editId
+        ? await sb.from('medical_visits').update(row).eq('id',S.editId).select('*').single()
+        : await sb.from('medical_visits').insert(row).select('*').single();
       if(r.error) throw r.error;
 
       var extra = [];
@@ -364,7 +430,10 @@
 
       // Prescriptions join the daily checklist, and fall off it when the course
       // ends — ends_on is what keeps a 10-day antibiotic from living there forever.
-      if((v.prescriptions||[]).length && (v.person||'Me')==='Me'){
+      // Only on first save: an edit would otherwise add the same course again
+      // every time you fix a typo. (Vitals above are safe to repeat — they upsert
+      // on import_ref.)
+      if(!S.editId && (v.prescriptions||[]).length && (v.person||'Me')==='Me'){
         var meds = v.prescriptions.map(function(p){
           var ends = null;
           if(p.duration_days){
@@ -381,8 +450,9 @@
       }
 
       await loadAll();
-      S.draft=null; S.draftFiles=[];
-      S.msg = 'Visit saved.' + (extra.length ? ' ' + extra.join(', ') + '.' : '');
+      var edited = !!S.editId;
+      S.draft=null; S.draftFiles=[]; S.editId=null; S.editPaths=[]; S.trip=null;
+      S.msg = (edited?'Visit updated.':'Visit saved.') + (extra.length ? ' ' + extra.join(', ') + '.' : '');
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
   }
@@ -392,18 +462,22 @@
     if(!x.service_date){ S.err='An expense needs a date of service.'; render(); return; }
     S.busy=true; S.err=''; render();
     try{
-      var paths = await uploadAll(S.draftFiles);
-      var r = await sb.from('medical_expenses').insert({
+      var paths = S.editPaths.concat(await uploadAll(S.draftFiles));
+      var row = {
         user_id:S.userId, person:x.person||'Me', service_date:x.service_date,
         provider:x.provider, category:x.category, doc_kind:x.doc_kind,
         billed_amount:x.billed_amount, paid_amount:x.paid_amount,
         visit_id:x.visit_id||null,
-        note:x.note, image_path:paths[0], image_paths:paths
-      });
+        note:x.note, image_path:paths[0]||null, image_paths:paths
+      };
+      var r = S.editId
+        ? await sb.from('medical_expenses').update(row).eq('id',S.editId)
+        : await sb.from('medical_expenses').insert(row);
       if(r.error) throw r.error;
       await loadAll();
-      S.draft=null; S.draftFiles=[];
-      S.msg = 'Expense filed.';
+      var edited = !!S.editId;
+      S.draft=null; S.draftFiles=[]; S.editId=null; S.editPaths=[];
+      S.msg = edited ? 'Expense updated.' : 'Expense filed.';
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
   }
@@ -419,16 +493,21 @@
              missing: v.amount_owed!=null && paid + 0.005 < Number(v.amount_owed) };
   }
 
-  // File a receipt straight against a visit — pre-links it and pre-fills the
-  // fields we already know from the visit.
+  // File a receipt straight against a visit — pre-links it, pre-fills what we
+  // already know, and OPENS THE CAMERA. It used to just set state and show a
+  // message, which on the HSA tab (where the button already lives) looked
+  // exactly like a dead button.
   function receiptFor(id){
     var v = S.visits.find(function(x){ return x.id===id; });
     if(!v) return;
     S.tab='hsa'; S.openId=null; S.pages=[]; S.pageKind=null;
     S.prefill = { visit_id:v.id, service_date:v.visit_date, provider:v.provider,
                   person:v.person, paid_amount:v.amount_owed };
-    S.msg = 'Photograph the receipt for '+(v.provider||'this visit')+'.';
+    S.msg = 'Photographing the receipt for '+(v.provider||'this visit')+'.';
     render();
+    // After render, so the input exists to be clicked.
+    var i = el('pf-expense');
+    if(i) i.click();
   }
 
   async function toggleReimbursed(id){
@@ -498,8 +577,10 @@
 
   function draftVisit(){
     var v = S.draft;
-    var h = '<section class="card"><h2 class="h2">Check this before it\'s filed</h2>'+
-      '<p class="p">Read off your photo. A wrong date or a misread diagnosis is worth catching now — this is a medical record.</p>'+
+    var h = '<section class="card"><h2 class="h2">'+(S.editId?'Edit visit':'Check this before it\'s filed')+'</h2>'+
+      '<p class="p">'+(S.editId
+        ? 'Fix anything the parser got wrong. If it missed the clinic\'s address, add it here and the mileage can be worked out.'
+        : 'Read off your photo. A wrong date or a misread diagnosis is worth catching now — this is a medical record.')+'</p>'+
       peopleList()+
       '<div class="grid2">'+
         '<div><label class="lb">Visit date</label><input class="field" type="date" value="'+esc(v.visit_date||'')+'" onchange="d(\'visit_date\',this.value)"></div>'+
@@ -561,17 +642,19 @@
           : 'Not added — Supplements only tracks you.')+'</div>';
     }
 
+    h += draftPages();
+
     if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     h += '<div style="display:flex;gap:8px;margin-top:14px">'+
       '<button class="btn btn-primary" onclick="saveVisit()"'+(S.busy?' disabled':'')+'>'+
-        (S.busy?'Saving…':'Save visit')+'</button>'+
+        (S.busy?'Saving…':(S.editId?'Save changes':'Save visit'))+'</button>'+
       '<button class="btn btn-ghost" onclick="cancelDraft()">Cancel</button></div></section>';
     return h;
   }
 
   function draftExpense(){
     var x = S.draft;
-    var h = '<section class="card"><h2 class="h2">Check this before it\'s filed</h2>'+
+    var h = '<section class="card"><h2 class="h2">'+(S.editId?'Edit expense':'Check this before it\'s filed')+'</h2>'+
       '<p class="p">This is the record you\'d rely on years from now. Worth ten seconds.</p>'+
       peopleList()+
       '<div class="grid2">'+
@@ -617,10 +700,12 @@
       h += '<div class="flag">This is dated <b>before your HSA was opened</b> ('+fmt(S.hsa.established_on)+'). Expenses incurred before the account existed can never be reimbursed from it.</div>';
     }
 
+    h += draftPages();
+
     if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     h += '<div style="display:flex;gap:8px;margin-top:14px">'+
       '<button class="btn btn-primary" onclick="saveExpense()"'+(S.busy?' disabled':'')+'>'+
-        (S.busy?'Filing…':'File it')+'</button>'+
+        (S.busy?'Filing…':(S.editId?'Save changes':'File it'))+'</button>'+
       '<button class="btn btn-ghost" onclick="cancelDraft()">Cancel</button></div></section>';
     return h;
   }
@@ -696,7 +781,8 @@
             }).join('')+'</div>';
           }
 
-          hh += '<div style="display:flex;gap:8px;margin-top:10px">'+
+          hh += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'+
+            '<button class="btn btn-ghost btn-sm" onclick="editVisit(\''+v.id+'\')">Edit</button>'+
             '<button class="btn btn-ghost btn-sm" onclick="receiptFor(\''+v.id+'\')">File a receipt</button>'+
             '<button class="btn btn-danger btn-sm" onclick="removeVisit(\''+v.id+'\')">Delete</button></div>';
         }
@@ -767,6 +853,11 @@
           '<div style="min-width:0">'+
             '<div class="nm">'+esc(e.provider || label(CATEGORIES, e.category))+'</div>'+
             '<div class="ct">'+fmt(e.service_date)+' · '+esc(label(CATEGORIES,e.category))+' · '+esc(e.person)+'</div>'+
+            // Show the link, so a wrong auto-match is visible rather than silent.
+            (e.visit_id ? '<div class="ct">↳ '+esc((function(){
+              var v = S.visits.find(function(z){ return z.id===e.visit_id; });
+              return v ? (label(VISIT_TYPES,v.visit_type)+', '+fmt(v.visit_date)) : 'a deleted visit';
+            })())+'</div>' : '')+
             '<div style="margin-top:6px">'+
               (e.reimbursed
                 ? '<span class="pill done">reimbursed '+fmt(e.reimbursed_on)+'</span>'
@@ -782,7 +873,8 @@
           '</div>'+
           '<button class="x" onclick="removeExpense(\''+e.id+'\')" title="Delete">×</button>'+
           '</div>'+
-          '<div style="display:flex;gap:8px;margin-top:9px;align-items:center">'+
+          '<div style="display:flex;gap:8px;margin-top:9px;align-items:center;flex-wrap:wrap">'+
+            '<button class="btn btn-ghost btn-sm" onclick="editExpense(\''+e.id+'\')">Edit</button>'+
             '<button class="btn btn-ghost btn-sm" onclick="toggleReimbursed(\''+e.id+'\')">'+
               (e.reimbursed?'Mark un-reimbursed':'Mark reimbursed')+'</button>'+
             ((e.image_paths&&e.image_paths.length?e.image_paths:(e.image_path?[e.image_path]:[]))
