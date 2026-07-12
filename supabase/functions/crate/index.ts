@@ -217,34 +217,56 @@ Return ONLY a JSON object, no prose:
   }));
   content.push({ type: "text", text: prompt });
 
-  const res = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY!,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 8000,
-      thinking: { type: "adaptive" },
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
-      messages: [{ role: "user", content }],
-    }),
-  });
+  // deno-lint-ignore no-explicit-any
+  const messages: any[] = [{ role: "user", content }];
+  let text = "";
 
-  if (!res.ok) {
-    // A failed second pass is not a failed ingest. The covers stay unidentified
-    // and still surface as rows; we just didn't manage to rescue them.
-    console.error("identifyCovers failed:", res.status, (await res.text()).slice(0, 300));
-    return [];
+  // The API can end a long search turn with stop_reason "pause_turn" instead of
+  // a finished answer. The turn isn't done — you send the assistant message
+  // back untouched and it picks up where it left off. Miss this and you get an
+  // empty result from a request that was working fine. Bounded so a pathological
+  // case can't loop forever.
+  for (let turn = 0; turn < 4; turn++) {
+    const res = await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 8000,
+        thinking: { type: "adaptive" },
+        // allowed_callers "direct" turns OFF dynamic filtering, which would
+        // otherwise run the search from inside a code-execution sandbox — more
+        // moving parts and more latency than a handful of lookups needs.
+        tools: [{
+          type: "web_search_20260209",
+          name: "web_search",
+          max_uses: 5,
+          allowed_callers: ["direct"],
+        }],
+        messages,
+      }),
+    });
+
+    if (!res.ok) {
+      // A failed rescue is not a failed ingest. The covers keep their
+      // "unidentified" rows; we just didn't manage to name them.
+      console.error("identifyCovers failed:", res.status, (await res.text()).slice(0, 300));
+      return [];
+    }
+
+    const data = await res.json();
+    text = (data.content || [])
+      .filter((b: { type: string }) => b.type === "text")
+      .map((b: { text: string }) => b.text)
+      .join("");
+
+    if (data.stop_reason !== "pause_turn") break;
+    messages.push({ role: "assistant", content: data.content });
   }
-
-  const data = await res.json();
-  const text = (data.content || [])
-    .filter((b: { type: string }) => b.type === "text")
-    .map((b: { text: string }) => b.text)
-    .join("");
 
   try {
     const clean = text.replace(/```json/gi, "").replace(/```/g, "").trim();
@@ -581,56 +603,66 @@ async function runIngest(
   const { finds, unidentified, context } = await extractFinds(content);
   const source = images.length ? "screenshot" : "text";
 
-  // Anything the first pass couldn't name gets a second, slower look — this
-  // time with web search, because these posts are about new releases and the
-  // press for them exists. Only worth doing when there's an image to match
-  // against and something actually went unnamed.
-  const stillUnknown = [...unidentified];
-  const rescued: Find[] = [];
+  const token = await accessTokenFor(row);
+  const playlistId = await ensurePlaylist(token, row);
 
-  if (unidentified.length && images.length) {
-    const found = await identifyCovers(images, mediaType, unidentified, context, finds);
-    // Walk highest-index-first so the splices don't shift the ones behind them.
-    for (const c of found.sort((a, b) => b.index - a.index)) {
-      const i = c.index - 1;
-      if (i < 0 || i >= stillUnknown.length) continue;
-      stillUnknown.splice(i, 1);
-      rescued.push({ artist: c.artist, album: c.album, confidence: "guess" });
-    }
-  }
+  const { added, skipped } = await resolveAndAdd(row, token, playlistId, finds, source);
 
-  const all = [...finds, ...rescued];
-
-  // A cover we still can't name becomes a row in the crate, not just a toast.
-  // The toast only exists on the web path and only until the next render; the
-  // Shortcut never sees it. A row survives both, and the description is often
-  // enough for a human to go "that's Joyce Manor" and add it by name.
-  for (const desc of stillUnknown) {
-    await admin.from("music_finds").insert({
+  // Every cover we couldn't name becomes a row in the crate straight away, so
+  // the miss is visible even if the web-search pass below never finishes.
+  const unknownIds: number[] = [];
+  for (const desc of unidentified) {
+    const ins = await admin.from("music_finds").insert({
       user_id: row.user_id,
       artist: desc,
       album: null,
       source,
       status: "unidentified",
       note: "Couldn't name this cover — add the band by name if you know it.",
-    });   // a duplicate description just bounces off the dedupe index
+    }).select("id").single();   // a repeat description bounces off the dedupe index
+    unknownIds.push(ins.data?.id ?? 0);
   }
 
-  const missed = stillUnknown.length
-    ? `Couldn't identify ${stillUnknown.length} cover${stillUnknown.length === 1 ? "" : "s"} — see the crate.`
+  // The web-search rescue is SLOW — several searches, and the API can pause a
+  // long search turn mid-flight. Nobody gets to wait on that: not the Shortcut
+  // (its socket is long gone) and not the web page (it would sit there until
+  // the edge function's wall clock killed it, which is exactly what it did).
+  // So it always runs past the end of the response and writes its results
+  // straight to the crate. Refresh the page a minute later and they're there.
+  if (unidentified.length && images.length) {
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).EdgeRuntime?.waitUntil(
+      rescueCovers(row, token, playlistId, images, mediaType, unidentified, unknownIds, context, finds, source)
+        .catch((e) => console.error("cover rescue failed:", (e as Error).message)),
+    );
+  }
+
+  const missed = unidentified.length
+    ? `${unidentified.length} cover${unidentified.length === 1 ? "" : "s"} had no text — searching the web for ${unidentified.length === 1 ? "it" : "them"}. Refresh in a minute.`
     : null;
 
-  if (!all.length) {
-    return { added: [], skipped: [], note: missed || "No artists found in that." };
-  }
+  return {
+    added,
+    skipped,
+    note: missed,
+    playlist_url: `https://open.spotify.com/playlist/${playlistId}`,
+  };
+}
 
-  const token = await accessTokenFor(row);
-  const playlistId = await ensurePlaylist(token, row);
-
+// ── Finds → Spotify → playlist ─────────────────────────────────────────────
+// Shared by the first pass and the web-search rescue, so a record found either
+// way lands in the crate the same.
+async function resolveAndAdd(
+  row: Record<string, any>,
+  token: string,
+  playlistId: string,
+  finds: Find[],
+  source: string,
+) {
   const added: unknown[] = [];
   const skipped: unknown[] = [];
 
-  for (const f of all) {
+  for (const f of finds) {
     const artist = f.artist.trim();
     const album = f.album?.trim() || null;
     const guessed = f.confidence === "guess";
@@ -678,10 +710,37 @@ async function runIngest(
     }
   }
 
-  return {
-    added,
-    skipped,
-    note: missed,
-    playlist_url: `https://open.spotify.com/playlist/${playlistId}`,
-  };
+  return { added, skipped };
+}
+
+// ── The background rescue ──────────────────────────────────────────────────
+// Web-search the covers the first pass couldn't name, then swap each
+// "unidentified" placeholder row for the real record.
+async function rescueCovers(
+  row: Record<string, any>,
+  token: string,
+  playlistId: string,
+  images: string[],
+  mediaType: string,
+  unknown: string[],
+  unknownIds: number[],
+  context: string,
+  known: Find[],
+  source: string,
+) {
+  const found = await identifyCovers(images, mediaType, unknown, context, known);
+  if (!found.length) return;
+
+  const rescued: Find[] = [];
+  for (const c of found) {
+    const i = c.index - 1;
+    if (i < 0 || i >= unknown.length) continue;
+    // Drop the placeholder — we know what it is now.
+    if (unknownIds[i]) await admin.from("music_finds").delete().eq("id", unknownIds[i]);
+    rescued.push({ artist: c.artist, album: c.album, confidence: "guess" });
+  }
+
+  if (rescued.length) {
+    await resolveAndAdd(row, token, playlistId, rescued, source);
+  }
 }
