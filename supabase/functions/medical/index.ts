@@ -57,8 +57,9 @@ Also pull anything measured or prescribed at the visit:
 - "vitals": blood pressure, weight, pulse, temperature — whatever's on the page. Use the units printed. Blood pressure goes in as systolic/diastolic.
 - "prescriptions": drugs prescribed AT THIS VISIT. Include dose and how long for. If it says "10 days" or "30 day supply", put that in "duration_days" as a number — it's what stops a finished course sitting in a daily checklist forever. Null if it's ongoing/indefinite.
 
-And the money, if it's there:
+And two things people forget to record:
 - "amount_owed": what the patient is told they owe / their responsibility. Summaries often carry it. 0 if it isn't shown.
+- "facility_address": the clinic's street address as printed — street, city, state, ZIP, on one line. It's usually in the letterhead or footer. If several addresses appear, take the one where the visit HAPPENED, not the billing office and not a lab's mailing address.
 
 Rules:
 - These may be SEVERAL PAGES of one visit. Read them as one document — the date might be on page 1 and the prescriptions on page 3. Don't return one visit per page.
@@ -80,6 +81,9 @@ const VISIT_SCHEMA = {
     provider: { type: "string" },
     specialty: { type: "string" },
     facility: { type: "string" },
+    // The clinic's street address, as printed. Used to compute round-trip
+    // mileage — a qualified HSA expense nobody claims because nobody logs it.
+    facility_address: { type: "string" },
     person: { type: "string" },
     reason: { type: "string" },
     diagnosis: { type: "string" },
@@ -120,9 +124,10 @@ const VISIT_SCHEMA = {
     },
   },
   required: [
-    "visit_date", "visit_type", "provider", "specialty", "facility", "person",
-    "reason", "diagnosis", "treatment", "instructions", "referrals",
-    "follow_up_on", "follow_up_note", "amount_owed", "vitals", "prescriptions",
+    "visit_date", "visit_type", "provider", "specialty", "facility",
+    "facility_address", "person", "reason", "diagnosis", "treatment",
+    "instructions", "referrals", "follow_up_on", "follow_up_note",
+    "amount_owed", "vitals", "prescriptions",
   ],
   additionalProperties: false,
 };
@@ -181,6 +186,47 @@ function normalise(o: any): any {
   return out;
 }
 
+// ── Driving distance ───────────────────────────────────────────────────────
+// Nominatim to geocode, OSRM to route. Both are OpenStreetMap public services:
+// free, no key, and fine for one-off personal lookups (their usage policy asks
+// for a real User-Agent and low volume, both of which this is).
+//
+// A ROUTED distance, not a straight line: mileage is claimed on miles driven,
+// and the crow-flies number would understate every trip — which is the wrong
+// direction to be wrong in on a tax record.
+const UA = "Tally personal health log (medical mileage lookup)";
+
+async function geocode(q: string): Promise<[number, number] | null> {
+  const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+    encodeURIComponent(q);
+  const r = await fetch(url, { headers: { "User-Agent": UA, "Accept": "application/json" } });
+  if (!r.ok) return null;
+  const j = await r.json();
+  if (!j?.length) return null;
+  return [Number(j[0].lon), Number(j[0].lat)];
+}
+
+async function drivingMiles(from: string, to: string) {
+  const [a, b] = await Promise.all([geocode(from), geocode(to)]);
+  if (!a) throw new Error("Couldn't find your home address on the map.");
+  if (!b) throw new Error("Couldn't find the clinic's address on the map.");
+
+  const r = await fetch(
+    `https://router.project-osrm.org/route/v1/driving/${a[0]},${a[1]};${b[0]},${b[1]}?overview=false`,
+    { headers: { "User-Agent": UA } },
+  );
+  if (!r.ok) throw new Error("Couldn't work out a route.");
+  const j = await r.json();
+  const metres = j?.routes?.[0]?.distance;
+  if (!metres) throw new Error("Couldn't work out a route.");
+
+  const oneWay = metres / 1609.344;
+  return {
+    one_way: Math.round(oneWay * 10) / 10,
+    round_trip: Math.round(oneWay * 2 * 10) / 10,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -191,6 +237,18 @@ Deno.serve(async (req) => {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  // ---- mileage: two addresses → round-trip driving miles -------------------
+  if (body.mode === "mileage") {
+    const from = String(body.from || "").trim();
+    const to = String(body.to || "").trim();
+    if (!from || !to) return json({ error: "Need both addresses." }, 400);
+    try {
+      return json(await drivingMiles(from, to));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
   }
 
   const isVisit = body.mode === "visit";

@@ -135,7 +135,8 @@
   ];
 
   var S = { loaded:false, userId:null, tab:'visits',
-            visits:[], expenses:[], hsa:{ established_on:null, mileage_rate:0.21 },
+            visits:[], expenses:[], hsa:{ established_on:null, mileage_rate:0.21, home_address:null },
+            trip:null, tripBusy:false, addTrip:true,       // computed round-trip mileage for the draft
             pages:[], pageKind:null,                      // pages staged before reading
             draft:null, draftKind:null, draftFiles:[],    // the reviewed-before-save extraction
             prefill:null,                                 // set when filing a receipt against a visit
@@ -268,9 +269,25 @@
       S.pages=[]; S.pageKind=null;
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
+
+    // The clinic's address is on the summary and your home address doesn't move,
+    // so the round trip is derivable. Mileage is a qualified expense that almost
+    // nobody claims — purely because nobody wants to work out the miles.
+    if(kind==='visit' && S.draft) computeTrip();
   }
 
-  function cancelDraft(){ S.draft=null; S.draftKind=null; S.draftFiles=[]; S.err=''; render(); }
+  async function computeTrip(){
+    S.trip=null;
+    if(!S.draft || !S.draft.facility_address || !S.hsa.home_address) return;
+    S.tripBusy=true; render();
+    try{
+      S.trip = await callMedical({ mode:'mileage',
+        from:S.hsa.home_address, to:S.draft.facility_address });
+    }catch(e){ S.trip = { error:e.message }; }
+    S.tripBusy=false; render();
+  }
+
+  function cancelDraft(){ S.draft=null; S.draftKind=null; S.draftFiles=[]; S.trip=null; S.err=''; render(); }
   function d(k, v){ S.draft[k] = v; }
 
   // The staging strip: pages you've added, before you commit to reading them.
@@ -310,12 +327,27 @@
         facility:v.facility, reason:v.reason, diagnosis:v.diagnosis,
         treatment:v.treatment, instructions:v.instructions, referrals:v.referrals,
         follow_up_on:v.follow_up_on||null, follow_up_note:v.follow_up_note,
-        amount_owed:v.amount_owed||null,
+        amount_owed:v.amount_owed||null, facility_address:v.facility_address,
         image_path:paths[0], image_paths:paths
       }).select('*').single();
       if(r.error) throw r.error;
 
       var extra = [];
+
+      // Round-trip mileage, filed as its own expense against this visit. The
+      // unique index on (visit_id) where category='mileage' makes claiming the
+      // same drive twice structurally impossible, not merely discouraged.
+      if(S.addTrip && S.trip && S.trip.round_trip && (v.person||'Me')==='Me'){
+        var amt = Math.round(S.trip.round_trip * S.hsa.mileage_rate * 100)/100;
+        var mr = await sb.from('medical_expenses').insert({
+          user_id:S.userId, person:'Me', visit_id:r.data.id,
+          service_date:v.visit_date, provider:v.provider || v.facility,
+          category:'mileage', miles:S.trip.round_trip, paid_amount:amt,
+          doc_kind:'receipt',
+          note:S.trip.round_trip+' mi round trip @ $'+S.hsa.mileage_rate+'/mi · '+(v.facility_address||'')
+        });
+        if(!mr.error) extra.push(money(amt)+' mileage → HSA');
+      }
 
       // Vitals measured at the visit belong in Vitals, not buried in a photo.
       // Only for you — the Vitals module has no notion of other people.
@@ -429,11 +461,12 @@
   async function saveHsa(){
     var est = el('hsa-est').value || null;
     var rate = parseFloat(el('hsa-rate').value) || 0.21;
+    var home = el('hsa-home').value.trim() || null;
     await sb.from('hsa_settings').upsert({
-      user_id:S.userId, established_on:est, mileage_rate:rate,
+      user_id:S.userId, established_on:est, mileage_rate:rate, home_address:home,
       updated_at:new Date().toISOString()
     });
-    S.hsa = { established_on:est, mileage_rate:rate };
+    S.hsa = { established_on:est, mileage_rate:rate, home_address:home };
     S.msg = 'Saved.'; render();
   }
 
@@ -481,6 +514,7 @@
         '<div><label class="lb">Specialty</label><input class="field" value="'+esc(v.specialty||'')+'" oninput="d(\'specialty\',this.value)"></div>'+
       '</div>'+
       '<label class="lb">Facility</label><input class="field" value="'+esc(v.facility||'')+'" oninput="d(\'facility\',this.value)">'+
+      '<label class="lb">Address</label><input class="field" value="'+esc(v.facility_address||'')+'" oninput="d(\'facility_address\',this.value)" onchange="computeTrip()" placeholder="Street, city, state, ZIP">'+
       '<label class="lb">Reason for visit</label><input class="field" value="'+esc(v.reason||'')+'" oninput="d(\'reason\',this.value)">'+
       '<label class="lb">Diagnosis</label><textarea class="field" oninput="d(\'diagnosis\',this.value)">'+esc(v.diagnosis||'')+'</textarea>'+
       '<label class="lb">Treatment</label><textarea class="field" oninput="d(\'treatment\',this.value)">'+esc(v.treatment||'')+'</textarea>'+
@@ -493,6 +527,22 @@
       // Recording it here is what lets the app later ask "where's the receipt?"
       '<label class="lb">Amount owed (if the summary says)</label>'+
       '<input class="field" type="number" step="0.01" value="'+(v.amount_owed==null?'':v.amount_owed)+'" oninput="d(\'amount_owed\', this.value===\'\'?null:parseFloat(this.value))">';
+
+    // Mileage: derived, offered, and yours to decline. Never filed silently —
+    // it's a tax record, and a claim you didn't know you made is a bad surprise.
+    if(!S.hsa.home_address && v.facility_address){
+      h += '<div class="flag soft">Set your <b>home address</b> in the HSA tab and Tally will work out the round-trip mileage for visits like this. It\'s a qualified expense and almost nobody claims it.</div>';
+    }else if(S.tripBusy){
+      h += '<div class="flag soft">Working out the drive…</div>';
+    }else if(S.trip && S.trip.round_trip){
+      var mamt = Math.round(S.trip.round_trip * S.hsa.mileage_rate * 100)/100;
+      h += '<div class="flag soft" style="display:flex;gap:9px;align-items:flex-start">'+
+        '<input type="checkbox" id="addtrip" '+(S.addTrip?'checked':'')+' onchange="S.addTrip=this.checked" style="margin-top:2px">'+
+        '<label for="addtrip" style="cursor:pointer"><b>'+S.trip.round_trip+' mi round trip = '+money(mamt)+'</b> — '+
+        S.trip.one_way+' mi each way, by road, from home. File it as a mileage expense against this visit.</label></div>';
+    }else if(S.trip && S.trip.error){
+      h += '<div class="flag soft">Couldn\'t work out the drive ('+esc(S.trip.error)+'). You can add mileage by hand in the HSA tab.</div>';
+    }
 
     if((v.vitals||[]).length){
       h += '<div class="flag soft"><b>'+v.vitals.length+' vital'+(v.vitals.length===1?'':'s')+'</b> on this summary — '+
@@ -752,6 +802,9 @@
         '<div><label class="lb">HSA opened</label><input class="field" id="hsa-est" type="date" value="'+esc(S.hsa.established_on||'')+'"></div>'+
         '<div><label class="lb">Mileage rate ($/mi)</label><input class="field" id="hsa-rate" type="number" step="0.001" value="'+S.hsa.mileage_rate+'"></div>'+
       '</div>'+
+      '<label class="lb">Home address</label>'+
+      '<input class="field" id="hsa-home" value="'+esc(S.hsa.home_address||'')+'" placeholder="1201 E Idlewild Ave, Tampa, FL 33604">'+
+      '<p class="p" style="margin:6px 0 0;font-size:11.5px">Where you drive from. With this set, a visit\'s round-trip mileage is worked out from the clinic\'s address on the summary. The two addresses are sent to OpenStreetMap\'s public geocoder to do it.</p>'+
       '<button class="btn btn-ghost" style="margin-top:12px" onclick="saveHsa()">Save</button>'+
       '</section>';
 
