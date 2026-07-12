@@ -85,7 +85,11 @@
   // ── data ──
   async function loadStack(){
     var r = await sb.from('supplements').select('*').eq('active',true).order('sort_order',{ascending:true}).order('created_at',{ascending:true});
-    S.stack = r.data || [];
+    // Prescriptions logged from a doctor's visit live in this checklist too, but
+    // a course ENDS. Once it has, it drops off by itself — a finished antibiotic
+    // sitting here forever is how you start ignoring the whole list.
+    var today = new Date().toISOString().slice(0,10);
+    S.stack = (r.data || []).filter(function(s){ return !s.ends_on || s.ends_on >= today; });
   }
   async function loadTaken(){
     var r = await sb.from('supplement_log').select('supplement_id').eq('log_date',S.day);
@@ -162,9 +166,21 @@
     }else{
       h+=S.stack.map(function(s){
         var on=!!S.taken[s.id];
+        var rx = s.kind==='prescription';
+        // A prescription needs to look different from a vitamin, and needs to
+        // say when it runs out — otherwise you can't tell what you're finishing.
+        var meta = [];
+        if(s.dose) meta.push(esc(s.dose));
+        if(rx && s.prescriber) meta.push('Rx · '+esc(s.prescriber));
+        if(rx && s.ends_on){
+          var left = Math.round((new Date(s.ends_on+'T12:00:00') - new Date().setHours(12,0,0,0))/86400000);
+          meta.push(left<=0 ? 'last day' : left+' day'+(left===1?'':'s')+' left');
+        }
         return '<div class="supp"><button class="check'+(on?' on':'')+'" onclick="toggleTaken(\''+s.id+'\')" aria-label="Toggle taken">'+(on?'✓':'')+'</button>'+
-          '<div class="body"><div class="name">'+esc(s.name)+(s.timing&&s.timing!=='Anytime'?'<span class="badge">'+esc(s.timing)+'</span>':'')+'</div>'+
-          (s.dose?('<div class="meta">'+esc(s.dose)+'</div>'):'')+'</div>'+
+          '<div class="body"><div class="name">'+esc(s.name)+
+            (rx?'<span class="badge">Rx</span>':'')+
+            (s.timing&&s.timing!=='Anytime'?'<span class="badge">'+esc(s.timing)+'</span>':'')+'</div>'+
+          (meta.length?('<div class="meta">'+meta.join(' · ')+'</div>'):'')+'</div>'+
           '<button class="icon-btn" title="Edit" onclick="openEdit(\''+s.id+'\')">✎</button></div>';
       }).join('');
     }
