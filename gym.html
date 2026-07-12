@@ -71,6 +71,14 @@
     .chip button{background:none;border:none;color:var(--green-deep);opacity:.5;cursor:pointer;font-size:14px;line-height:1;padding:0 3px;}
     .chip button:hover{opacity:1;color:var(--danger);}
 
+    /* Saved workouts */
+    .fav{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px;background:var(--surface-warm);}
+    .fav.no{opacity:.62;}
+    .fav .nm{font-weight:600;font-size:14px;overflow-wrap:anywhere;}
+    .fav .ct{font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-top:3px;}
+    .fav .why{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.45;}
+    .fav.no .why{color:var(--danger);}
+
     /* Muscle group buttons */
     .msec{margin-bottom:14px;}
     .msec:last-child{margin-bottom:0;}
@@ -120,11 +128,12 @@
     { label:'Everything else', items:['Core','Full body'] }
   ];
 
-  var S = { loaded:false, userId:null,
+  var S = { loaded:false, userId:null, athleteId:null,
             gyms:[], gymId:null, kit:[],
             muscle:null, groups:[], note:'',
             session:null, sets:[],           // the workout in progress
             history:[], openId:null,         // past workouts — NOT scoped to a gym
+            favs:[], matches:{}, matching:false,   // saved workouts + can-I-do-it-here
             kitOpen:false,                   // the equipment list stays folded away once it exists
             newGym:'', kitText:'',
             busy:false, thinking:false, err:'', msg:'' };
@@ -169,7 +178,153 @@
       var r = await sb.from('gyms').insert({ user_id:S.userId, name:name }).select('*').single();
       if(r.error) throw r.error;
       S.gyms.push(r.data); S.gymId = r.data.id; S.newGym=''; S.kit=[];
-      S.muscle=null; S.groups=[];
+      S.muscle=null; S.groups=[]; S.matches={}; S.kitOpen=true;
+    }catch(e){ S.err = e.message; }
+    S.busy=false; render();
+    // A brand-new gym has no equipment yet, so there's nothing to match against.
+    // matchFavs() runs again the moment the inventory lands — see loadKit callers.
+  }
+
+  // ── Favourites ────────────────────────────────────────────────────────────
+  // A favourite remembers the gym it came from but isn't owned by it. When you
+  // pick a gym, we ask whether that gym can actually support each saved workout
+  // — which is a judgement about equivalence and load ("dumbbells" vs
+  // "dumbbells 10–75 lb"), not a string match, so the model makes it.
+  async function loadFavs(){
+    var r = await sb.from('workout_favorites')
+      .select('id, name, muscle_group, origin_gym_id, favorite_exercises(exercise, equipment, position)')
+      .order('created_at', {ascending:false});
+    S.favs = r.data || [];
+  }
+
+  async function matchFavs(){
+    if(!S.gymId || !S.favs.length){ S.matches={}; return; }
+    S.matching = true; render();
+    try{
+      var out = await callGym({ mode:'match_favorites', gym_id:S.gymId });
+      var m = {};
+      (out.matches||[]).forEach(function(x){ m[x.favorite_id] = x; });
+      S.matches = m;
+    }catch(e){ S.matches = {}; }   // a failed match just means no suggestions
+    S.matching = false; render();
+  }
+
+  // Save what you just did — exercises in the order you did them, with the
+  // equipment each needed. The equipment is what lets this workout travel.
+  async function saveFavorite(){
+    if(!S.session || !S.sets.length) return;
+    var name = prompt('Name this workout', S.muscle+' at '+gym(S.gymId).name);
+    if(!name || !name.trim()) return;
+
+    S.busy = true; S.err=''; render();
+    try{
+      var f = await sb.from('workout_favorites').insert({
+        user_id:S.userId, name:name.trim(), muscle_group:S.muscle, origin_gym_id:S.gymId
+      }).select('*').single();
+      if(f.error) throw f.error;
+
+      var seen = [], rows = [];
+      S.sets.slice().sort(function(a,b){ return (a.set_no||0)-(b.set_no||0); })
+        .forEach(function(s){
+          if(seen.indexOf(s.exercise) !== -1) return;
+          seen.push(s.exercise);
+          rows.push({ user_id:S.userId, favorite_id:f.data.id, exercise:s.exercise,
+                      equipment:s.equipment, position:seen.length-1 });
+        });
+      if(rows.length) await sb.from('favorite_exercises').insert(rows);
+
+      await loadFavs();
+      S.msg = 'Saved "'+name.trim()+'". It\'ll be offered at any gym that can handle it.';
+    }catch(e){ S.err = e.message; }
+    S.busy=false; render();
+  }
+
+  async function removeFavorite(id){
+    if(!confirm('Forget this saved workout?')) return;
+    await sb.from('workout_favorites').delete().eq('id', id);
+    S.favs = S.favs.filter(function(f){ return f.id!==id; });
+    render();
+  }
+
+  // Load a favourite as today's session at the gym you're in now, applying any
+  // substitutions the model worked out for this gym.
+  async function startFavorite(id){
+    var f = S.favs.find(function(x){ return x.id===id; });
+    if(!f || !S.gymId) return;
+    var m = S.matches[id] || {};
+    var swaps = {};
+    (m.swaps||[]).forEach(function(s){ swaps[s.exercise] = s.use_instead; });
+
+    S.muscle = f.muscle_group;
+    S.note = (m.swaps && m.swaps.length)
+      ? 'Swapped for this gym: ' + m.swaps.map(function(s){
+          return s.exercise+' → '+s.use_instead; }).join('; ')
+      : '';
+    S.err=''; S.msg='';
+
+    var byEq = {}, order = [];
+    (f.favorite_exercises||[]).slice()
+      .sort(function(a,b){ return (a.position||0)-(b.position||0); })
+      .forEach(function(e){
+        var name = swaps[e.exercise] || e.exercise;
+        var eq = e.equipment || 'Exercises';
+        if(!byEq[eq]){ byEq[eq]=[]; order.push(eq); }
+        byEq[eq].push({ name:name, target:'', sets:'', reps:'', cue:'' });
+      });
+    S.groups = order.map(function(eq){ return { equipment:eq, exercises:byEq[eq] }; });
+
+    await ensureSession(S.muscle);
+    await loadSets();
+    render();
+
+    var names = [];
+    S.groups.forEach(function(g){ (g.exercises||[]).forEach(function(e){ names.push(e.name); }); });
+    if(names.length) loadLast(names);
+    window.scrollTo({ top: document.body.scrollHeight, behavior:'smooth' });
+  }
+
+  // ── Finishing: the session becomes an entry in the workout log ─────────────
+  // `runs` already carries activity_type ('strength'), and the log already
+  // filters on it — so a finished gym session is a first-class entry there
+  // rather than a second, parallel history nobody looks at.
+  async function finishWorkout(){
+    if(!S.session || !S.sets.length || S.busy) return;
+    if(!S.athleteId){ S.err = 'No profile — can\'t post to the log.'; render(); return; }
+
+    S.busy = true; S.err=''; render();
+    try{
+      var mins = Math.round((Date.now() - new Date(S.session.created_at).getTime())/60000);
+      // Left the page open for three hours? That's not a three-hour workout.
+      // Better to post no duration than a fictional one.
+      if(!(mins > 0 && mins <= 240)) mins = null;
+
+      var byEx = {}, order = [];
+      S.sets.slice().sort(function(a,b){ return (a.set_no||0)-(b.set_no||0); })
+        .forEach(function(s){
+          if(!byEx[s.exercise]){ byEx[s.exercise]=[]; order.push(s.exercise); }
+          byEx[s.exercise].push(s);
+        });
+      var summary = order.map(function(n){
+        var ss = byEx[n];
+        var w = ss.map(function(x){ return x.reps + (x.weight!=null ? '×'+x.weight : ''); }).join(', ');
+        return n+': '+w;
+      }).join('\n');
+
+      var r = await sb.from('runs').insert({
+        athlete_id: S.athleteId,
+        run_date: S.session.worked_on,
+        activity_type: 'strength',
+        duration_seconds: mins ? mins*60 : null,
+        notes: S.muscle+' — '+gym(S.gymId).name+'\n'+summary
+      }).select('id').single();
+      if(r.error) throw r.error;
+
+      await sb.from('workout_sessions').update({ finished_at: new Date().toISOString() })
+        .eq('id', S.session.id);
+
+      S.session=null; S.sets=[]; S.groups=[]; S.muscle=null; S.note='';
+      await loadHistory();
+      S.msg = 'Workout logged. It\'s in your Workout Log.';
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
   }
@@ -245,7 +400,9 @@
 
   async function pickGym(id){
     S.gymId = id; S.muscle=null; S.groups=[]; S.note=''; S.msg=''; S.kitOpen=false;
+    S.matches={};
     await loadKit(); render();
+    matchFavs();   // "which of my workouts can I do here?" — the point of favourites
   }
 
   // ── Inventory ─────────────────────────────────────────────────────────────
@@ -263,6 +420,7 @@
         : 'Nothing new — everything in those photos was already on the list.';
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
+    matchFavs();   // a newly-stocked gym may now be able to do your favourites
   }
 
   async function inventoryText(){
@@ -275,6 +433,7 @@
       S.msg = 'Added '+out.added.length+' '+(out.added.length===1?'item':'items')+'.';
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
+    matchFavs();
   }
 
   async function removeKit(id){
@@ -551,6 +710,45 @@
     if(S.msg) h += '<p class="ok">'+esc(S.msg)+'</p>';
     h += '</section>';
 
+    // ── Favourites
+    // Sorted so the ones this gym can actually do come first. A favourite that
+    // doesn't fit still shows — greyed, with the reason — because "your chest
+    // day needs a cable machine and this place hasn't got one" is useful to
+    // know, and silently hiding it just looks like the app lost your workout.
+    if(S.favs.length){
+      var doable = S.favs.filter(function(f){ return (S.matches[f.id]||{}).doable; });
+      var nope   = S.favs.filter(function(f){ return !(S.matches[f.id]||{}).doable; });
+
+      h += '<section class="card"><div class="row-between" style="margin-bottom:10px">'+
+        '<h2 class="h2" style="margin:0">Saved workouts</h2>'+
+        (S.matching ? '<span class="kicker">checking…</span>'
+                    : '<span class="kicker">'+doable.length+' fit here</span>')+
+        '</div>';
+
+      h += doable.concat(nope).map(function(f){
+        var m = S.matches[f.id] || {};
+        var ok = !!m.doable;
+        var from = f.origin_gym_id ? gym(f.origin_gym_id) : null;
+        var n = (f.favorite_exercises||[]).length;
+
+        return '<div class="fav'+(ok?'':' no')+'">'+
+          '<div class="row-between" style="align-items:flex-start">'+
+            '<div style="min-width:0">'+
+              '<div class="nm">★ '+esc(f.name)+'</div>'+
+              '<div class="ct">'+esc(f.muscle_group)+' · '+n+' exercise'+(n===1?'':'s')+
+                (from && from.id!==S.gymId ? ' · from '+esc(from.name) : '')+'</div>'+
+              (m.why ? '<div class="why">'+esc(m.why)+'</div>' : '')+
+            '</div>'+
+            '<button class="x" onclick="removeFavorite(\''+f.id+'\')" title="Forget">×</button>'+
+          '</div>'+
+          (ok ? '<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="startFavorite(\''+f.id+'\')">'+
+                  'Do this here'+((m.swaps||[]).length ? ' (with '+m.swaps.length+' swap'+(m.swaps.length===1?'':'s')+')' : '')+
+                '</button>' : '')+
+          '</div>';
+      }).join('');
+      h += '</section>';
+    }
+
     // ── Muscle group
     h += '<section class="card"><h2 class="h2">Train what?</h2>'+
       MUSCLES.map(function(sec){
@@ -576,8 +774,17 @@
         return '<div class="eqgroup"><h3>'+esc(g.equipment)+'</h3>'+
           (g.exercises||[]).map(function(ex){ return exCard(ex, g.equipment); }).join('')+'</div>';
       }).join('');
+
+      // Finishing and favouriting only mean anything once you've actually lifted.
+      if(total){
+        h += '<div style="display:flex;gap:8px;margin-top:4px">'+
+          '<button class="btn btn-primary" onclick="finishWorkout()"'+(S.busy?' disabled':'')+'>'+
+            (S.busy?'Logging…':'Finish workout')+'</button>'+
+          '<button class="btn btn-ghost" onclick="saveFavorite()"'+(S.busy?' disabled':'')+'>★ Save</button>'+
+          '</div>';
+      }
       h += '</section>';
-      h += '<p class="fine">Logged sets are saved as you go — there\'s no "finish" button to forget.</p>';
+      h += '<p class="fine">Sets save as you go. <b>Finish workout</b> posts it to your Workout Log; <b>Save</b> keeps it as a favourite you can do at any gym with the kit for it.</p>';
     }
 
     h += historyCard();
@@ -587,13 +794,20 @@
 
   // ── Boot ──────────────────────────────────────────────────────────────────
   (async function(){
-    var u = await requireUser(); if(!u) return;
-    S.userId = u.user.id;
+    // requireProfile, not requireUser: finishing a workout posts a row to `runs`,
+    // which is keyed by athlete_id, so we need the profile as well as the login.
+    var p = await requireProfile(); if(!p) return;
+    var s = await sb.auth.getSession();
+    S.userId = s.data.session.user.id;
+    S.athleteId = p.row ? p.row.id : null;
+
     await loadGyms();
     await loadKit();
+    await loadFavs();
     await loadHistory();
     S.loaded = true;
     render();
+    matchFavs();
   })();
   </script>
 </body>

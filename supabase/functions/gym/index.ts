@@ -164,6 +164,52 @@ const EXERCISE_SCHEMA = {
   additionalProperties: false,
 };
 
+// ── Can this gym do that favourite? ───────────────────────────────────────
+// Not a string comparison. A favourite needs "Dumbbells"; the gym has
+// "dumbbells (10–75 lb)" and "adjustable bench". Whether the workout survives
+// the move is a judgement about equivalence and load, so the model makes it.
+const MATCH_PROMPT =
+  `Here is a gym's equipment, and some saved workouts the user likes. For each workout, decide whether they could actually do it AT THIS GYM.
+
+- "doable": true if every exercise can be done here, OR if the ones that can't have a genuine equivalent that hits the same muscle the same way. Otherwise false.
+- "why": one short line. If it works, say what makes it work ("the dumbbells go to 75, and there's a bench"). If it doesn't, say exactly what's missing ("no cable machine — three of the five exercises are cable work").
+- "swaps": for any exercise that can't be done as written but has a good equivalent here, give the replacement. Empty if nothing needs swapping.
+
+Be strict. The whole value of this is that it doesn't hand someone a workout they'll get to the gym and find they can't do. A near-miss substitution is fine; a "you could sort of approximate it" is not — that's a false. And bodyweight is always available anywhere.`;
+
+const MATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    matches: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          favorite_id: { type: "string" },
+          doable: { type: "boolean" },
+          why: { type: "string" },
+          swaps: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                exercise: { type: "string" },
+                use_instead: { type: "string" },
+              },
+              required: ["exercise", "use_instead"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["favorite_id", "doable", "why", "swaps"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["matches"],
+  additionalProperties: false,
+};
+
 async function userFromJWT(req: Request): Promise<string> {
   const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
   const { data, error } = await admin.auth.getUser(jwt);
@@ -267,6 +313,51 @@ Deno.serve(async (req) => {
       });
 
       return json({ groups: out.groups || [], note: out.note || null });
+    }
+
+    // ---- match_favorites: which saved workouts does this gym support? ------
+    if (body.mode === "match_favorites") {
+      const gymId = String(body.gym_id || "");
+      if (!gymId) return json({ error: "Which gym?" }, 400);
+
+      const { data: gym } = await admin
+        .from("gyms").select("id, name, user_id").eq("id", gymId).single();
+      if (!gym || gym.user_id !== userId) return json({ error: "Not your gym." }, 403);
+
+      const { data: favs } = await admin
+        .from("workout_favorites")
+        .select("id, name, muscle_group, favorite_exercises(exercise, equipment, position)")
+        .eq("user_id", userId);
+
+      if (!favs || !favs.length) return json({ matches: [] });
+
+      const { data: kit } = await admin
+        .from("gym_equipment").select("name, detail").eq("gym_id", gymId);
+
+      const kitList = (kit || []).length
+        ? (kit || []).map((e: any) => `- ${e.name}${e.detail ? ` (${e.detail})` : ""}`).join("\n")
+        : "(nothing inventoried — bodyweight only)";
+
+      const favList = favs.map((f: any) => {
+        const ex = (f.favorite_exercises || [])
+          .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+          .map((e: any) => `    · ${e.exercise}${e.equipment ? ` [${e.equipment}]` : ""}`)
+          .join("\n");
+        return `Workout id ${f.id} — "${f.name}" (${f.muscle_group}):\n${ex}`;
+      }).join("\n\n");
+
+      const out = await claude({
+        model: MODEL,
+        max_tokens: 4000,
+        thinking: { type: "adaptive" },
+        output_config: { format: { type: "json_schema", schema: MATCH_SCHEMA } },
+        messages: [{
+          role: "user",
+          content: `${MATCH_PROMPT}\n\nGym: ${gym.name}\n\nEquipment:\n${kitList}\n\nSaved workouts:\n${favList}`,
+        }],
+      });
+
+      return json({ matches: out.matches || [] });
     }
 
     return json({ error: `Unknown mode: ${body.mode}` }, 400);
