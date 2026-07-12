@@ -79,7 +79,9 @@ For each recommendation:
 About album covers:
 - Many covers have the artist and title printed on them, often in stylised type. Read them carefully.
 - Many covers have NO text at all — just a photograph, a painting, an illustration. This does NOT mean you skip it. Try to recognise the record from the artwork itself and return it with confidence "guess".
-- If a cover is genuinely unplaceable, do NOT invent a name. Instead add 1 to "unidentified" and, if you can, describe it in "unidentified_note" ("a 90s snapshot of two people at a party").
+- Use the context to help you place a wordless cover: the genre and era the post is about, the caption, and the other records shown alongside it. A wordless snapshot sitting next to a Tigers Jaw record in a post about emo is very likely a well-known emo record — think about which one.
+- Prefer a named guess over a shrug. If you have a plausible candidate, return it with confidence "guess". Spotify will simply fail to match a bad guess, and a bad guess is visible and deletable; a missed record is invisible.
+- Only when you have no candidate at all, do NOT invent one. Instead add a short description of the cover to "unidentified" ("a washed-out 90s snapshot of two people yelling at a party"), so it can be shown to the user rather than silently dropped.
 
 Do NOT return:
 - The poster, the blog, the playlist curator, the DJ or host — they aren't recommendations.
@@ -105,17 +107,17 @@ const FINDS_SCHEMA = {
         additionalProperties: false,
       },
     },
-    // Covers it saw but could not put a name to. Surfaced to the user so a
-    // missed record is visible instead of silently absent.
-    unidentified: { type: "integer" },
-    unidentified_note: { anyOf: [{ type: "string" }, { type: "null" }] },
+    // Covers it saw but could not put a name to — one short description each.
+    // These become rows in the crate, so a missed record is visible and the
+    // user can name it themselves instead of never knowing it was there.
+    unidentified: { type: "array", items: { type: "string" } },
   },
-  required: ["finds", "unidentified", "unidentified_note"],
+  required: ["finds", "unidentified"],
   additionalProperties: false,
 };
 
 type Find = { artist: string; album: string | null; confidence?: string };
-type Extraction = { finds: Find[]; unidentified: number; unidentified_note: string | null };
+type Extraction = { finds: Find[]; unidentified: string[] };
 
 async function extractFinds(content: unknown): Promise<Extraction> {
   const res = await fetch(ANTHROPIC_URL, {
@@ -146,8 +148,9 @@ async function extractFinds(content: unknown): Promise<Extraction> {
   const out = JSON.parse(text); // schema-constrained — safe to parse directly
   return {
     finds: (out.finds || []).filter((f: Find) => f.artist?.trim()),
-    unidentified: Number(out.unidentified) || 0,
-    unidentified_note: out.unidentified_note || null,
+    unidentified: (out.unidentified || [])
+      .filter((d: string) => d?.trim())
+      .map((d: string) => d.trim().slice(0, 140)),
   };
 }
 
@@ -464,13 +467,26 @@ async function runIngest(
     text: text ? `${EXTRACT_PROMPT}\n\nPost text:\n${text}` : EXTRACT_PROMPT,
   });
 
-  const { finds, unidentified, unidentified_note } = await extractFinds(content);
+  const { finds, unidentified } = await extractFinds(content);
+  const source = images.length ? "screenshot" : "text";
 
-  // A cover Claude saw but couldn't name still gets reported — the whole
-  // point of the `unidentified` count is that nothing disappears silently.
-  const missed = unidentified > 0
-    ? `Couldn't identify ${unidentified} cover${unidentified === 1 ? "" : "s"}` +
-      (unidentified_note ? ` (${unidentified_note})` : "") + "."
+  // A cover Claude saw but couldn't name becomes a row in the crate, not just a
+  // toast. The toast only exists on the web path and only until the next
+  // render; the Shortcut never sees it at all. A row survives both, and the
+  // user can read the description, recognise the record, and add it by name.
+  for (const desc of unidentified) {
+    await admin.from("music_finds").insert({
+      user_id: row.user_id,
+      artist: desc,
+      album: null,
+      source,
+      status: "unidentified",
+      note: "Couldn't name this cover — add the band by name if you know it.",
+    });   // a duplicate description just bounces off the dedupe index
+  }
+
+  const missed = unidentified.length
+    ? `Couldn't identify ${unidentified.length} cover${unidentified.length === 1 ? "" : "s"} — see the crate.`
     : null;
 
   if (!finds.length) {
@@ -479,7 +495,6 @@ async function runIngest(
 
   const token = await accessTokenFor(row);
   const playlistId = await ensurePlaylist(token, row);
-  const source = images.length ? "screenshot" : "text";
 
   const added: unknown[] = [];
   const skipped: unknown[] = [];

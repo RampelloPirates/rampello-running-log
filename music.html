@@ -162,6 +162,15 @@
 
   // ── Render ────────────────────────────────────────────────────────────────
   function findRow(f){
+    // An unidentified cover isn't an artist — it's a description of a record
+    // Claude saw and couldn't name. Show it as such, so it reads as a to-do
+    // ("I know that one — it's Joyce Manor") rather than a broken row.
+    if(f.status==='unidentified'){
+      return '<div class="find"><div class="body">'+
+        '<div class="name" style="font-style:italic;color:var(--muted)">'+esc(f.artist)+'</div>'+
+        '<div class="meta">couldn\'t name this cover · add the band above if you know it</div></div>'+
+        '<button class="x" title="Remove" onclick="removeFind('+f.id+')">×</button></div>';
+    }
     var label = f.album ? (esc(f.artist)+' — '+esc(f.album)) : esc(f.artist);
     var meta;
     if(f.status==='added'){
