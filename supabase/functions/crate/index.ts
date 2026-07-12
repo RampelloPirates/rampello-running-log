@@ -33,7 +33,9 @@ const SPOTIFY_API = "https://api.spotify.com/v1";
 
 // Where Spotify sends the user back. Must be registered verbatim in the
 // Spotify dashboard, and must be https (Spotify banned http://localhost).
-const REDIRECT_URI = "https://rampello-running-log.vercel.app/music.html";
+// This is the Vercel project's production domain ("jeff-tally") — if the
+// domain ever changes, this constant and the Spotify dashboard must both move.
+const REDIRECT_URI = "https://jeff-tally.vercel.app/music.html";
 
 // playlist-modify-private is what we actually need (the crate is private);
 // -public is included so a public playlist still works if you flip it later.
