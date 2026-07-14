@@ -88,6 +88,17 @@
             border:1px solid var(--border);background:var(--surface-warm);color:var(--ink);cursor:pointer;}
     .muscle:hover{border-color:var(--green);color:var(--green-deep);}
     .muscle.sel{background:var(--green);color:#fff;border-color:var(--green);}
+    /* This gym already has a menu for that muscle — it'll open instantly. */
+    .muscle .dot{display:inline-block;width:5px;height:5px;border-radius:50%;
+                 background:var(--amber);margin-left:5px;vertical-align:middle;}
+    .muscle.sel .dot{background:#fff;}
+
+    .stale{font-size:12.5px;color:var(--ink);background:#FBF2E6;border:1px solid #E8D3B4;
+           border-radius:10px;padding:10px 12px;margin-bottom:12px;line-height:1.5;}
+    .ex .warn{font-size:11.5px;color:var(--danger);margin-top:4px;}
+    .ex .own{font-family:var(--f-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;
+             color:var(--amber);border:1px solid var(--border);border-radius:5px;
+             padding:1px 4px;vertical-align:middle;font-weight:500;}
 
     /* Exercise menu */
     .eqgroup{margin-bottom:16px;}
@@ -131,11 +142,12 @@
   var S = { loaded:false, userId:null, athleteId:null,
             gyms:[], gymId:null, kit:[],
             muscle:null, groups:[], note:'',
+            menus:{}, menuFrom:'',           // saved menus for this gym, by muscle
             session:null, sets:[],           // the workout in progress
             history:[], openId:null,         // past workouts — NOT scoped to a gym
             favs:[], matches:{}, matching:false,   // saved workouts + can-I-do-it-here
             kitOpen:false,                   // the equipment list stays folded away once it exists
-            newGym:'', kitText:'',
+            newGym:'', kitText:'', exQ:'', looking:false, exErr:'', exMsg:'',
             busy:false, thinking:false, err:'', msg:'' };
 
   function el(id){ return document.getElementById(id); }
@@ -178,7 +190,7 @@
       var r = await sb.from('gyms').insert({ user_id:S.userId, name:name }).select('*').single();
       if(r.error) throw r.error;
       S.gyms.push(r.data); S.gymId = r.data.id; S.newGym=''; S.kit=[];
-      S.muscle=null; S.groups=[]; S.matches={}; S.kitOpen=true;
+      S.muscle=null; S.groups=[]; S.matches={}; S.menus={}; S.menuFrom=''; S.kitOpen=true;
     }catch(e){ S.err = e.message; }
     S.busy=false; render();
     // A brand-new gym has no equipment yet, so there's nothing to match against.
@@ -256,6 +268,7 @@
     (m.swaps||[]).forEach(function(s){ swaps[s.exercise] = s.use_instead; });
 
     S.muscle = f.muscle_group;
+    S.menuFrom = 'adhoc';   // today's plan, not this gym's menu — don't save it back
     S.note = (m.swaps && m.swaps.length)
       ? 'Swapped for this gym: ' + m.swaps.map(function(s){
           return s.exercise+' → '+s.use_instead; }).join('; ')
@@ -354,6 +367,7 @@
     if(!past || !S.gymId) return;
 
     S.muscle = past.muscle_group;
+    S.menuFrom = 'adhoc';
     S.note = '';
     S.err=''; S.msg='';
 
@@ -400,8 +414,8 @@
 
   async function pickGym(id){
     S.gymId = id; S.muscle=null; S.groups=[]; S.note=''; S.msg=''; S.kitOpen=false;
-    S.matches={};
-    await loadKit(); render();
+    S.matches={}; S.menus={}; S.menuFrom=''; S.exQ='';
+    await loadKit(); await loadMenus(); render();
     matchFavs();   // "which of my workouts can I do here?" — the point of favourites
   }
 
@@ -454,9 +468,58 @@
   }
 
   // ── Exercises ─────────────────────────────────────────────────────────────
-  async function pickMuscle(m){
+  // The answer to "what can I do for quads at the Y?" doesn't change between
+  // Tuesdays — the gym has the same equipment it had last week. So the menu is
+  // kept, and picking a muscle you've trained here before is instant and free.
+  //
+  // What CAN change is the equipment. The fingerprint is the kit as it stood
+  // when the menu was built; if it's moved on, we say the menu is stale rather
+  // than quietly handing over a workout the gym can no longer support.
+  function kitPrint(){
+    return S.kit.map(function(k){ return String(k.name||'').toLowerCase(); })
+                .sort().join('|');
+  }
+  function stale(menu){
+    return !!(menu && menu.kit_fingerprint && menu.kit_fingerprint !== kitPrint());
+  }
+
+  async function loadMenus(){
+    S.menus = {};
+    if(!S.gymId) return;
+    var r = await sb.from('gym_menus').select('*').eq('gym_id', S.gymId);
+    (r.data||[]).forEach(function(m){ S.menus[m.muscle_group] = m; });
+  }
+
+  // Only menus built for a gym+muscle are saved. A repeated workout or a loaded
+  // favourite is today's plan, not this gym's menu — writing those back would
+  // overwrite leg day with whatever you happened to do on Tuesday.
+  async function saveMenu(){
+    if(!S.gymId || !S.muscle || S.menuFrom==='adhoc') return;
+    var r = await sb.from('gym_menus').upsert({
+      user_id:S.userId, gym_id:S.gymId, muscle_group:S.muscle,
+      groups:S.groups, note:S.note||null, kit_fingerprint:kitPrint(),
+      updated_at:new Date().toISOString()
+    }, { onConflict:'gym_id,muscle_group' }).select('*').single();
+    if(!r.error) S.menus[S.muscle] = r.data;
+  }
+
+  async function pickMuscle(m, force){
     if(S.thinking || !S.gymId) return;
-    S.muscle = m; S.thinking=true; S.err=''; S.msg=''; S.groups=[]; S.note='';
+    S.err=''; S.msg=''; S.exQ='';
+
+    var saved = S.menus[m];
+    if(saved && !force){
+      S.muscle = m; S.menuFrom = 'saved';
+      S.groups = saved.groups || [];
+      S.note = saved.note || '';
+      await ensureSession(m);
+      await loadSets();
+      render();
+      afterMenu();
+      return;
+    }
+
+    S.muscle = m; S.thinking=true; S.groups=[]; S.note=''; S.menuFrom='fresh';
     render();
     try{
       var out = await callGym({ mode:'exercises', gym_id:S.gymId, muscle:m });
@@ -464,14 +527,69 @@
       S.note = out.note || '';
       await ensureSession(m);
       await loadSets();
-    }catch(e){ S.err = e.message; S.muscle=null; }
+      await saveMenu();
+    }catch(e){ S.err = e.message; S.muscle=null; S.menuFrom=''; }
     S.thinking=false; render();
+    afterMenu();
+  }
 
-    // Fill in "last time: 8 reps @ 55" behind the render, so the menu appears
-    // immediately and the history trickles in rather than holding it up.
+  // Fill in "last time: 8 reps @ 55" behind the render, so the menu appears
+  // immediately and the history trickles in rather than holding it up.
+  function afterMenu(){
     var names = [];
     S.groups.forEach(function(g){ (g.exercises||[]).forEach(function(e){ names.push(e.name); }); });
     if(names.length) loadLast(names);
+  }
+
+  // ── Your own exercises ────────────────────────────────────────────────────
+  // The generated menu is a starting point, not a cage. You have exercises that
+  // came from a coach, a physio, a video — and a log's job is to record what you
+  // actually did. Type the name; Claude works out what it trains (searching the
+  // web if it doesn't recognise it) and files it under the right equipment.
+  async function addExercise(){
+    var q = S.exQ.trim();
+    if(!q || S.looking || !S.gymId) return;
+    S.looking=true; S.exErr=''; S.exMsg=''; render();
+    try{
+      var out = await callGym({ mode:'lookup', gym_id:S.gymId, query:q });
+      var e = out.exercise || {};
+      if(!e.found) throw new Error(e.warn || 'Couldn\'t work out what that is.');
+
+      // Typed with no menu open? The lookup tells us what it trains, so open
+      // that muscle's menu and drop it in there.
+      if(!S.muscle){
+        await pickMuscle(e.muscle || 'Full body');
+        if(!S.muscle) throw new Error('Couldn\'t open a menu for that.');
+      }
+
+      var eq = e.equipment || 'Bodyweight';
+      var ex = { name:e.name, target:e.target||'', sets:e.sets||'', reps:e.reps||'',
+                 cue:e.cue||'', warn:(e.in_gym===false ? (e.warn||'Not on this gym\'s equipment list.') : ''),
+                 mine:true };
+
+      var g = S.groups.find(function(x){ return x.equipment.toLowerCase()===eq.toLowerCase(); });
+      if(!g){ g = { equipment:eq, exercises:[] }; S.groups.push(g); }
+      if(g.exercises.some(function(x){ return x.name.toLowerCase()===ex.name.toLowerCase(); })){
+        S.exMsg = ex.name+' is already on this menu.';
+      }else{
+        g.exercises.push(ex);
+        await saveMenu();
+        S.exMsg = 'Added '+ex.name+' — '+(e.muscle||'')+(e.muscle && e.target ? ', ' : '')+(e.target||'')+'.';
+      }
+      S.exQ='';
+      loadLast([ex.name]);
+    }catch(e){ S.exErr = e.message; }
+    S.looking=false; render();
+  }
+
+  async function dropExercise(equipment, name){
+    S.groups = S.groups.map(function(g){
+      if(g.equipment !== equipment) return g;
+      return { equipment:g.equipment,
+               exercises:(g.exercises||[]).filter(function(e){ return e.name!==name; }) };
+    }).filter(function(g){ return (g.exercises||[]).length; });
+    await saveMenu();
+    render();
   }
 
   // ── Logging ───────────────────────────────────────────────────────────────
@@ -553,10 +671,18 @@
     // exercises you did last time. Render around the gaps instead of printing
     // empty scaffolding.
     var h = '<div class="ex"><div class="top">'+
-      '<span class="nm">'+esc(ex.name)+'</span>'+
+      '<span class="nm">'+esc(ex.name)+(ex.mine?' <span class="own">yours</span>':'')+'</span>'+
       (ex.sets && ex.reps ? '<span class="pres">'+esc(ex.sets)+' × '+esc(ex.reps)+'</span>' : '')+
+      // The menu is saved, so pruning it sticks — an exercise you never do stops
+      // taking up room forever. Only offered on a real menu; a repeated workout
+      // isn't a list you own.
+      (S.menuFrom && S.menuFrom!=='adhoc'
+        ? '<button class="x" onclick="dropExercise('+JSON.stringify(equipment).replace(/"/g,'&quot;')+
+            ','+JSON.stringify(ex.name).replace(/"/g,'&quot;')+')" title="Remove from this menu">×</button>'
+        : '')+
       '</div>'+
       (ex.target ? '<div class="tg">'+esc(ex.target)+'</div>' : '')+
+      (ex.warn ? '<div class="warn">'+esc(ex.warn)+'</div>' : '')+
       (ex.cue ? '<div class="cue">'+esc(ex.cue)+'</div>' : '');
 
     if(last){
@@ -750,14 +876,32 @@
     }
 
     // ── Muscle group
+    // A dot marks the muscles this gym already has a menu for — those open
+    // instantly, no wait and no cost, because the equipment hasn't moved.
     h += '<section class="card"><h2 class="h2">Train what?</h2>'+
       MUSCLES.map(function(sec){
         return '<div class="msec"><span class="kicker">'+esc(sec.label)+'</span>'+
           '<div class="muscles">'+sec.items.map(function(m){
+            var have = !!S.menus[m];
             return '<button class="muscle'+(S.muscle===m?' sel':'')+'" onclick="pickMuscle('+
-              JSON.stringify(m).replace(/"/g,'&quot;')+')"'+(S.thinking?' disabled':'')+'>'+esc(m)+'</button>';
+              JSON.stringify(m).replace(/"/g,'&quot;')+')"'+(S.thinking||S.looking?' disabled':'')+'>'+
+              esc(m)+(have?'<i class="dot" title="saved menu"></i>':'')+'</button>';
           }).join('')+'</div></div>';
-      }).join('')+'</section>';
+      }).join('');
+
+    // Type an exercise you already do and it gets looked up — what it trains,
+    // what it needs — and filed into the right menu. Works with no menu open:
+    // the lookup decides the muscle group and opens it.
+    h += '<div class="setrow" style="margin-top:4px">'+
+      '<input class="field" id="exq" placeholder="or add one you already do — &quot;RDL&quot;, &quot;Copenhagen plank&quot;" '+
+        'value="'+esc(S.exQ)+'" oninput="S.exQ=this.value" '+
+        'onkeydown="if(event.key===\'Enter\')addExercise()" style="text-align:left">'+
+      '<button class="btn btn-ghost btn-sm" onclick="addExercise()"'+
+        ((S.looking||S.thinking)?' disabled':'')+'>'+(S.looking?'Looking…':'Add')+'</button>'+
+      '</div>';
+    if(S.exErr) h += '<p class="err">'+esc(S.exErr)+'</p>';
+    if(S.exMsg) h += '<p class="ok">'+esc(S.exMsg)+'</p>';
+    h += '</section>';
 
     // ── The menu
     if(S.thinking){
@@ -765,11 +909,24 @@
         ' can actually do for '+esc(S.muscle.toLowerCase())+'…</div></section>';
     }else if(S.groups.length){
       var total = S.sets.length;
+      var saved = S.menus[S.muscle];
+      var isMenu = S.menuFrom && S.menuFrom!=='adhoc';
+
       h += '<section class="card"><div class="row-between" style="margin-bottom:12px">'+
         '<h2 class="h2" style="margin:0">'+esc(S.muscle)+' at '+esc(gym(S.gymId).name)+'</h2>'+
         (total ? '<span class="kicker">'+total+' set'+(total===1?'':'s')+' logged</span>' : '')+
         '</div>';
+
+      // The kit changed since this menu was built, so some of it may no longer
+      // be possible. Say so — don't silently serve a workout the gym can't do.
+      if(isMenu && stale(saved)){
+        h += '<div class="stale">'+esc(gym(S.gymId).name)+'\'s equipment list has changed since this '+
+          'menu was built. Some of it may no longer be possible. '+
+          '<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="pickMuscle('+
+            JSON.stringify(S.muscle).replace(/"/g,'&quot;')+',true)">Rebuild it</button></div>';
+      }
       if(S.note) h += '<p class="p" style="padding:10px;background:var(--surface-warm);border-radius:9px;border-left:2px solid var(--amber)">'+esc(S.note)+'</p>';
+
       h += S.groups.map(function(g){
         return '<div class="eqgroup"><h3>'+esc(g.equipment)+'</h3>'+
           (g.exercises||[]).map(function(ex){ return exCard(ex, g.equipment); }).join('')+'</div>';
@@ -784,6 +941,13 @@
           '</div>';
       }
       h += '</section>';
+
+      if(isMenu){
+        h += '<p class="fine">This menu is saved for '+esc(gym(S.gymId).name)+' — it opens instantly next time. '+
+          'Add your own exercises above, × the ones you never do, or '+
+          '<a href="#" onclick="pickMuscle('+JSON.stringify(S.muscle).replace(/"/g,'&quot;')+
+          ',true);return false" style="color:var(--green);font-weight:600">rebuild it from scratch</a>.</p>';
+      }
       h += '<p class="fine">Sets save as you go. <b>Finish workout</b> posts it to your Workout Log; <b>Save</b> keeps it as a favourite you can do at any gym with the kit for it.</p>';
     }
 
@@ -803,6 +967,7 @@
 
     await loadGyms();
     await loadKit();
+    await loadMenus();
     await loadFavs();
     await loadHistory();
     S.loaded = true;

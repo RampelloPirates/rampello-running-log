@@ -47,7 +47,7 @@ function sniffMedia(b64: string, fallback: string): string {
   return fallback;
 }
 
-async function claude(body: Record<string, unknown>) {
+async function post(body: Record<string, unknown>) {
   const res = await fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -60,13 +60,35 @@ async function claude(body: Record<string, unknown>) {
   if (!res.ok) {
     throw new Error(`Anthropic ${res.status} — ${(await res.text()).slice(0, 200)}`);
   }
-  const data = await res.json();
-  if (data.stop_reason === "refusal") throw new Error("The model declined that request.");
+  return await res.json();
+}
+
+function textOf(data: any) {
   const text = (data.content || [])
     .filter((b: { type: string }) => b.type === "text")
     .map((b: { text: string }) => b.text)
     .join("");
   return JSON.parse(text);   // schema-constrained — safe to parse directly
+}
+
+async function claude(body: Record<string, unknown>) {
+  const data = await post(body);
+  if (data.stop_reason === "refusal") throw new Error("The model declined that request.");
+  return textOf(data);
+}
+
+// Same, but the model may reach for web search on the way. A server tool call
+// ends the turn with stop_reason "pause_turn" — the results are already in the
+// response, so we hand the whole thing back and let it carry on.
+async function claudeSearching(body: Record<string, unknown>) {
+  const messages = [...(body.messages as any[])];
+  for (let i = 0; i < 4; i++) {
+    const data = await post({ ...body, messages });
+    if (data.stop_reason === "refusal") throw new Error("The model declined that request.");
+    if (data.stop_reason !== "pause_turn") return textOf(data);
+    messages.push({ role: "assistant", content: data.content });
+  }
+  throw new Error("Gave up looking that exercise up.");
 }
 
 // ── Inventory: photos → equipment ──────────────────────────────────────────
@@ -210,6 +232,47 @@ const MATCH_SCHEMA = {
   additionalProperties: false,
 };
 
+// ── Lookup: a name the user typed → what it is and what it trains ──────────
+// The generated menu is a starting point, not a cage. People have exercises they
+// already do — from a coach, a physio, a video, a friend at the gym — and the
+// point of a log is to log what you actually did, not what an app suggested.
+const MUSCLE_ENUM = [
+  "Chest", "Shoulders", "Triceps", "Back", "Biceps", "Forearms",
+  "Quads", "Hamstrings", "Glutes", "Calves", "Legs (all)", "Core", "Full body",
+];
+
+const LOOKUP_PROMPT =
+  `The user typed the name of an exercise they want to add to their workout. Work out what it is.
+
+- "found": false ONLY if this isn't an exercise at all, or you genuinely cannot establish what it is. Then leave the rest empty and put the reason in "warn".
+- "name": the standard name for it, properly spelled. They may have typed it wrong, abbreviated it ("RDL", "OHP"), or used gym slang.
+- "muscle": the ONE group from the list that this exercise primarily trains. Primarily. A deadlift is Hamstrings, not Full body, unless it truly is a whole-body movement.
+- "target": the specific part it hits — "long head of the triceps", "glute medius".
+- "equipment": what it needs. Look at the gym's equipment list below and use THAT gym's wording where the exercise really does use that item, so it files under the right heading. If it needs nothing, "Bodyweight".
+- "sets" / "reps": a sensible prescription ("3", "8–12").
+- "cue": ONE short form cue that prevents the usual mistake.
+- "in_gym": true if this gym has what the exercise needs (bodyweight always counts as available). If false, still fill everything in — they asked for it, and they may know something the equipment list doesn't — but say what's missing in "warn".
+
+If the name is one you don't recognise, search the web before answering. New exercises, physio movements and regional names are real, and guessing at one produces a plausible-sounding lie. Only search if you actually need to — you already know the overwhelming majority of exercises.`;
+
+const LOOKUP_SCHEMA = {
+  type: "object",
+  properties: {
+    found: { type: "boolean" },
+    name: { type: "string" },
+    muscle: { enum: MUSCLE_ENUM.concat([""]) },
+    target: { type: "string" },
+    equipment: { type: "string" },
+    sets: { type: "string" },
+    reps: { type: "string" },
+    cue: { type: "string" },
+    in_gym: { type: "boolean" },
+    warn: { type: "string" },
+  },
+  required: ["found", "name", "muscle", "target", "equipment", "sets", "reps", "cue", "in_gym", "warn"],
+  additionalProperties: false,
+};
+
 async function userFromJWT(req: Request): Promise<string> {
   const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
   const { data, error } = await admin.auth.getUser(jwt);
@@ -313,6 +376,50 @@ Deno.serve(async (req) => {
       });
 
       return json({ groups: out.groups || [], note: out.note || null });
+    }
+
+    // ---- lookup: a typed exercise name → what it is, what it trains --------
+    if (body.mode === "lookup") {
+      const gymId = String(body.gym_id || "");
+      const q = String(body.query || "").trim();
+      if (!gymId || !q) return json({ error: "Type the name of an exercise." }, 400);
+
+      const { data: gym } = await admin
+        .from("gyms").select("id, name, user_id").eq("id", gymId).single();
+      if (!gym || gym.user_id !== userId) return json({ error: "Not your gym." }, 403);
+
+      const { data: kit } = await admin
+        .from("gym_equipment").select("name, detail").eq("gym_id", gymId);
+      const kitList = (kit || []).length
+        ? (kit || []).map((e: any) => `- ${e.name}${e.detail ? ` (${e.detail})` : ""}`).join("\n")
+        : "(nothing inventoried — bodyweight only)";
+
+      const req = {
+        model: MODEL,
+        max_tokens: 3000,
+        thinking: { type: "adaptive" },
+        output_config: { format: { type: "json_schema", schema: LOOKUP_SCHEMA } },
+        messages: [{
+          role: "user",
+          content: `${LOOKUP_PROMPT}\n\nGym: ${gym.name}\n\nEquipment:\n${kitList}\n\nThey typed: ${q}`,
+        }],
+      };
+
+      // Search is a fallback for names the model doesn't know, so it isn't worth
+      // failing the whole lookup over. If the tool is unavailable — or the API
+      // objects to the combination — answer from what the model already knows,
+      // which covers all but the exotic.
+      let out;
+      try {
+        out = await claudeSearching({
+          ...req,
+          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }],
+        });
+      } catch (_e) {
+        out = await claude(req);
+      }
+
+      return json({ exercise: out });
     }
 
     // ---- match_favorites: which saved workouts does this gym support? ------
