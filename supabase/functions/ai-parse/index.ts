@@ -131,6 +131,9 @@ async function lookupBarcode(barcode: string): Promise<unknown> {
     kind: "packaged",
     barcode,
     serving_size: p.serving_size || null,
+    // Grams per serving, when OFF has parsed it out of serving_size for us.
+    // The client defaults the amount-eaten field to one serving when it's here.
+    serving_quantity: num(p.serving_quantity),
     cal_100g: num(n["energy-kcal_100g"]),
     protein_100g: num(n["proteins_100g"]),
     fat_100g: num(n["fat_100g"]),

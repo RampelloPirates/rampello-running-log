@@ -97,6 +97,11 @@
     .stepper{display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:2px 8px;}
     .stepper input{width:46px;font-family:var(--f-mono);font-size:14px;border:none;background:transparent;text-align:center;padding:6px 0;}
     .pill{background:var(--green-tint);color:var(--green-deep);border:none;border-radius:8px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;font-family:var(--f-body);}
+    /* serving ⇄ grams switch on the label / barcode panes */
+    .unit-sw{display:inline-flex;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:2px;}
+    .unit-sw button{font-family:var(--f-body);font-size:11.5px;font-weight:600;border:none;background:transparent;
+                    color:var(--muted);padding:5px 9px;border-radius:6px;cursor:pointer;}
+    .unit-sw button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06);}
     .err{color:var(--danger);font-size:13px;margin:10px 0 0;}
     .loading{padding:40px;text-align:center;color:var(--muted);font-size:14px;}
   </style>
@@ -114,7 +119,8 @@
     burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
     draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null, editEntryId:null, editItems:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
-    libOpen:false, libQ:'',                 // the ingredient library picker
+    libOpen:false, libQ:'',                 // the saved-ingredient picker
+    usualQ:'',                              // filter on the usuals list
 
     busy:false, err:'', editTarget:false,
   };
@@ -129,6 +135,15 @@
   function sumMacros(items){ return (items||[]).reduce((a,i)=>({p:a.p+(i.protein||0),f:a.f+(i.fat||0),c:a.c+(i.carbs||0),fib:a.fib+(i.fiber||0)}),{p:0,f:0,c:0,fib:0}); }
   function macroCompact(m){ return 'P'+Math.round(m.p||0)+' · F'+Math.round(m.f||0)+' · C'+Math.round(m.c||0)+' · Fb'+Math.round(m.fib||0); }
   function el(id){ return document.getElementById(id); }
+  // Pull a gram weight out of a serving-size string: "30 g", "2/3 cup (55g)",
+  // "1 bar (45 g)". Returns null when there's no gram figure to find — which is
+  // the signal that we can't offer a grams toggle for that item.
+  function parseServingGrams(s){
+    if(s==null) return null;
+    var m = String(s).match(/([\d.]+)\s*(?:g|gram|grams)\b/i);
+    var v = m ? parseFloat(m[1]) : NaN;
+    return (v>0) ? v : null;
+  }
 
   function localDateKey(d){
     d = d || new Date();
@@ -187,10 +202,30 @@
     }
     S.log = entries.map(function(e){ return entryToView(e, byEntry[e.id]); });
   }
+  // "Usuals" is not a curated list any more — it's everything you've ever
+  // logged, newest first, deduped by name. You were going to History to find
+  // things; this is History's usefulness without the digging. Names carry no
+  // amounts (see insertEntry callers), so the same food at two portion sizes
+  // collapses to one row you re-log at whatever size you want.
+  var USUALS_SCAN = 400;   // entries to look back over
+  var USUALS_MAX  = 150;   // distinct foods to keep
   async function loadUsuals(){
-    var r = await sb.from('nutrition_usuals').select('*').order('created_at',{ascending:false});
-    S.usuals = (r.data||[]).map(function(u){ return {id:u.id,name:u.name,total:u.total_calories||0,
-      macros:{p:num(u.protein),f:num(u.fat),c:num(u.carbs),fib:num(u.fiber)}, items:u.items||[]}; });
+    var r = await sb.from('nutrition_entries').select('*').order('occurred_at',{ascending:false}).limit(USUALS_SCAN);
+    var seen = {}, keep = [];
+    (r.data||[]).forEach(function(e){
+      var k = String(e.title||'').trim().toLowerCase();
+      if(!k || seen[k] || keep.length>=USUALS_MAX) return;
+      seen[k] = 1; keep.push(e);
+    });
+    var byEntry = {};
+    if(keep.length){
+      var ri = await sb.from('nutrition_entry_items').select('*').in('entry_id',keep.map(function(e){return e.id;})).order('position',{ascending:true});
+      (ri.data||[]).forEach(function(it){ (byEntry[it.entry_id]=byEntry[it.entry_id]||[]).push(it); });
+    }
+    S.usuals = keep.map(function(e){
+      var v = entryToView(e, byEntry[e.id]);
+      return {id:v.id, name:v.title, total:v.total, macros:v.macros, items:v.items, ts:v.ts};
+    });
   }
   async function loadRecipes(){
     var r = await sb.from('foods').select('*').eq('kind','recipe').order('created_at',{ascending:false});
@@ -242,20 +277,6 @@
       toast('Logged to today');
     }catch(err){ S.err=err.message; render(); }
   }
-  // Save a past entry as a reusable "usual".
-  async function saveUsualFromEntry(key, entryId){
-    var d = S.history.filter(function(x){return x.key===key;})[0]; if(!d||!d.entries) return;
-    var e = d.entries.filter(function(x){return x.id===entryId;})[0]; if(!e) return;
-    var items = (e.items||[]).map(function(it){ return {name:it.name,qty:it.qty,unit:it.unit,calories:it.calories,protein:it.protein,fat:it.fat,carbs:it.carbs,fiber:it.fiber}; });
-    var m = e.macros || sumMacros(items);
-    try{
-      var r = await sb.from('nutrition_usuals').insert({user_id:S.userId, name:e.title,
-        total_calories:Math.round(e.total||items.reduce(function(s,i){return s+i.calories;},0)),
-        protein:round1(m.p), fat:round1(m.f), carbs:round1(m.c), fiber:round1(m.fib), items:items}).select('id').single();
-      if(r.error) throw r.error;
-      await loadUsuals(); toast('Saved to usuals');
-    }catch(err){ S.err=err.message; render(); }
-  }
   function toast(msg){
     var t=document.createElement('div');
     t.textContent=msg;
@@ -279,6 +300,7 @@
       if(e2.error) throw e2.error;
     }
     await loadLog();
+    await loadUsuals();   // usuals is derived from the log, so it moves with it
   }
 
   // ── AI parsing via the ai-parse edge function ─────────────────────────────
@@ -315,7 +337,9 @@
     try{
       var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file); });
       var out = await callEdge({mode:'label', image:b64, media_type:file.type||'image/jpeg'});
-      S.label = Object.assign({}, out, {servingsEaten:1});
+      // Default to one serving — that's what the label is denominated in and
+      // what you almost always ate. Grams stay one tap away.
+      S.label = Object.assign({}, out, {servingsEaten:1, mode:'serving', servingG:parseServingGrams(out.servingSize)});
     }catch(e){ S.err = e.message || "Couldn't read that label. Try a clearer photo."; }
     finally{ S.busy=false; render(); }
   }
@@ -330,34 +354,23 @@
     }catch(e){ S.err=e.message; render(); }
   }
 
-  async function saveUsual(){
-    if(!S.draft) return;
-    var items = S.draft.items.map(function(it){ return {name:it.name,qty:it.qty,unit:it.unit,calories:it.calories,protein:it.protein,fat:it.fat,carbs:it.carbs,fiber:it.fiber}; });
-    var m = sumMacros(items);
-    try{
-      var r = await sb.from('nutrition_usuals').insert({user_id:S.userId, name:S.draft.title,
-        total_calories:items.reduce(function(s,i){return s+i.calories;},0),
-        protein:round1(m.p),fat:round1(m.f),carbs:round1(m.c),fiber:round1(m.fib), items:items}).select('id').single();
-      if(r.error) throw r.error;
-      await loadUsuals(); flash('Saved to usuals');
-    }catch(e){ S.err=e.message; render(); }
-  }
-
   async function addUsual(id){
     var u = S.usuals.filter(function(x){return x.id===id;})[0]; if(!u) return;
     try{ await insertEntry({title:u.name, source:'usual', total:u.total, macros:u.macros||sumMacros(u.items), items:u.items}); S.view='today'; render(); }
     catch(e){ S.err=e.message; render(); }
   }
-  async function removeUsual(id){ await sb.from('nutrition_usuals').delete().eq('id',id); await loadUsuals(); render(); }
 
   async function commitLabel(){
     var L = S.label; var per = L.caloriesPerServing||0; var eaten = L.servingsEaten||1;
     var cal = Math.round(per*eaten);
     var m = {p:round1((L.proteinPerServing||0)*eaten), f:round1((L.fatPerServing||0)*eaten), c:round1((L.carbsPerServing||0)*eaten), fib:round1((L.fiberPerServing||0)*eaten)};
     var title = L.productName || 'Packaged item';
+    // Record the amount the way it was entered, so re-logging rescales sensibly.
+    var inG = L.mode==='g' && L.servingG;
+    var qty = inG ? Math.round(eaten*L.servingG*10)/10 : round2(eaten);
     try{
       await insertEntry({title:title, source:'label', total:cal, macros:m,
-        items:[{name:title, qty:eaten, unit:'serving', calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib}]});
+        items:[{name:title, qty:qty, unit:(inG?'g':'serving'), calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib}]});
       S.label=null; render();
     }catch(e){ S.err=e.message; render(); }
   }
@@ -589,7 +602,9 @@
     var cal = Math.round((r.per100.cal*grams)/100);
     var m = {p:round1((r.per100.p*grams)/100), f:round1((r.per100.f*grams)/100), c:round1((r.per100.c*grams)/100), fib:round1(((r.per100.fib||0)*grams)/100)};
     try{
-      await insertEntry({title:grams+'g '+r.name, source:'recipe', total:cal, macros:m,
+      // Title carries no weight — the same dish at 200g and 350g should be one
+      // name in Usuals, with the amount living on the item row underneath.
+      await insertEntry({title:r.name, source:'recipe', total:cal, macros:m,
         items:[{name:r.name, qty:grams, unit:'g', calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib}]});
       S.view='today'; render();
     }catch(e){ S.err=e.message; render(); }
@@ -654,9 +669,18 @@
 
   function labelMacroText(L){ var e=L.servingsEaten||0; var g=function(v){return round1((v||0)*e);};
     return 'P'+g(L.proteinPerServing)+' · F'+g(L.fatPerServing)+' · C'+g(L.carbsPerServing)+' · Fb'+g(L.fiberPerServing); }
-  function labelEaten(v){ S.label.servingsEaten=parseFloat(v)||0;
+  function labelEaten(v){ S.label.servingsEaten=Math.max(0,parseFloat(v)||0); refreshLabelTotals(); }
+  // Grams in → servings, since every number on the label is per serving.
+  function labelGrams(v){
+    var g = Math.max(0,parseFloat(v)||0);
+    S.label.servingsEaten = S.label.servingG ? (g/S.label.servingG) : 0;
+    refreshLabelTotals();
+  }
+  function refreshLabelTotals(){
     var n=el('labelAdds'); if(n) n.textContent=Math.round((S.label.caloriesPerServing||0)*(S.label.servingsEaten||0)).toLocaleString();
-    var m=el('labelMacros'); if(m) m.textContent=labelMacroText(S.label); }
+    var m=el('labelMacros'); if(m) m.textContent=labelMacroText(S.label);
+  }
+  function labelMode(m){ S.label.mode=m; render(); }
   function labelName(v){ S.label.productName=v; }
 
   // ── Barcode: photo → OCR the number (edge fn) → Open Food Facts ────────────
@@ -665,30 +689,43 @@
     try{
       var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file); });
       var out = await callEdge({mode:'barcode', image:b64, media_type:file.type||'image/jpeg'});
-      S.barcode = Object.assign({grams:100}, out);
+      // Open Food Facts is per-100g, but you ate a serving. Default to one
+      // serving whenever the product tells us what a serving weighs; fall back
+      // to 100g when it doesn't.
+      var sg = num(out.serving_quantity) || parseServingGrams(out.serving_size);
+      S.barcode = Object.assign({}, out, {servingG:sg||null, mode:(sg?'serving':'g'), grams:(sg||100)});
     }catch(e){ S.err = e.message || "Couldn't read that barcode."; }
     finally{ S.busy=false; render(); }
   }
   function barcodeMacroText(B){ var g=B.grams||0; var v=function(x){return round1((num(x)||0)*g/100);};
     return 'P'+v(B.protein_100g)+' · F'+v(B.fat_100g)+' · C'+v(B.carbs_100g)+' · Fb'+v(B.fiber_100g); }
-  function barcodeGrams(v){ S.barcode.grams=Math.max(0,parseFloat(v)||0);
+  // Grams stay the unit the math runs in; servings are just a nicer way to type it.
+  function barcodeGrams(v){ S.barcode.grams=Math.max(0,parseFloat(v)||0); refreshBarcodeTotals(); }
+  function barcodeServings(v){
+    var s = Math.max(0,parseFloat(v)||0);
+    S.barcode.grams = s * (S.barcode.servingG||0);
+    refreshBarcodeTotals();
+  }
+  function refreshBarcodeTotals(){
     var n=el('barcodeAdds'); if(n) n.textContent=Math.round((num(S.barcode.cal_100g)*S.barcode.grams)/100).toLocaleString();
-    var m=el('barcodeMacros'); if(m) m.textContent=barcodeMacroText(S.barcode); }
+    var m=el('barcodeMacros'); if(m) m.textContent=barcodeMacroText(S.barcode);
+  }
+  function barcodeMode(m){ S.barcode.mode=m; render(); }
   async function commitBarcode(){
     var B=S.barcode; var g=B.grams||0; if(g<=0) return;
     var cal=Math.round((num(B.cal_100g)*g)/100);
     var m={p:round1((num(B.protein_100g)*g)/100), f:round1((num(B.fat_100g)*g)/100), c:round1((num(B.carbs_100g)*g)/100), fib:round1((num(B.fiber_100g)*g)/100)};
+    var inSv = B.mode==='serving' && B.servingG;
+    var qty = inSv ? round2(g/B.servingG) : Math.round(g*10)/10;
     try{
       await insertEntry({title:B.name||'Packaged item', source:'barcode', total:cal, macros:m,
-        items:[{name:B.name||'Packaged item', qty:g, unit:'g', calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib}]});
+        items:[{name:B.name||'Packaged item', qty:qty, unit:(inSv?'serving':'g'), calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib}]});
       S.barcode=null; render();
     }catch(e){ S.err=e.message; render(); }
   }
 
   function setView(v){ S.view=v; S.err=''; render(); if(v==='history') loadHistory().then(render); }
   function setMethod(m){ S.method=m; S.err=''; render(); }
-
-  function flash(msg){ S.err=''; render(); }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   function render(){
@@ -805,7 +842,7 @@
     h += '<div class="row-between" style="padding:10px 0 2px;border-top:1px solid var(--border);margin-top:4px;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Meal total</span><span id="draftTotal" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+d.items.reduce(function(s,i){return s+i.calories;},0).toLocaleString()+'</span></div>';
     h += '<div id="draftMacro" style="text-align:right;font-size:12px;color:var(--muted);font-family:var(--f-mono);padding-bottom:8px">'+macroCompact(sumMacros(d.items))+'</div>';
     if(d.note) h += '<p class="note">'+esc(d.note)+'</p>';
-    h += '<div class="btn-row"><button class="btn btn-primary" onclick="commitDraft()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="saveUsual()">Save usual</button></div>';
+    h += '<button class="btn btn-primary" onclick="commitDraft()">Add to log</button>';
     h += '<button class="link" style="width:100%;color:var(--muted);padding:10px 0 0" onclick="S.draft=null;render()">discard</button>';
     return h;
   }
@@ -824,7 +861,19 @@
     if(L.proteinPerServing||L.fatPerServing||L.carbsPerServing||L.fiberPerServing)
       h += '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin-top:3px">per serving — P'+(L.proteinPerServing!=null?L.proteinPerServing:'?')+' · F'+(L.fatPerServing!=null?L.fatPerServing:'?')+' · C'+(L.carbsPerServing!=null?L.carbsPerServing:'?')+' · Fb'+(L.fiberPerServing!=null?L.fiberPerServing:'?')+'</div>';
     h += '</div>';
-    h += '<label style="font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:10px">Servings eaten<input value="'+(L.servingsEaten)+'" inputmode="decimal" oninput="labelEaten(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center"></label>';
+    // Amount eaten: servings by default; grams only when the label gave us a
+    // gram weight per serving to convert with.
+    var inG = L.mode==='g' && L.servingG;
+    var shown = inG ? Math.round((L.servingsEaten||0)*L.servingG*10)/10 : (Math.round((L.servingsEaten||0)*100)/100);
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">'+
+      '<span style="font-size:13px;font-weight:500">Amount eaten</span>'+
+      '<span style="display:flex;align-items:center;gap:8px">'+
+        '<input value="'+shown+'" inputmode="decimal" oninput="'+(inG?'labelGrams':'labelEaten')+'(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center">'+
+        (L.servingG
+          ? '<span class="unit-sw"><button class="'+(inG?'':'on')+'" onclick="labelMode(\'serving\')">servings</button><button class="'+(inG?'on':'')+'" onclick="labelMode(\'g\')">grams</button></span>'
+          : '<span style="font-size:12px;color:var(--muted)">serving'+((L.servingsEaten||0)===1?'':'s')+'</span>')+
+      '</span></div>';
+    if(L.servingG) h += '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-top:4px;text-align:right">1 serving = '+L.servingG+'g</div>';
     h += '<div class="row-between" style="padding:14px 0 2px;border-top:1px solid var(--border);margin:12px 0 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="labelAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+Math.round((L.caloriesPerServing||0)*(L.servingsEaten||0)).toLocaleString()+'</span></div>';
     h += '<div id="labelMacros" style="text-align:right;font-size:12px;color:var(--muted);font-family:var(--f-mono);padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px">'+labelMacroText(L)+'</div>';
     h += '<div class="btn-row"><button class="btn btn-amber" onclick="commitLabel()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="S.label=null;render()">Cancel</button></div>';
@@ -846,7 +895,17 @@
     if(B.protein_100g!=null||B.fat_100g!=null||B.carbs_100g!=null||B.fiber_100g!=null)
       h += '<div style="font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin-top:3px">per 100g — P'+(B.protein_100g!=null?B.protein_100g:'?')+' · F'+(B.fat_100g!=null?B.fat_100g:'?')+' · C'+(B.carbs_100g!=null?B.carbs_100g:'?')+' · Fb'+(B.fiber_100g!=null?B.fiber_100g:'?')+'</div>';
     h += '</div>';
-    h += '<label style="font-size:13px;font-weight:500;display:flex;align-items:center;justify-content:space-between;gap:10px">Amount eaten<span style="display:flex;align-items:center;gap:4px"><input value="'+g+'" inputmode="decimal" oninput="barcodeGrams(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center"><span style="font-size:12px;color:var(--muted)">g</span></span></label>';
+    var inSv = B.mode==='serving' && B.servingG;
+    var shown = inSv ? (Math.round((g/B.servingG)*100)/100) : (Math.round(g*10)/10);
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">'+
+      '<span style="font-size:13px;font-weight:500">Amount eaten</span>'+
+      '<span style="display:flex;align-items:center;gap:8px">'+
+        '<input value="'+shown+'" inputmode="decimal" oninput="'+(inSv?'barcodeServings':'barcodeGrams')+'(this.value)" style="width:80px;font-family:var(--f-mono);font-size:15px;padding:7px 9px;border:1px solid var(--border);border-radius:8px;text-align:center">'+
+        (B.servingG
+          ? '<span class="unit-sw"><button class="'+(inSv?'on':'')+'" onclick="barcodeMode(\'serving\')">servings</button><button class="'+(inSv?'':'on')+'" onclick="barcodeMode(\'g\')">grams</button></span>'
+          : '<span style="font-size:12px;color:var(--muted)">g</span>')+
+      '</span></div>';
+    if(B.servingG) h += '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono);margin-top:4px;text-align:right">1 serving = '+B.servingG+'g</div>';
     h += '<div class="row-between" style="padding:14px 0 2px;border-top:1px solid var(--border);margin:12px 0 0;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Adds to log</span><span id="barcodeAdds" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+cal.toLocaleString()+'</span></div>';
     h += '<div id="barcodeMacros" style="text-align:right;font-size:12px;color:var(--muted);font-family:var(--f-mono);padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px">'+barcodeMacroText(B)+'</div>';
     h += '<div class="btn-row"><button class="btn btn-amber" onclick="commitBarcode()">Add to log</button><button class="btn btn-ghost btn-auto" onclick="S.barcode=null;render()">Cancel</button></div>';
@@ -912,7 +971,12 @@
       '<span class="lcal">'+e.total.toLocaleString()+'</span>'+
       '<button class="x" style="font-size:14px;padding:0 0 0 6px;color:var(--green)" title="Edit quantity" onclick="event.stopPropagation();openEntryEdit(\''+e.id+'\')">✎</button>'+
       '<button class="x" style="font-size:16px;padding:0 0 0 4px" onclick="event.stopPropagation();deleteEntry(\''+e.id+'\')">×</button></div>';
-    if(hasMacros) h += '<div style="padding-left:66px;padding-top:3px"><span class="macro-compact">'+macroCompact(e.macros)+'</span></div>';
+    // The amount lives here, under the name, not in it — so the same food at
+    // two portion sizes reads as one food you ate twice.
+    var one = (e.items && e.items.length===1) ? e.items[0] : null;
+    var amt = (one && one.qty) ? (round2(one.qty)+' '+(one.unit||'')).trim() : '';
+    if(amt || hasMacros) h += '<div style="padding-left:66px;padding-top:3px"><span class="macro-compact">'+
+      (amt?esc(amt):'')+((amt&&hasMacros)?' · ':'')+(hasMacros?macroCompact(e.macros):'')+'</span></div>';
     if(e.items && e.items.length>1){
       h += '<div class="row-items" style="display:none;padding-left:66px;padding-top:6px">'+e.items.map(function(it){
         return '<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);padding:2px 0"><span>'+esc(it.qty)+' '+esc(it.unit)+' '+esc(it.name)+'</span><span style="font-family:var(--f-mono)">'+it.calories+'</span></div>';
@@ -922,13 +986,27 @@
   }
   function toggleRow(head){ var items = head.parentNode.querySelector('.row-items'); if(items) items.style.display = items.style.display==='none'?'block':'none'; }
 
-  function viewUsuals(){
-    var h = '<section class="card"><h2 class="h2">Saved usuals</h2>';
-    if(!S.usuals.length){ h += '<p class="empty" style="text-align:left;padding:0">No usuals yet. When you break down a meal on the Today tab, tap "Save usual" to keep it here for one-tap logging.</p>'; }
-    else h += S.usuals.map(function(u){
+  function usualRowsHTML(){
+    var q = (S.usualQ||'').trim().toLowerCase();
+    var list = q ? S.usuals.filter(function(u){ return u.name.toLowerCase().indexOf(q)!==-1; }) : S.usuals;
+    if(!list.length) return '<p class="note" style="margin:12px 0 0">Nothing matches.</p>';
+    return list.map(function(u){
       var m=u.macros; var macro = (m.p||m.f||m.c||m.fib)?(' · P'+Math.round(m.p)+' F'+Math.round(m.f)+' C'+Math.round(m.c)+' Fb'+Math.round(m.fib||0)):'';
-      return '<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px dashed var(--border)"><div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(u.name)+'</div><div style="font-size:12px;color:var(--muted);font-family:var(--f-mono)">'+u.total.toLocaleString()+' cal'+macro+'</div></div><button class="pill" onclick="addUsual(\''+u.id+'\')">+ Log</button><button class="x" style="font-size:17px" onclick="removeUsual(\''+u.id+'\')">×</button></div>';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px dashed var(--border)"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500;overflow-wrap:anywhere">'+esc(u.name)+'</div>'+
+        '<div style="font-size:12px;color:var(--muted);font-family:var(--f-mono)">'+u.total.toLocaleString()+' cal'+macro+' · '+prettyDate(localDateKey(new Date(u.ts)))+'</div></div>'+
+        '<button class="pill" onclick="addUsual(\''+u.id+'\')">+ Log</button></div>';
     }).join('');
+  }
+  function viewUsuals(){
+    var h = '<section class="card"><h2 class="h2">Usuals</h2>';
+    if(!S.usuals.length){
+      h += '<p class="empty" style="text-align:left;padding:0">Nothing logged yet. Everything you log shows up here automatically, newest first, ready to log again.</p>';
+      return h+'</section>';
+    }
+    h += '<p style="font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.5">Everything you\'ve logged, newest first. Tap <strong>+ Log</strong> to add it to today — then adjust the amount on the Today tab if this time was bigger or smaller.</p>';
+    h += '<input class="field" placeholder="Search what you\'ve eaten…" value="'+esc(S.usualQ||'')+'" '+
+      'oninput="S.usualQ=this.value; var n=el(\'usualList\'); if(n) n.innerHTML=usualRowsHTML();" style="padding:9px 11px;font-size:13.5px">';
+    h += '<div id="usualList">'+usualRowsHTML()+'</div>';
     return h+'</section>';
   }
 
@@ -940,19 +1018,27 @@
       h += '<textarea class="field" rows="5" placeholder="1 lb ground beef\n2 cans kidney beans\n1 onion, diced\n2 tbsp olive oil\n1 can crushed tomatoes" oninput="S.recipeText=this.value" style="line-height:1.5;margin-bottom:10px">'+esc(S.recipeText)+'</textarea>';
       h += '<button class="btn btn-primary" onclick="parseRecipe()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Calculating…':'Calculate nutrition')+'</button>';
       h += '<div style="text-align:center;margin:10px 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">or</div>';
+      // Two inputs, not one: `capture` forces the camera open, which is wrong
+      // when the recipe photo is already sitting in your camera roll.
       h += '<input id="recipePhoto" type="file" accept="image/*" capture="environment" style="display:none" onchange="parseRecipePhoto(this.files&&this.files[0])">';
-      h += '<button class="btn btn-ghost" onclick="el(\'recipePhoto\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Reading photo…':'📷 Photo of a recipe')+'</button>';
-      // You can also START from the library — picking an ingredient opens the
+      h += '<input id="recipePhotoLib" type="file" accept="image/*" style="display:none" onchange="parseRecipePhoto(this.files&&this.files[0])">';
+      h += '<div class="btn-row">'+
+        '<button class="btn btn-ghost" onclick="el(\'recipePhoto\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Reading…':'📷 Take a photo')+'</button>'+
+        '<button class="btn btn-ghost" onclick="el(\'recipePhotoLib\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Reading…':'🖼 Choose from library')+'</button></div>';
+      // You can also START from a saved ingredient — picking one opens the
       // builder with it already in. Much of what you cook is made of things
       // you've already measured once.
       if(ingredientLibrary().length){
         h += '<div style="text-align:center;margin:10px 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">or</div>'+
-          '<button class="btn btn-ghost" onclick="toggleLib()">'+(S.libOpen?'Hide library':'📚 Choose from library')+'</button>'+
+          '<button class="btn btn-ghost" onclick="toggleLib()">'+(S.libOpen?'Hide saved ingredients':'🥕 Use a saved ingredient')+'</button>'+
           libraryHTML();
       }
       if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     }else{
-      h += '<div class="row-between" style="margin-bottom:8px;align-items:baseline"><h2 class="h2" style="margin:0">'+esc(S.recipeName.trim()||'Untitled recipe')+'</h2><button class="link" style="color:var(--muted)" onclick="startOverRecipe()">'+(S.recipeEditId?'cancel':'start over')+'</button></div>';
+      // The name is an input, not a heading — renaming a saved recipe is just
+      // Edit → retype → Update, with no separate rename flow to learn.
+      h += '<div class="row-between" style="margin-bottom:6px;align-items:baseline"><span class="kicker sm">'+(S.recipeEditId?'Editing recipe':'New recipe')+'</span><button class="link" style="color:var(--muted)" onclick="startOverRecipe()">'+(S.recipeEditId?'cancel':'start over')+'</button></div>';
+      h += '<input class="field" placeholder="Recipe name" value="'+esc(S.recipeName)+'" oninput="S.recipeName=this.value" style="font-family:var(--f-display);font-weight:600;font-size:15px;margin-bottom:10px">';
       h += S.recipeDraft.ingredients.map(function(it){
         return '<div style="padding:9px 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:8px"><input value="'+esc(it.name)+'" oninput="ingName(\''+it.id+'\',this.value)" style="flex:1;font-family:var(--f-body);font-size:14px;border:none;background:transparent;font-weight:500;padding:0"><button class="x" style="font-size:17px" onclick="ingRemove(\''+it.id+'\')">×</button></div>'+
           '<div style="display:flex;align-items:center;gap:8px;margin-top:5px"><span style="flex:1;font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+esc(it.qty)+' '+esc(it.unit)+'</span>'+
@@ -963,7 +1049,7 @@
         '<input id="addIngText" class="field" placeholder="Add an ingredient — e.g. 2 tbsp olive oil" style="flex:1;padding:8px 10px;font-size:13px" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addIngredientEstimate();}">'+
         '<button class="btn btn-quiet btn-auto" style="padding:8px 12px;white-space:nowrap" onclick="addIngredientEstimate()"'+(S.busy?' disabled':'')+'>'+(S.busy?'…':'+ Add')+'</button></div>'+
         '<div style="display:flex;gap:12px;align-items:center;padding:4px 0">'+
-          '<button class="link" onclick="toggleLib()">'+(S.libOpen?'hide library':'📚 choose from library')+'</button>'+
+          '<button class="link" onclick="toggleLib()">'+(S.libOpen?'hide saved ingredients':'🥕 use a saved ingredient')+'</button>'+
           '<button class="link" style="color:var(--muted)" onclick="ingAdd()">or a blank row</button>'+
         '</div>'+
         libraryHTML();
@@ -1050,7 +1136,6 @@
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 14px">'+
             '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+esc(e.title)+'</div>'+
             '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+e.total.toLocaleString()+' cal'+emac+'</div></div>'+
-            '<button class="pill" style="background:var(--surface-warm);color:var(--green-deep);border:1px solid var(--border);font-weight:500" title="Save as a usual" onclick="saveUsualFromEntry(\''+d.key+'\',\''+e.id+'\')">★ Usual</button>'+
             '<button class="pill" onclick="relogEntry(\''+d.key+'\',\''+e.id+'\')">+ Log</button></div>';
         }).join('')+'</div>';
       }
