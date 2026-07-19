@@ -109,6 +109,17 @@
     .wx-dot{position:absolute;width:5px;height:5px;border-radius:50%;background:var(--mark-off);
             opacity:.55;transform:translate(-50%,50%);z-index:2;}
     .fit .gl{left:0;}
+    .tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    table.pb{width:100%;border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-nums;}
+    table.pb th,table.pb td{padding:.45rem .3rem;border-bottom:1px solid var(--silver);text-align:left;white-space:nowrap;}
+    table.pb th{font-family:var(--f-mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;
+                color:var(--muted);font-weight:600;}
+    table.pb th.num,table.pb td.num{text-align:right;}
+    table.pb tr:last-child td{border-bottom:none;}
+    table.pb .u{font-size:.7em;color:var(--muted);font-weight:400;}
+    .pb-when{font-size:.76rem;color:var(--muted);}
+    .pb-src{font-family:var(--f-mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.04em;
+            background:var(--surface-warm);border:1px solid var(--silver);border-radius:4px;padding:1px 5px;color:var(--muted);}
     .empty{color:var(--muted);font-size:.88rem;padding:1.2rem 0;text-align:center;line-height:1.6;}
     .tip{position:fixed;display:none;pointer-events:none;background:var(--green-deep);color:#fff;
          padding:.4rem .6rem;border-radius:8px;font-size:.72rem;font-family:var(--f-mono);line-height:1.5;
@@ -377,7 +388,7 @@
   //
   // None of these will match Garmin's number — theirs is proprietary Firstbeat.
   // Consistency over time is the point, not agreement on the absolute value.
-  var FIT = { runs:[], maxHR:[], oura:[], loaded:false };
+  var FIT = { runs:[], maxHR:[], oura:[], bests:[], loaded:false };
   var showEst = false;
   var MI_5K = 3.106856, MI_10K = 6.213712, MI_HALF = 13.109375;
 
@@ -622,6 +633,10 @@
     FIT.maxHR = (v.data||[]).map(function(x){ return {day:x.measured_on, value:Number(x.value)}; }).filter(function(x){ return x.value>0; });
     var o = await sb.from('oura_daily').select('day,vo2_max,resting_hr').order('day',{ascending:true});
     FIT.oura = o.data || [];
+    var pb = await sb.from('personal_bests')
+      .select('distance_key,seconds,distance_miles,achieved_on,source')
+      .eq('athlete_id', athlete.id);
+    FIT.bests = pb.data || [];      // absent table just leaves this empty
     FIT.loaded = true;
     render();
   }
@@ -1080,6 +1095,146 @@
     return h+'</div>';
   }
 
+  // ── Personal bests ─────────────────────────────────────────────────────────
+  // Every best here is the fastest rolling window ANYWHERE inside a run, not a
+  // standalone time trial — a 5K PB can live in the middle of a 9-mile long
+  // run. Nothing is stored: it rescans the streams each time, so it cannot
+  // drift out of step with the runs behind it. The `personal_bests` table
+  // carries what predates the app (Garmin's years of history), and the board
+  // shows whichever is better.
+  var PB_DISTS = [
+    {key:'0.5mi', label:'½ mile', mi:0.5},
+    {key:'1k',    label:'1K',     mi:0.621371},
+    {key:'1mi',   label:'1 mile', mi:1},
+    {key:'5k',    label:'5K',     mi:3.106856},
+    {key:'10k',   label:'10K',    mi:6.213712},
+    {key:'half',  label:'Half',   mi:13.109375},
+  ];
+  var pbByYear = false;
+
+  // A best deserves the precision the source gave it: miles() rounds to one
+  // decimal, which quietly turns Garmin's 13.29 into 13.3.
+  function pbMiles(v){ return (Math.round(v*100)/100).toFixed(2); }
+
+  function hms(sec){
+    if (sec == null || !isFinite(sec)) return '—';
+    sec = Math.round(sec);
+    var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+    return h ? (h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'))
+             : (m+':'+String(s).padStart(2,'0'));
+  }
+
+  function bestsModel(){
+    // Derived: scan every stream we have for each distance.
+    var derived = {};     // key → {seconds, date}
+    var byYear = {};      // year → key → {seconds, date}
+    (FIT.runs||[]).forEach(function(r){
+      var s = r.samples;
+      if (!Array.isArray(s) || s.length < 5) return;
+      var pts = s.filter(function(p){ return p && p.mi!=null && p.t!=null; })
+                 .map(function(p){ return {t:Number(p.t), mi:Number(p.mi)}; })
+                 .filter(function(p){ return isFinite(p.t) && isFinite(p.mi); });
+      if (pts.length < 5) return;
+      var yr = r.run_date.slice(0,4);
+      PB_DISTS.forEach(function(d){
+        var sec = bestEffort(pts, d.mi);
+        if (sec == null || !(sec > 0)) return;
+        if (!derived[d.key] || sec < derived[d.key].seconds) derived[d.key] = {seconds:sec, date:r.run_date};
+        byYear[yr] = byYear[yr] || {};
+        if (!byYear[yr][d.key] || sec < byYear[yr][d.key].seconds) byYear[yr][d.key] = {seconds:sec, date:r.run_date};
+      });
+    });
+
+    // Farthest comes from the summary rows, so it reaches every run rather than
+    // only the ones that kept a stream.
+    var farthest = null;
+    RUNS.forEach(function(r){
+      if ((r.activity_type||'run') !== 'run') return;
+      var mi = Number(r.distance_miles)||0;
+      if (!(mi > 0)) return;
+      var yr = r.run_date.slice(0,4);
+      if (!farthest || mi > farthest.miles) farthest = {miles:mi, date:r.run_date};
+      byYear[yr] = byYear[yr] || {};
+      if (!byYear[yr].farthest || mi > byYear[yr].farthest.miles) byYear[yr].farthest = {miles:mi, date:r.run_date};
+    });
+
+    var carried = {};
+    (FIT.bests||[]).forEach(function(b){ carried[b.distance_key] = b; });
+
+    // Pick the winner per distance, remembering which side it came from.
+    var rows = PB_DISTS.map(function(d){
+      var dv = derived[d.key], cv = carried[d.key];
+      var cvSec = (cv && cv.seconds!=null) ? Number(cv.seconds) : null;
+      var useDerived = dv && (cvSec == null || dv.seconds < cvSec);
+      return { key:d.key, label:d.label,
+               seconds: useDerived ? dv.seconds : cvSec,
+               date: useDerived ? dv.date : (cv ? cv.achieved_on : null),
+               src: useDerived ? 'run' : (cv ? (cv.source||'Manual') : null),
+               rival: (dv && cvSec!=null) ? {derived:dv.seconds, carried:cvSec} : null };
+    });
+    var cf = carried.farthest;
+    var cfMi = (cf && cf.distance_miles!=null) ? Number(cf.distance_miles) : null;
+    var useDerivedFar = farthest && (cfMi == null || farthest.miles > cfMi);
+    rows.push({ key:'farthest', label:'Farthest', miles: useDerivedFar ? farthest.miles : cfMi,
+                date: useDerivedFar ? farthest.date : (cf ? cf.achieved_on : null),
+                src: useDerivedFar ? 'run' : (cf ? (cf.source||'Manual') : null) });
+
+    var years = Object.keys(byYear).sort().reverse();
+    return {rows:rows, byYear:byYear, years:years,
+            streams:(FIT.runs||[]).filter(function(r){return Array.isArray(r.samples)&&r.samples.length>5;}).length};
+  }
+
+  function bestsTable(B){
+    return '<div class="tblwrap"><table class="pb"><thead><tr>'+
+      '<th>Distance</th><th class="num">Best</th><th>When</th></tr></thead><tbody>'+
+      B.rows.map(function(r){
+        var val = (r.key==='farthest')
+          ? (r.miles!=null ? pbMiles(r.miles)+' <span class="u">mi</span>' : '—')
+          : hms(r.seconds);
+        var when = r.date ? shortYear(r.date)
+                 : (r.src ? '<span class="pb-src">'+esc(r.src)+'</span>' : '—');
+        var tag = (r.src && r.src!=='run' && r.date) ? ' <span class="pb-src">'+esc(r.src)+'</span>' : '';
+        return '<tr><td>'+esc(r.label)+'</td>'+
+          '<td class="num"><strong>'+val+'</strong></td>'+
+          '<td class="pb-when">'+when+tag+'</td></tr>';
+      }).join('')+'</tbody></table></div>';
+  }
+
+  function bestsYearTable(B){
+    if (!B.years.length) return '<p class="hint" style="margin:.6rem 0 0">No dated bests yet — these come from runs with a sample stream.</p>';
+    var cols = PB_DISTS.concat([{key:'farthest', label:'Far'}]);
+    return '<div class="tblwrap"><table class="pb"><thead><tr><th>Year</th>'+
+      cols.map(function(c){ return '<th class="num">'+esc(c.label)+'</th>'; }).join('')+
+      '</tr></thead><tbody>'+
+      B.years.map(function(y){
+        return '<tr><td>'+y+'</td>'+cols.map(function(c){
+          var v = B.byYear[y][c.key];
+          if (!v) return '<td class="num">—</td>';
+          return '<td class="num">'+(c.key==='farthest' ? pbMiles(v.miles) : hms(v.seconds))+'</td>';
+        }).join('')+'</tr>';
+      }).join('')+'</tbody></table></div>'+
+      '<p class="hint" style="margin:.6rem 0 0">Only bests with a date appear here, so Garmin\'s all-time carry-overs are absent — it lists a time but not the day it happened.</p>';
+  }
+
+  function renderBests(){
+    var h = '<div class="card"><h2>Personal bests</h2>';
+    if (!FIT.loaded) return h+'<div class="empty">Loading…</div></div>';
+    var B = bestsModel();
+    h += '<p class="hint">The fastest stretch anywhere inside a run — a 5K best can sit in the middle of a long run. Recomputed from your streams every time, with Garmin\'s history carried underneath as the mark to beat.</p>';
+    h += pbByYear ? bestsYearTable(B) : bestsTable(B);
+    h += '<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-top:.7rem">'+
+      '<span style="font-size:.72rem;color:var(--muted)">'+B.streams+' run'+(B.streams===1?'':'s')+' scanned</span>'+
+      '<button class="toggle" id="pb-toggle">'+(pbByYear?'show all-time':'show by year')+'</button></div>';
+    if (!pbByYear && B.streams < 5) {
+      h += '<p class="hint" style="margin:.6rem 0 0">Only '+B.streams+' run'+(B.streams===1?'':'s')+' carry a sample stream so far, so most of these are still Garmin\'s numbers. They\'ll start falling to your own runs as the sync builds history.</p>';
+    }
+    return h+'</div>';
+  }
+  function shortYear(iso){
+    var p = iso.split('-').map(Number);
+    return new Date(p[0],p[1]-1,p[2]).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderPills(){
     document.getElementById('range-pills').innerHTML = RANGES.map(function(r){
@@ -1094,7 +1249,7 @@
     var weeks = buildWeeks();
     renderStats(weeks);
     document.getElementById('views').innerHTML = RUNS.length
-      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderFitness(weeks) + renderAerobic(weeks) + renderWeather(weeks))
+      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFitness(weeks) + renderAerobic(weeks) + renderWeather(weeks))
       : '<div class="card"><div class="empty">No activities logged yet.<br>Once runs are in, this fills up on its own.</div></div>';
     var t = document.getElementById('tbl-toggle');
     if(t) t.addEventListener('click', function(){ showTable = !showTable; render(); });
@@ -1104,6 +1259,8 @@
     if(wx) wx.addEventListener('click', function(){ showScatter = !showScatter; render(); });
     var ae = document.getElementById('aero-toggle');
     if(ae) ae.addEventListener('click', function(){ aeroView = (aeroView==='ef'?'dec':'ef'); render(); });
+    var pb = document.getElementById('pb-toggle');
+    if(pb) pb.addEventListener('click', function(){ pbByYear = !pbByYear; render(); });
     wireTips();
   }
 
