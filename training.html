@@ -444,9 +444,15 @@
 
   // Max HR in effect on a given day — the latest reading dated on or before it.
   function maxHrOn(day){
+    if(!FIT.maxHR.length) return null;
     var v = null;
     FIT.maxHR.forEach(function(m){ if(m.day <= day) v = m.value; });
-    return v;
+    // Nothing dated on or before this day: fall back to the earliest reading
+    // there is. A max HR is a standing physiological value, not something that
+    // happened on a date — Garmin just tells you about it on a date. Without
+    // this, entering it today leaves every prior day blank and the chart has a
+    // single point, which draws nothing.
+    return v != null ? v : FIT.maxHR[0].value;
   }
 
   // Rolling best over a trailing window: fitness you have demonstrated lately.
@@ -499,10 +505,10 @@
   // Same HTML-text / SVG-geometry split as the bar charts: axis labels stay at
   // their real size at any width, and the dots stay circular because they're
   // HTML, not marks inside a non-uniformly scaled viewBox.
-  function fitnessChart(F){
+  function fitnessChart(F, wantEst){
     var pts = F.pts, n = pts.length;
     var vals = [];
-    pts.forEach(function(p){ [p.vdot,p.oura,showEst?p.est:null].forEach(function(v){ if(v!=null) vals.push(v); }); });
+    pts.forEach(function(p){ [p.vdot,p.oura,wantEst?p.est:null].forEach(function(v){ if(v!=null) vals.push(v); }); });
     if(!vals.length) return '';
     var lo = Math.min.apply(null,vals), hi = Math.max.apply(null,vals);
     if(hi-lo < 4){ var mid=(hi+lo)/2; lo=mid-2; hi=mid+2; }
@@ -517,7 +523,7 @@
     }
     h += '<svg class="fit-svg" viewBox="0 0 100 100" preserveAspectRatio="none">';
     [['vdot','#33733A',2],['est','#009B8C',1.5]].forEach(function(s){
-      if(s[0]==='est' && !showEst) return;
+      if(s[0]==='est' && !wantEst) return;
       // Break the path wherever the series has no value, rather than bridging a
       // gap with a straight line that implies data we don't have.
       var d='', pen=false;
@@ -555,20 +561,30 @@
     F.pts.forEach(function(p){ if(p.vdot!=null){ if(firstV===null) firstV=p.vdot; lastV=p.vdot; } });
     var ouraPts = F.pts.filter(function(p){ return p.oura!=null; });
     var lastOura = ouraPts.length ? ouraPts[ouraPts.length-1] : null;
+    var hasEst = F.pts.some(function(p){ return p.est!=null; });
+    // With no VDOT effort and no Oura test, the HR-ratio estimate is all there
+    // is. Leaving it behind a toggle that defaults to off draws an empty card
+    // and reads as broken.
+    var estOnly = (lastV==null && !lastOura && hasEst);
+    var wantEst = showEst || estOnly;
 
-    h += '<p class="hint">VDOT from efforts you actually ran, anchored by Oura\'s walking test. Absolute values won\'t match Garmin — the trend is the point.</p>';
+    h += estOnly
+      ? '<p class="hint">Showing the heart-rate estimate only — 15.3 × (max HR ÷ resting HR), smoothed over a week. It moves with recovery rather than performance, and reads high because Oura\'s resting HR is a sleeping low. Race something, or log a run whose stream holds a 5K, and VDOT plots alongside it.</p>'
+      : '<p class="hint">VDOT from efforts you actually ran, anchored by Oura\'s walking test. Absolute values won\'t match Garmin — the trend is the point.</p>';
     h += '<div class="stats" style="margin-bottom:.8rem">'+
       '<div class="stat"><div class="label">VDOT now</div><div class="value">'+(lastV!=null?lastV.toFixed(1):'—')+'</div>'+
         (firstV!=null&&lastV!=null&&Math.abs(lastV-firstV)>=0.05
           ? '<div class="delta" style="color:'+(lastV>=firstV?'var(--mark)':'var(--muted)')+'">'+(lastV>firstV?'+':'')+(lastV-firstV).toFixed(1)+' over range</div>' : '')+'</div>'+
-      '<div class="stat"><div class="label">Oura test</div><div class="value">'+(lastOura?lastOura.oura.toFixed(1):'—')+'</div>'+
-        (lastOura?'<div class="delta" style="color:var(--muted)">'+shortDate(parseDay(lastOura.day))+'</div>':'')+'</div>'+
+      '<div class="stat"><div class="label">'+(estOnly?'HR estimate':'Oura test')+'</div><div class="value">'+
+        (estOnly ? (last.est!=null?last.est.toFixed(1):'—') : (lastOura?lastOura.oura.toFixed(1):'—'))+'</div>'+
+        (estOnly ? '<div class="delta" style="color:var(--muted)">max HR ÷ resting HR</div>'
+                 : (lastOura?'<div class="delta" style="color:var(--muted)">'+shortDate(parseDay(lastOura.day))+'</div>':''))+'</div>'+
       '</div>';
-    h += fitnessChart(F);
+    h += fitnessChart(F, wantEst);
     h += '<div class="legend">'+
-      '<span><i class="key"></i>VDOT (best effort, 6 wk)</span>'+
-      '<span><i class="key" style="background:var(--mark-accent)"></i>Oura test</span>'+
-      (showEst?'<span><i class="key" style="background:#009B8C"></i>HRmax ÷ resting HR (7-day avg)</span>':'')+
+      (lastV!=null?'<span><i class="key"></i>VDOT (best effort, 6 wk)</span>':'')+
+      (lastOura?'<span><i class="key" style="background:var(--mark-accent)"></i>Oura test</span>':'')+
+      (wantEst?'<span><i class="key" style="background:#009B8C"></i>HRmax ÷ resting HR (7-day avg)</span>':'')+
       '</div>';
     // The calibration read. Two estimates of the same quantity sitting a steady
     // distance apart is expected — one is a walk test, the other a run
@@ -586,9 +602,12 @@
                    : ' but the gap swings by '+spread.toFixed(1)+', so they disagree about which way you\'re trending.')+'</p>';
     }
     h += '<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-top:.7rem">'+
-      '<span style="font-size:.72rem;color:var(--muted)">'+F.efforts.length+' qualifying effort'+(F.efforts.length===1?'':'s')+'</span>'+
-      '<button class="toggle" id="est-toggle">'+(showEst?'hide daily estimate':'show daily estimate')+'</button></div>';
-    if(showEst) h += '<p class="hint" style="margin:.5rem 0 0">The daily line is 15.3 × (max HR ÷ resting HR). It moves with recovery, not performance, and reads high because Oura\'s resting HR is a sleeping low.</p>';
+      '<span style="font-size:.72rem;color:var(--muted)">'+
+        (estOnly ? 'No qualifying efforts yet' : F.efforts.length+' qualifying effort'+(F.efforts.length===1?'':'s'))+'</span>'+
+      // When the estimate is the only series it can't be hidden, so offering a
+      // toggle would be a button that does nothing.
+      (estOnly ? '' : '<button class="toggle" id="est-toggle">'+(showEst?'hide daily estimate':'show daily estimate')+'</button>')+'</div>';
+    if(wantEst && !estOnly) h += '<p class="hint" style="margin:.5rem 0 0">The daily line is 15.3 × (max HR ÷ resting HR). It moves with recovery, not performance, and reads high because Oura\'s resting HR is a sleeping low.</p>';
     return h+'</div>';
   }
 
