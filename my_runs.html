@@ -254,19 +254,32 @@
       border-bottom: 1px solid var(--silver-2);
     }
     .run-segments.show { display: block; }
+    /* These tables carry 6 columns and have to survive a 390px phone. They stay
+       narrow by pushing units into the header ("PACE /MI", not "9:00 /mi" in
+       every cell) and by never wrapping a value onto a second line. The scroll
+       wrapper is the backstop — the page body must never scroll sideways. */
+    .tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .seg-mini-table {
       width: 100%; border-collapse: collapse;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       background: var(--paper);
       border: 1px solid var(--silver-2);
       border-radius: 3px;
-      overflow: hidden;
     }
     .seg-mini-table th, .seg-mini-table td {
-      padding: 0.5rem 0.75rem;
+      padding: 0.45rem 0.3rem;
       border-bottom: 1px solid var(--silver-2);
       text-align: left;
+      white-space: nowrap;
     }
+    .seg-mini-table th:first-child, .seg-mini-table td:first-child { padding-left: 0.6rem; }
+    .seg-mini-table th:last-child, .seg-mini-table td:last-child { padding-right: 0.6rem; }
+    /* The type pill sets the width of the widest column, so it runs tighter
+       inside a table than it does standing alone in the run header. */
+    .seg-mini-table .seg-pill { font-size: 0.6rem; padding: 2px 6px; letter-spacing: 0.2px; }
+    /* Units drop to a second header line rather than sitting alongside — as one
+       line, "Pace /mi" is wider than any pace it labels. */
+    .seg-mini-table th .u { display: block; font-size: 0.9em; font-weight: 400; letter-spacing: 0; text-transform: none; }
     .seg-mini-table th {
       background: var(--bone);
       font-size: 0.65rem;
@@ -325,13 +338,19 @@
                color: var(--slate); padding: 0.3rem 0.55rem; border-radius: 4px; cursor: pointer; }
     .sp-mode.on { background: var(--green); color: var(--paper); }
     .split-hint { font-size: 0.72rem; color: var(--slate); margin: 0.45rem 0 0.6rem; line-height: 1.5; }
-    .sp-amt { width: 62px; font-family: var(--font-body); font-size: 0.8rem; text-align: right;
-              border: 1px solid var(--silver); border-radius: 4px; padding: 0.28rem 0.35rem; background: var(--paper); }
-    .sp-type { font-family: var(--font-body); font-size: 0.75rem; border: 1px solid var(--silver);
-               border-radius: 4px; padding: 0.25rem; background: var(--paper); color: var(--black); }
-    .sp-auto { font-size: 0.75rem; color: var(--slate); }
-    .sp-auto em { font-size: 0.62rem; font-style: normal; color: var(--slate-2); }
-    .sp-del { border: none; background: none; color: var(--slate-2); font-size: 1rem; cursor: pointer; padding: 0 0.2rem; }
+    .sp-row { background: var(--paper); border: 1px solid var(--silver-2); border-radius: 5px;
+              padding: 0.5rem 0.6rem; margin-bottom: 0.4rem; }
+    .sp-controls { display: flex; align-items: center; gap: 0.5rem; }
+    .sp-amtwrap { display: inline-flex; align-items: center; gap: 0.25rem; }
+    .sp-amt { width: 58px; font-family: var(--font-body); font-size: 0.85rem; text-align: right;
+              border: 1px solid var(--silver); border-radius: 4px; padding: 0.3rem 0.4rem; background: var(--paper); }
+    .sp-unit { font-size: 0.72rem; color: var(--slate-2); }
+    .sp-type { flex: 1; min-width: 0; font-family: var(--font-body); font-size: 0.8rem; border: 1px solid var(--silver);
+               border-radius: 4px; padding: 0.3rem; background: var(--paper); color: var(--black); }
+    .sp-auto { font-size: 0.72rem; color: var(--slate-2); font-style: italic; white-space: nowrap; }
+    .sp-derived { font-size: 0.72rem; color: var(--slate); margin-top: 0.35rem; line-height: 1.45; }
+    .sp-del { border: none; background: none; color: var(--slate-2); font-size: 1.1rem; cursor: pointer;
+              padding: 0 0.15rem; flex-shrink: 0; }
     .sp-del:hover { color: var(--danger); }
     .split-foot { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
                   flex-wrap: wrap; margin-top: 0.6rem; font-size: 0.75rem; }
@@ -521,6 +540,12 @@
       const m = Math.floor(secPerMile / 60);
       const s = Math.round(secPerMile % 60);
       return `${m}:${pad(s)} /mi`;
+    }
+    // Bare pace for table cells — the "/mi" lives in the column header there, so
+    // repeating it on every row just costs width the phone doesn't have.
+    function paceOnly(secPerMile) {
+      if (!secPerMile || !isFinite(secPerMile) || secPerMile <= 0) return '—';
+      return `${Math.floor(secPerMile / 60)}:${pad(Math.round(secPerMile % 60))}`;
     }
     function formatMiles(m) {
       const n = Number(m);
@@ -917,7 +942,10 @@
       });
       const order = ['warmup','easy','tempo','threshold','interval','hill','fartlek','strides','rest','cooldown'];
       const types = Object.keys(byType).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-      if (types.length < 2) return '';
+      // Only worth showing when it actually aggregates something — an interval
+      // session with 8 reps and 8 recoveries. On a warmup/tempo/cooldown, where
+      // every type appears once, it's a verbatim copy of the table above it.
+      if (types.length < 2 || !types.some(t => byType[t].count > 1)) return '';
       const hasStream = types.some(t => byType[t].cadT || byType[t].hrT);
       const rows = types.map(t => {
         const g = byType[t];
@@ -926,19 +954,19 @@
         const hr = g.hrT ? Math.round(g.hrW / g.hrT) : null;
         return `
           <tr>
-            <td><span class="seg-pill seg-${t}">${t}</span> <span style="color:var(--slate-2)">×${g.count}</span></td>
-            <td class="num">${g.miles ? formatMiles(g.miles) + ' mi' : '—'}</td>
+            <td><span class="seg-pill seg-${t}">${t}</span>${g.count > 1 ? ` <span style="color:var(--slate-2)">×${g.count}</span>` : ''}</td>
+            <td class="num">${g.miles ? formatMiles(g.miles) : '—'}</td>
             <td class="num">${g.seconds ? formatDuration(g.seconds) : '—'}</td>
-            <td class="num"><strong>${formatPace(pace)}</strong></td>
+            <td class="num"><strong>${paceOnly(pace)}</strong></td>
             ${hasStream ? `<td class="num">${cad || '—'}</td><td class="num">${hr || '—'}</td>` : ''}
           </tr>`;
       }).join('');
       return `
         <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--slate-2);font-weight:700;margin:0.85rem 0 0.4rem;">By segment type</div>
-        <table class="seg-mini-table" style="margin-bottom:0.5rem;">
-          <thead><tr><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th>${hasStream ? '<th class="num">Cad</th><th class="num">HR</th>' : ''}</tr></thead>
+        <div class="tbl-scroll"><table class="seg-mini-table" style="margin-bottom:0.5rem;">
+          <thead><tr><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace<span class="u">/mi</span></th>${hasStream ? '<th class="num">Cad</th><th class="num">HR</th>' : ''}</tr></thead>
           <tbody>${rows}</tbody>
-        </table>`;
+        </table></div>`;
     }
 
     // ---- per-mile splits + cadence/HR charts (from Strava-synced runs) ----
@@ -953,17 +981,17 @@
           <tr>
             <td>${label}</td>
             <td class="num">${s.seconds ? formatDuration(s.seconds) : '—'}</td>
-            <td class="num"><strong>${formatPace(pace)}</strong></td>
+            <td class="num"><strong>${paceOnly(pace)}</strong></td>
             <td class="num">${s.avg_cadence || '—'}</td>
             <td class="num">${s.avg_hr || '—'}${s.max_hr ? ' / ' + s.max_hr : ''}</td>
           </tr>`;
       }).join('');
       return `
         <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--slate-2);font-weight:700;margin-bottom:0.4rem;">Per-mile splits</div>
-        <table class="seg-mini-table" style="margin-bottom:0.85rem;">
-          <thead><tr><th>Split</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Cad</th><th class="num">HR a/m</th></tr></thead>
+        <div class="tbl-scroll"><table class="seg-mini-table" style="margin-bottom:0.85rem;">
+          <thead><tr><th>Split</th><th class="num">Time</th><th class="num">Pace<span class="u">/mi</span></th><th class="num">Cad</th><th class="num">HR<span class="u">a/m</span></th></tr></thead>
           <tbody>${rows}</tbody>
-        </table>`;
+        </table></div>`;
     }
 
     // Minimal inline SVG line chart — no library. series: [{x,y}].
@@ -1042,28 +1070,33 @@
       const unit = split.mode === 'mi' ? 'mi' : 'min';
       const over = rem < -0.01;
 
+      // Stacked cards, not a table: this needs a type picker, an editable
+      // amount and five derived numbers per piece, which is eight columns —
+      // unreadable on a phone however tightly it's packed. Two lines each
+      // instead, with the derived values as a readout under the controls.
       const rows = split.rows.map((r, i) => {
         const c = out[i] || {};
         const isLast = i === split.rows.length - 1;
+        const derived = [
+          c.miles ? formatMiles(c.miles) + ' mi' : null,
+          c.seconds ? formatDuration(Math.round(c.seconds)) : null,
+          c.pace ? paceOnly(c.pace) + '/mi' : null,
+          c.cad ? c.cad + ' spm' : null,
+          c.hr ? c.hr + ' bpm' : null,
+        ].filter(Boolean).join(' · ');
         return `
-          <tr>
-            <td>
+          <div class="sp-row">
+            <div class="sp-controls">
               <select class="sp-type" data-i="${i}">
                 ${SEG_TYPES.map(t => `<option value="${t}"${r.type === t ? ' selected' : ''}>${t}</option>`).join('')}
               </select>
-            </td>
-            <td class="num">
               ${isLast
-                ? `<span class="sp-auto" title="The last piece always runs to the end of the run">${split.mode === 'mi' ? formatMiles(c.miles || 0) : ((c.seconds||0)/60).toFixed(1)} ${unit}<br><em>rest of run</em></span>`
-                : `<input class="sp-amt" data-i="${i}" inputmode="decimal" value="${escapeHtml(r.amount)}" placeholder="0">`}
-            </td>
-            <td class="num">${c.miles ? formatMiles(c.miles) + ' mi' : '—'}</td>
-            <td class="num">${c.seconds ? formatDuration(Math.round(c.seconds)) : '—'}</td>
-            <td class="num"><strong>${formatPace(c.pace)}</strong></td>
-            <td class="num">${c.cad || '—'}</td>
-            <td class="num">${c.hr || '—'}</td>
-            <td class="num">${split.rows.length > 1 ? `<button class="sp-del" data-i="${i}" title="Remove">×</button>` : ''}</td>
-          </tr>`;
+                ? `<span class="sp-auto">rest of run</span>`
+                : `<span class="sp-amtwrap"><input class="sp-amt" data-i="${i}" inputmode="decimal" value="${escapeHtml(r.amount)}" placeholder="0"><span class="sp-unit">${unit}</span></span>`}
+              ${split.rows.length > 1 ? `<button class="sp-del" data-i="${i}" title="Remove this piece">×</button>` : ''}
+            </div>
+            <div class="sp-derived">${derived || 'nothing in this piece yet'}</div>
+          </div>`;
       }).join('');
 
       return `
@@ -1076,10 +1109,7 @@
             </span>
           </div>
           <p class="split-hint">Enter how long each piece was. Time, pace, cadence and HR are read from the run's own stream — you don't type them. The last piece takes whatever's left.</p>
-          <table class="seg-mini-table">
-            <thead><tr><th>Type</th><th class="num">${split.mode === 'mi' ? 'Distance' : 'Time'}</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Cad</th><th class="num">HR</th><th></th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
+          ${rows}
           <div class="split-foot">
             <span class="${over ? 'split-over' : 'split-rem'}">${
               over
@@ -1216,9 +1246,9 @@
         });
         const hasStream = stat.some(x => x.cad != null || x.hr != null);
         body += `
-          <table class="seg-mini-table">
+          <div class="tbl-scroll"><table class="seg-mini-table">
             <thead>
-              <tr><th>#</th><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th>${hasStream ? '<th class="num">Cad</th><th class="num">HR</th>' : ''}</tr>
+              <tr><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace<span class="u">/mi</span></th>${hasStream ? '<th class="num">Cad</th><th class="num">HR</th>' : ''}</tr>
             </thead>
             <tbody>
               ${segs.map((s, i) => {
@@ -1228,17 +1258,16 @@
                 const st = stat[i] || {};
                 return `
                   <tr>
-                    <td>${s.segment_order || i+1}</td>
                     <td><span class="seg-pill seg-${s.segment_type}">${s.segment_type}</span></td>
-                    <td class="num">${d ? formatMiles(d) + ' mi' : '—'}</td>
+                    <td class="num">${d ? formatMiles(d) : '—'}</td>
                     <td class="num">${t ? formatDuration(t) : '—'}</td>
-                    <td class="num">${formatPace(p)}</td>
+                    <td class="num"><strong>${paceOnly(p)}</strong></td>
                     ${hasStream ? `<td class="num">${st.cad || '—'}</td><td class="num">${st.hr || '—'}</td>` : ''}
                   </tr>
                 `;
               }).join('')}
             </tbody>
-          </table>
+          </table></div>
         `;
         body += renderSegmentSummary(segs, stat);
       } else if (run.mile_splits && run.mile_splits.length) {
