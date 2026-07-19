@@ -97,6 +97,14 @@
                   white-space:nowrap;overflow:visible;}
     .blabels span:first-child{text-align:left;}
     .blabels span:last-child{text-align:right;}
+    /* Fitness chart: HTML gridlines + labels, SVG only for the line geometry,
+       and HTML dots so a measured point stays a circle under the stretched
+       viewBox. Same reasoning as the bar charts above. */
+    .fit-plot{position:relative;height:180px;margin-left:30px;}
+    .fit-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+    .fit-dot{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--mark-accent);
+             box-shadow:0 0 0 2px var(--paper);transform:translate(-50%,50%);z-index:3;}
+    .fit .gl{left:0;}
     .empty{color:var(--muted);font-size:.88rem;padding:1.2rem 0;text-align:center;line-height:1.6;}
     .tip{position:fixed;display:none;pointer-events:none;background:var(--green-deep);color:#fff;
          padding:.4rem .6rem;border-radius:8px;font-size:.72rem;font-family:var(--f-mono);line-height:1.5;
@@ -351,6 +359,244 @@
       }).join('')+'</tbody></table>';
   }
 
+  // ── Aerobic fitness ────────────────────────────────────────────────────────
+  // Three sources, deliberately not averaged together — they measure different
+  // things and disagreeing is informative:
+  //
+  //   · VDOT     — Daniels & Gilbert, from efforts you actually ran. Needs only
+  //                distance and time, so it reaches the whole history.
+  //   · Oura     — the walking test. Sparse, but the only MEASURED value here,
+  //                so it's what tells you where the formula lines really sit.
+  //   · Est.     — 15.3 × HRmax/HRrest (Uth 2004). Daily and smooth, but it is
+  //                largely resting HR re-expressed, and Oura's sleeping low
+  //                runs under a clinical resting HR, so it reads high.
+  //
+  // None of these will match Garmin's number — theirs is proprietary Firstbeat.
+  // Consistency over time is the point, not agreement on the absolute value.
+  var FIT = { runs:[], maxHR:[], oura:[], loaded:false };
+  var showEst = false;
+  var MI_5K = 3.106856, MI_10K = 6.213712, MI_HALF = 13.109375;
+
+  // Daniels & Gilbert. VO2 at the velocity run, divided by the fraction of
+  // VO2max sustainable for that duration.
+  function vdotFor(miles, seconds){
+    var t = seconds/60;
+    if(!(miles>0) || !(t>0)) return null;
+    // Only meaningful over race-like durations. Below ~5 min the model runs off
+    // its calibration. The upper bound is 4 h so marathons still score — past
+    // that, fuelling rather than aerobic capacity is what's being measured.
+    // A long effort tends to under-read anyway, and since the series takes the
+    // best effort in the window, an under-reading one simply never wins.
+    if(t < 5 || t > 240) return null;
+    var v = (miles*1609.344)/t;                       // metres per minute
+    var vo2 = -4.60 + 0.182258*v + 0.000104*v*v;
+    var pct = 0.8 + 0.1894393*Math.exp(-0.012778*t) + 0.2989558*Math.exp(-0.1932605*t);
+    if(!(pct>0) || !(vo2>0)) return null;
+    var out = vo2/pct;
+    return (out>20 && out<95) ? out : null;           // outside this, the input was junk
+  }
+
+  // Fastest time to cover targetMiles anywhere inside a run's sample stream.
+  // The end of the window is interpolated between samples; the start is not,
+  // which biases results very slightly slow (~150 samples per run).
+  function bestEffort(samples, targetMiles){
+    var n = samples.length, best = null, j = 1;
+    if(n < 2 || samples[n-1].mi - samples[0].mi < targetMiles) return null;
+    for(var i=0; i<n-1; i++){
+      if(j < i+1) j = i+1;
+      while(j < n && (samples[j].mi - samples[i].mi) < targetMiles) j++;
+      if(j >= n) break;                                // no window left this long
+      var a = samples[j-1], b = samples[j];
+      var need = samples[i].mi + targetMiles;
+      var span = b.mi - a.mi;
+      var tEnd = span > 0 ? a.t + ((need - a.mi)/span)*(b.t - a.t) : b.t;
+      var dur = tEnd - samples[i].t;
+      if(dur > 0 && (best === null || dur < best)) best = dur;
+    }
+    return best;
+  }
+
+  // The best VDOT a single run demonstrates, over any of the standard distances
+  // (plus the whole run, when it was a race).
+  function runVdot(r){
+    var best = null, from = null;
+    if(r.sub_type === 'race'){
+      var v = vdotFor(Number(r.distance_miles)||0, Number(r.duration_seconds)||0);
+      if(v!=null){ best = v; from = 'race'; }
+    }
+    var s = r.samples;
+    if(Array.isArray(s) && s.length > 5){
+      var pts = s.filter(function(p){ return p && p.mi!=null && p.t!=null; })
+                 .map(function(p){ return {t:Number(p.t), mi:Number(p.mi)}; })
+                 .filter(function(p){ return isFinite(p.t) && isFinite(p.mi); });
+      [[MI_5K,'5K'],[MI_10K,'10K'],[MI_HALF,'half']].forEach(function(d){
+        var sec = bestEffort(pts, d[0]);
+        var vv = sec!=null ? vdotFor(d[0], sec) : null;
+        if(vv!=null && (best===null || vv>best)){ best = vv; from = d[1]; }
+      });
+    }
+    return best==null ? null : {vdot:best, from:from, date:r.run_date};
+  }
+
+  // Max HR in effect on a given day — the latest reading dated on or before it.
+  function maxHrOn(day){
+    var v = null;
+    FIT.maxHR.forEach(function(m){ if(m.day <= day) v = m.value; });
+    return v;
+  }
+
+  // Rolling best over a trailing window: fitness you have demonstrated lately.
+  // A plain running max would never come down; this decays if you stop proving it.
+  var VDOT_WINDOW = 42;
+  function fitnessSeries(weeks){
+    if(!weeks.length) return null;
+    var from = key(weeks[0].monday), to = key(new Date());
+    var efforts = [];
+    FIT.runs.forEach(function(r){ var e = runVdot(r); if(e) efforts.push(e); });
+    efforts.sort(function(a,b){ return a.date<b.date?-1:1; });
+
+    var ouraBy = {}; FIT.oura.forEach(function(o){ if(o.vo2_max!=null) ouraBy[o.day]=Number(o.vo2_max); });
+    var restBy = {}; FIT.oura.forEach(function(o){ if(o.resting_hr!=null) restBy[o.day]=Number(o.resting_hr); });
+
+    var pts = [], guard = 0;
+    for(var d=from; d<=to && guard<1500; d=dayAdd(d,1), guard++){
+      var cut = dayAdd(d, -VDOT_WINDOW);
+      var win = efforts.filter(function(e){ return e.date>cut && e.date<=d; });
+      var bestV = win.length ? Math.max.apply(null, win.map(function(e){return e.vdot;})) : null;
+      var mh = maxHrOn(d), rh = restBy[d];
+      pts.push({ day:d, vdot:bestV,
+                 oura:(ouraBy[d]!=null?ouraBy[d]:null),
+                 estRaw:(mh && rh) ? (15.3*(mh/rh)) : null });
+    }
+
+    // Resting HR moves a few bpm night to night and the ratio amplifies it, so
+    // the raw daily estimate is a hairball that buries the other series. Smooth
+    // it over a week — a day-to-day VO2 max reading is noise either way, and
+    // the trend is the only part that means anything.
+    pts.forEach(function(p,i){
+      var s=0, c=0;
+      for(var j=Math.max(0,i-3); j<=Math.min(pts.length-1,i+3); j++){
+        if(pts[j].estRaw!=null){ s+=pts[j].estRaw; c++; }
+      }
+      p.est = c ? (s/c) : null;
+    });
+    var any = pts.some(function(p){ return p.vdot!=null || p.oura!=null || p.est!=null; });
+    return any ? {pts:pts, efforts:efforts} : null;
+  }
+  // Key-in, key-out day arithmetic (addDays() above works on Date objects).
+  function dayAdd(k,n){ var p=k.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); d.setDate(d.getDate()+n); return key(d); }
+
+  // Same HTML-text / SVG-geometry split as the bar charts: axis labels stay at
+  // their real size at any width, and the dots stay circular because they're
+  // HTML, not marks inside a non-uniformly scaled viewBox.
+  function fitnessChart(F){
+    var pts = F.pts, n = pts.length;
+    var vals = [];
+    pts.forEach(function(p){ [p.vdot,p.oura,showEst?p.est:null].forEach(function(v){ if(v!=null) vals.push(v); }); });
+    if(!vals.length) return '';
+    var lo = Math.min.apply(null,vals), hi = Math.max.apply(null,vals);
+    if(hi-lo < 4){ var mid=(hi+lo)/2; lo=mid-2; hi=mid+2; }
+    var pad=(hi-lo)*0.15; lo-=pad; hi+=pad;
+    var X = function(i){ return n>1 ? (i/(n-1))*100 : 50; };
+    var Y = function(v){ return 100 - ((v-lo)/(hi-lo))*100; };
+
+    var step = (hi-lo)>30 ? 10 : (hi-lo)>12 ? 5 : (hi-lo)>6 ? 2 : 1;
+    var h = '<div class="fit"><div class="fit-plot">';
+    for(var g=Math.ceil(lo/step)*step; g<=hi; g+=step){
+      h += '<div class="gl" style="bottom:'+(100-Y(g)).toFixed(2)+'%"><b>'+g+'</b></div>';
+    }
+    h += '<svg class="fit-svg" viewBox="0 0 100 100" preserveAspectRatio="none">';
+    [['vdot','#33733A',2],['est','#009B8C',1.5]].forEach(function(s){
+      if(s[0]==='est' && !showEst) return;
+      // Break the path wherever the series has no value, rather than bridging a
+      // gap with a straight line that implies data we don't have.
+      var d='', pen=false;
+      pts.forEach(function(p,i){
+        var v=p[s[0]];
+        if(v==null){ pen=false; return; }
+        d += (pen?'L':'M')+X(i).toFixed(2)+' '+Y(v).toFixed(2)+' '; pen=true;
+      });
+      if(d) h += '<path d="'+d+'" fill="none" stroke="'+s[1]+'" stroke-width="'+s[2]+'" '+
+                 'vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>';
+    });
+    h += '</svg>';
+    pts.forEach(function(p,i){
+      if(p.oura==null) return;
+      h += '<span class="fit-dot" style="left:'+X(i).toFixed(2)+'%;bottom:'+(100-Y(p.oura)).toFixed(2)+'%" '+
+           'data-tip="'+esc('Oura test · '+p.oura.toFixed(1)+' · '+p.day)+'"></span>';
+    });
+    h += '</div><div class="blabels" style="padding-left:30px">';
+    var every = Math.ceil(n/5);
+    pts.forEach(function(p,i){
+      h += '<span>'+((i%every===0||i===n-1) ? esc(shortDate(parseDay(p.day))) : '')+'</span>';
+    });
+    return h+'</div></div>';
+  }
+
+  function renderFitness(weeks){
+    if(!FIT.loaded) return '<div class="card"><h2>Aerobic fitness</h2><div class="empty">Loading…</div></div>';
+    var F = fitnessSeries(weeks);
+    var h = '<div class="card"><h2>Aerobic fitness</h2>';
+    if(!F){
+      return h+'<p class="hint" style="margin:0">Nothing to plot yet. This needs either a race, a run with a heart-rate/pace stream long enough to hold a 5K, or a max HR in <a href="vitals.html" style="color:var(--green);font-weight:600">Vitals</a> alongside Oura resting HR.</p></div>';
+    }
+    var last = F.pts[F.pts.length-1];
+    var firstV = null, lastV = null;
+    F.pts.forEach(function(p){ if(p.vdot!=null){ if(firstV===null) firstV=p.vdot; lastV=p.vdot; } });
+    var ouraPts = F.pts.filter(function(p){ return p.oura!=null; });
+    var lastOura = ouraPts.length ? ouraPts[ouraPts.length-1] : null;
+
+    h += '<p class="hint">VDOT from efforts you actually ran, anchored by Oura\'s walking test. Absolute values won\'t match Garmin — the trend is the point.</p>';
+    h += '<div class="stats" style="margin-bottom:.8rem">'+
+      '<div class="stat"><div class="label">VDOT now</div><div class="value">'+(lastV!=null?lastV.toFixed(1):'—')+'</div>'+
+        (firstV!=null&&lastV!=null&&Math.abs(lastV-firstV)>=0.05
+          ? '<div class="delta" style="color:'+(lastV>=firstV?'var(--mark)':'var(--muted)')+'">'+(lastV>firstV?'+':'')+(lastV-firstV).toFixed(1)+' over range</div>' : '')+'</div>'+
+      '<div class="stat"><div class="label">Oura test</div><div class="value">'+(lastOura?lastOura.oura.toFixed(1):'—')+'</div>'+
+        (lastOura?'<div class="delta" style="color:var(--muted)">'+shortDate(parseDay(lastOura.day))+'</div>':'')+'</div>'+
+      '</div>';
+    h += fitnessChart(F);
+    h += '<div class="legend">'+
+      '<span><i class="key"></i>VDOT (best effort, 6 wk)</span>'+
+      '<span><i class="key" style="background:var(--mark-accent)"></i>Oura test</span>'+
+      (showEst?'<span><i class="key" style="background:#009B8C"></i>HRmax ÷ resting HR (7-day avg)</span>':'')+
+      '</div>';
+    // The calibration read. Two estimates of the same quantity sitting a steady
+    // distance apart is expected — one is a walk test, the other a run
+    // performance — and knowing the size of the gap is what makes either
+    // number usable. A gap that WANDERS is the interesting case: it means the
+    // two disagree about the direction you're moving.
+    var both = F.pts.filter(function(p){ return p.oura!=null && p.vdot!=null; });
+    if(both.length >= 2){
+      var diffs = both.map(function(p){ return p.oura - p.vdot; });
+      var mean = diffs.reduce(function(s,x){return s+x;},0)/diffs.length;
+      var spread = Math.max.apply(null,diffs) - Math.min.apply(null,diffs);
+      h += '<p class="hint" style="margin:.6rem 0 0">Across '+both.length+' tests, Oura reads '+
+        (mean>=0?'+':'−')+Math.abs(mean).toFixed(1)+' vs VDOT'+
+        (spread<=3 ? ', and holds that gap steadily — the two agree on direction, just not on the zero point.'
+                   : ' but the gap swings by '+spread.toFixed(1)+', so they disagree about which way you\'re trending.')+'</p>';
+    }
+    h += '<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-top:.7rem">'+
+      '<span style="font-size:.72rem;color:var(--muted)">'+F.efforts.length+' qualifying effort'+(F.efforts.length===1?'':'s')+'</span>'+
+      '<button class="toggle" id="est-toggle">'+(showEst?'hide daily estimate':'show daily estimate')+'</button></div>';
+    if(showEst) h += '<p class="hint" style="margin:.5rem 0 0">The daily line is 15.3 × (max HR ÷ resting HR). It moves with recovery, not performance, and reads high because Oura\'s resting HR is a sleeping low.</p>';
+    return h+'</div>';
+  }
+
+  async function loadFitness(){
+    var q = await sb.from('runs')
+      .select('run_date, sub_type, distance_miles, duration_seconds, samples')
+      .eq('athlete_id', athlete.id)
+      .or('samples.not.is.null,sub_type.eq.race')
+      .order('run_date',{ascending:true});
+    FIT.runs = q.data || [];
+    var v = await sb.from('vitals').select('measured_on,value').eq('kind','max_hr').order('measured_on',{ascending:true});
+    FIT.maxHR = (v.data||[]).map(function(x){ return {day:x.measured_on, value:Number(x.value)}; }).filter(function(x){ return x.value>0; });
+    var o = await sb.from('oura_daily').select('day,vo2_max,resting_hr').order('day',{ascending:true});
+    FIT.oura = o.data || [];
+    FIT.loaded = true;
+    render();
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderPills(){
     document.getElementById('range-pills').innerHTML = RANGES.map(function(r){
@@ -365,10 +611,12 @@
     var weeks = buildWeeks();
     renderStats(weeks);
     document.getElementById('views').innerHTML = RUNS.length
-      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks))
+      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderFitness(weeks))
       : '<div class="card"><div class="empty">No activities logged yet.<br>Once runs are in, this fills up on its own.</div></div>';
     var t = document.getElementById('tbl-toggle');
     if(t) t.addEventListener('click', function(){ showTable = !showTable; render(); });
+    var e = document.getElementById('est-toggle');
+    if(e) e.addEventListener('click', function(){ showEst = !showEst; render(); });
     wireTips();
   }
 
@@ -399,6 +647,9 @@
       .order('run_date', {ascending:true});
     RUNS = (r.data||[]).filter(function(x){ return x.run_date; });
     render();
+    // Sample streams are heavy, so the log paints first and the fitness card
+    // fills in behind it.
+    loadFitness();
   })();
   </script>
 </body>

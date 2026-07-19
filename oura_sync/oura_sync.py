@@ -140,8 +140,11 @@ def main():
     readiness = fetch("daily_readiness", headers, s, e)
     activity = fetch("daily_activity", headers, s, e)
     sleep = pick_main_sleep(fetch("sleep", headers, s, e))
+    # Sparse by nature — only days the walking test was actually taken. The
+    # route name really is camel-cased "vO2_max" in the v2 API.
+    vo2 = fetch("vO2_max", headers, s, e)
     print(f"Oura: {len(daily_sleep)} sleep, {len(readiness)} readiness, "
-          f"{len(activity)} activity, {len(sleep)} sleep periods")
+          f"{len(activity)} activity, {len(sleep)} sleep periods, {len(vo2)} vo2max")
 
     days = {}
 
@@ -163,6 +166,12 @@ def main():
             row["steps"] = to_int(x.get("steps"))
             row["active_calories"] = to_int(x.get("active_calories"))
             row["total_calories"] = to_int(x.get("total_calories"))
+    for x in vo2:
+        # Field has been documented as both "vo2_max" and "score" — take either
+        # rather than silently writing nothing if Oura renames it.
+        v = x.get("vo2_max", x.get("score"))
+        if x.get("day") and v is not None:
+            day_row(x["day"])["vo2_max"] = v
     for d, p in sleep.items():
         row = day_row(d)
         row["total_sleep_seconds"] = to_int(p.get("total_sleep_duration"))

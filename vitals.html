@@ -98,13 +98,18 @@
     blood_pressure:{label:'Blood Pressure', icon:'🩺', unit:'mmHg', compound:true, guides:[120,80], context:true},
     weight:        {label:'Weight',         icon:'⚖️', unit:'lb', context:true},
     pulse:         {label:'Resting Pulse',  icon:'💓', unit:'bpm', band:[60,100]},
+    // Typed in by hand off Garmin's notification — there's no supported API for
+    // it. Dated rather than a single setting, so a run from March is scored
+    // against the max HR that was in effect in March, not today's.
+    max_hr:        {label:'Max Heart Rate', icon:'❤️', unit:'bpm'},
     // Oura-sourced (read-only, synced nightly). Resting HR is folded into the
-    // Pulse card above (see load()); HRV and temp change are their own cards.
+    // Pulse card above (see load()); HRV, temp change and VO2 max are their own.
     hrv:           {label:'HRV',              icon:'💗', unit:'ms',  oura:true},
     temp_change:   {label:'Body Temp Change', icon:'🌡️', unit:'°C', oura:true, guides:[0]},
+    vo2_max:       {label:'VO₂ Max',          icon:'🫁', unit:'ml/kg/min', oura:true},
   };
-  var ORDER = ['blood_pressure','weight','pulse'];
-  var OURA_KINDS = ['hrv','temp_change'];
+  var ORDER = ['blood_pressure','weight','pulse','max_hr'];
+  var OURA_KINDS = ['hrv','temp_change','vo2_max'];
   // Where a BP / weight reading was taken.
   var CTX = { clinic:'Clinic', home:'Home' };
   function ctxBadge(r){ return r && r.context && CTX[r.context] ? '<span class="ctx '+r.context+'">'+CTX[r.context]+'</span>' : ''; }
@@ -322,11 +327,12 @@
     S.rows=r.data||[];
     // Fold in Oura daily physiology as read-only pseudo-rows (single source of
     // truth stays oura_daily; nothing is written back to the vitals table).
-    var o=await sb.from('oura_daily').select('day,resting_hr,avg_hrv,temperature_deviation').order('day',{ascending:false});
+    var o=await sb.from('oura_daily').select('day,resting_hr,avg_hrv,temperature_deviation,vo2_max').order('day',{ascending:false});
     (o.data||[]).forEach(function(d){
       if(d.resting_hr!=null)            S.rows.push({id:'oura:'+d.day+':hr',  kind:'pulse',        measured_on:d.day, value:d.resting_hr,            unit:'bpm', _oura:true});
       if(d.avg_hrv!=null)               S.rows.push({id:'oura:'+d.day+':hrv', kind:'hrv',          measured_on:d.day, value:d.avg_hrv,               unit:'ms',  _oura:true});
       if(d.temperature_deviation!=null) S.rows.push({id:'oura:'+d.day+':tmp', kind:'temp_change',  measured_on:d.day, value:d.temperature_deviation, unit:'°C', _oura:true});
+      if(d.vo2_max!=null)               S.rows.push({id:'oura:'+d.day+':vo2', kind:'vo2_max',      measured_on:d.day, value:d.vo2_max,               unit:'ml/kg/min', _oura:true});
     });
   }
   (async function(){
