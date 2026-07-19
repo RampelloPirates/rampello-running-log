@@ -922,6 +922,14 @@
     return { ef: (metres/((t1-t0)/60))/(hrSum/hrT), hr: hrSum/hrT };
   }
 
+  // Heart rate starts a run at rest and takes several minutes to reach steady
+  // state. Including that ramp in the first half drags its average down and
+  // manufactures drift that never happened: a perfectly steady 30-minute run
+  // reports 4.7% decoupling at a 4-minute ramp and 7.0% at six — most of the 5%
+  // threshold, out of thin air. So the comparison starts after the warmup, as
+  // the metric was designed to (TrainingPeaks has you select the steady portion
+  // by hand; this does it by rule).
+  var WARMUP_SKIP = 600;      // seconds dropped before the halves are measured
   function runDecoupling(r){
     if (HARD[r.sub_type]) return null;
     var s = r.samples;
@@ -930,13 +938,15 @@
                .map(function(p){ return {t:Number(p.t), mi:Number(p.mi), hr:Number(p.hr)}; })
                .filter(function(p){ return isFinite(p.t)&&isFinite(p.mi)&&isFinite(p.hr); });
     if (pts.length < 20) return null;
-    var tEnd = pts[pts.length-1].t;
-    if (tEnd < 1500) return null;                            // ≥25 min to mean anything
-    var mid = tEnd/2;
-    var a = streamWindow(pts, pts[0].t, mid), b = streamWindow(pts, mid, tEnd);
+    var t0 = pts[0].t + WARMUP_SKIP, tEnd = pts[pts.length-1].t;
+    // Needs 20 minutes of steady running left after the warmup comes off, so
+    // each half is a real 10-minute block rather than a handful of samples.
+    if (tEnd - t0 < 1200) return null;
+    var mid = (t0+tEnd)/2;
+    var a = streamWindow(pts, t0, mid), b = streamWindow(pts, mid, tEnd);
     if (!a || !b || !(a.ef>0)) return null;
     var pct = ((a.ef-b.ef)/a.ef)*100;
-    return (pct > -40 && pct < 60) ? {pct:pct, hr1:a.hr, hr2:b.hr} : null;
+    return (pct > -40 && pct < 60) ? {pct:pct, hr1:a.hr, hr2:b.hr, mins:Math.round((tEnd-t0)/60)} : null;
   }
 
   function aerobicModel(weeks){
@@ -948,10 +958,13 @@
       var v = runEF(r);
       if (v!=null) ef.push({key:r.run_date, val:v});
     });
+    var dewBy = {};
+    RUNS.forEach(function(r){ if (r.dewpoint_f != null) dewBy[r.run_date] = Number(r.dewpoint_f); });
     (FIT.runs||[]).forEach(function(r){
       if (r.run_date < from) return;
       var d = runDecoupling(r);
-      if (d) dec.push({key:r.run_date, val:d.pct, hr1:d.hr1, hr2:d.hr2});
+      if (d) dec.push({key:r.run_date, val:d.pct, hr1:d.hr1, hr2:d.hr2, mins:d.mins,
+                       dew:(dewBy[r.run_date]!=null ? dewBy[r.run_date] : null)});
     });
     ef.sort(function(a,b){return a.key<b.key?-1:1;});
     dec.sort(function(a,b){return a.key<b.key?-1:1;});
@@ -1040,7 +1053,8 @@
     h += showDec
       ? aeroChart(A.dec, { ref: DECOUPLE_OK, step: 2, fmt: function(v){ return v.toFixed(0)+'%'; },
           thin: 'Not enough runs with a stream of 25 minutes or more in this range.',
-          tip: function(p){ return p.val.toFixed(1)+'% · HR '+Math.round(p.hr1)+' → '+Math.round(p.hr2); } })
+          tip: function(p){ return p.val.toFixed(1)+'% · HR '+Math.round(p.hr1)+' → '+Math.round(p.hr2)+
+                 (p.mins?' · '+p.mins+' min':'')+(p.dew!=null?' · dew '+Math.round(p.dew)+'°F':''); } })
       : aeroChart(A.ef, { fmt: function(v){ return v.toFixed(2); },
           thin: 'Not enough runs with heart rate in this range.',
           tip: function(p){ return 'EF '+p.val.toFixed(2); } });
@@ -1051,8 +1065,13 @@
       (showDec ? '<span><i class="key" style="width:14px;height:3px;border-radius:2px;background:var(--mark-accent)"></i>'+DECOUPLE_OK+'% threshold</span>' : '')+
       '</div>';
 
+    var decDews = A.dec.map(function(p){return p.dew;}).filter(function(v){return v!=null;});
+    var medDew = median(decDews);
+    var hotNote = (showDec && medDew!=null && medDew >= 65)
+      ? ' <strong>These runs averaged a '+Math.round(medDew)+'°F dew point.</strong> Sweating drops plasma volume, so heart rate climbs to move the same blood — real drift, but thermoregulation rather than your base. Expect this number to fall on its own when the weather does; judge the base against runs in comparable conditions.'
+      : '';
     h += '<p class="hint" style="margin:.7rem 0 0">'+(showDec
-      ? 'Heart rate in the second half against the first, at the same pace. Under '+DECOUPLE_OK+'% means the engine held; consistently above it points at aerobic base, heat, or turning up on tired legs.'
+      ? 'Heart rate in the second half against the first, at the same pace, measured after the first 10 minutes so the warm-up ramp is not counted as drift. Under '+DECOUPLE_OK+'% means the engine held.'+hotNote
       : 'Metres per minute per heartbeat. It climbs as the base builds, and it moves earlier than race times do — no taper or maximal effort needed to see it.')+'</p>';
 
     h += '<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-top:.7rem">'+
