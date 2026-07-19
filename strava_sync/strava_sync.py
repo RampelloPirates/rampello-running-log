@@ -201,6 +201,106 @@ def build_laps(sid, headers):
     return rows
 
 
+# ── Weather ─────────────────────────────────────────────────────────────────
+# Strava returns no weather, so runs imported by this worker arrive without it.
+# That matters beyond decoration: dewpoint is what the weather-adjusted pace
+# analysis regresses against, and with it null on every synced run there is
+# nothing to fit. Open-Meteo needs no key; one range request covers the whole
+# backlog, so this tops up anything missing on every sync and quietly does
+# nothing once history is filled.
+WEATHER_LAT, WEATHER_LON = 27.95, -82.46      # Tampa, FL (same point log_run.html uses)
+WEATHER_HOURLY = "temperature_2m,relativehumidity_2m,dewpoint_2m,windspeed_10m"
+
+def hour_for_time_of_day(tod):
+    return {"morning": 7, "afternoon": 15, "evening": 19}.get(tod or "", 17)
+
+def _weather_call(url, params):
+    """Fetch one Open-Meteo range into {'YYYY-MM-DDTHH:00': {...}}."""
+    out = {}
+    try:
+        r = requests.get(url, params=params, timeout=30)
+        if r.status_code != 200:
+            print(f"  weather: HTTP {r.status_code} {r.text[:120]}")
+            return out
+        h = (r.json() or {}).get("hourly") or {}
+        times = h.get("time") or []
+        for i, stamp in enumerate(times):
+            def at(key):
+                arr = h.get(key) or []
+                return arr[i] if i < len(arr) else None
+            out[stamp] = {
+                "temperature_f": at("temperature_2m"),
+                "humidity_percent": at("relativehumidity_2m"),
+                "dewpoint_f": at("dewpoint_2m"),
+                "wind_mph": at("windspeed_10m"),
+            }
+    except Exception as e:
+        print(f"  weather: {e}")
+    return out
+
+def weather_index(start_iso, end_iso):
+    """Hourly weather across a date range. The archive is authoritative but lags
+    about five days, so the recent tail comes from the forecast endpoint."""
+    common = {
+        "latitude": WEATHER_LAT, "longitude": WEATHER_LON, "hourly": WEATHER_HOURLY,
+        "temperature_unit": "fahrenheit", "windspeed_unit": "mph", "timezone": "America/New_York",
+    }
+    idx = {}
+    archive_end = (datetime.now(timezone.utc).date() - timedelta(days=6)).isoformat()
+    if start_iso <= min(end_iso, archive_end):
+        idx.update(_weather_call("https://archive-api.open-meteo.com/v1/archive",
+                                 {**common, "start_date": start_iso, "end_date": min(end_iso, archive_end)}))
+    # Forecast covers the last ~92 days including the tail the archive hasn't
+    # caught up on; let it win on any overlap.
+    recent_start = max(start_iso, (datetime.now(timezone.utc).date() - timedelta(days=90)).isoformat())
+    if recent_start <= end_iso:
+        idx.update(_weather_call("https://api.open-meteo.com/v1/forecast",
+                                 {**common, "start_date": recent_start, "end_date": end_iso}))
+    return idx
+
+def backfill_weather(sb, athlete_id):
+    try:
+        q = (sb.table("runs")
+             .select("id,run_date,time_of_day")
+             .eq("athlete_id", athlete_id)
+             .is_("dewpoint_f", "null")
+             .order("run_date", desc=False)
+             .limit(600).execute())
+    except Exception as e:
+        print(f"Weather backfill skipped ({e})")
+        return
+    rows = [r for r in (q.data or []) if r.get("run_date")]
+    if not rows:
+        print("Weather: nothing to backfill.")
+        return
+
+    start, end = rows[0]["run_date"], max(r["run_date"] for r in rows)
+    print(f"Weather: filling {len(rows)} run(s), {start} … {end}")
+    idx = weather_index(start, end)
+    if not idx:
+        print("Weather: no data returned; leaving runs as they are.")
+        return
+
+    filled = 0
+    for r in rows:
+        key = f"{r['run_date']}T{hour_for_time_of_day(r.get('time_of_day')):02d}:00"
+        w = idx.get(key)
+        if not w or w.get("dewpoint_f") is None:
+            continue
+        patch = {
+            "temperature_f": None if w["temperature_f"] is None else int(round(w["temperature_f"])),
+            "humidity_percent": None if w["humidity_percent"] is None else int(round(w["humidity_percent"])),
+            "dewpoint_f": int(round(w["dewpoint_f"])),
+            "wind_mph": None if w["wind_mph"] is None else round(float(w["wind_mph"]), 1),
+        }
+        try:
+            sb.table("runs").update(patch).eq("id", r["id"]).execute()
+            filled += 1
+        except Exception as e:
+            print(f"  {r['run_date']}: weather update failed ({e})")
+    print(f"Weather: filled {filled} run(s).")
+
+
 def main():
     sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     auth = sb.auth.sign_in_with_password({"email": APP_EMAIL, "password": APP_PASSWORD})
@@ -295,6 +395,7 @@ def main():
             print(f"  {ref}: FAILED ({e})")
 
     print(f"Done. Imported {added} new run(s).")
+    backfill_weather(sb, athlete_id)
 
 
 if __name__ == "__main__":

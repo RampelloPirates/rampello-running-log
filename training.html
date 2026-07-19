@@ -104,6 +104,10 @@
     .fit-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
     .fit-dot{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--mark-accent);
              box-shadow:0 0 0 2px var(--paper);transform:translate(-50%,50%);z-index:3;}
+    /* One run. Small and recessive — these are the raw observations behind the
+       lines, not the story themselves. */
+    .wx-dot{position:absolute;width:5px;height:5px;border-radius:50%;background:var(--mark-off);
+            opacity:.55;transform:translate(-50%,50%);z-index:2;}
     .fit .gl{left:0;}
     .empty{color:var(--muted);font-size:.88rem;padding:1.2rem 0;text-align:center;line-height:1.6;}
     .tip{position:fixed;display:none;pointer-events:none;background:var(--green-deep);color:#fff;
@@ -485,6 +489,12 @@
   }
   // Key-in, key-out day arithmetic (addDays() above works on Date objects).
   function dayAdd(k,n){ var p=k.split('-').map(Number); var d=new Date(p[0],p[1]-1,p[2]); d.setDate(d.getDate()+n); return key(d); }
+  // Whole days between two day keys. UTC on both sides so a DST boundary in
+  // between can't turn a day into 23 or 25 hours and round the wrong way.
+  function daysApart(a,b){
+    var pa=a.split('-').map(Number), pb=b.split('-').map(Number);
+    return Math.round((Date.UTC(pb[0],pb[1]-1,pb[2]) - Date.UTC(pa[0],pa[1]-1,pa[2]))/86400000);
+  }
 
   // Same HTML-text / SVG-geometry split as the bar charts: axis labels stay at
   // their real size at any width, and the dots stay circular because they're
@@ -597,6 +607,245 @@
     render();
   }
 
+  // ── Weather-adjusted pace ──────────────────────────────────────────────────
+  // In Florida a summer pace chart reads as losing fitness when it's really
+  // just July. Rather than apply someone else's heat table, fit YOUR decay from
+  // YOUR runs: regress pace on dew point while holding the two things that
+  // would otherwise be mistaken for weather — fitness drifting over the months,
+  // and long runs being slower than short ones.
+  //
+  //   pace = b0 + b1·dewpoint + b2·daysElapsed + b3·distance
+  //
+  // Heart rate is deliberately NOT a predictor. Heat raises HR, so HR sits on
+  // the causal path between weather and pace; controlling for a mediator would
+  // absorb the very effect being measured and bias b1 toward zero.
+  var DEW_REF = 55;            // a comfortable dew point — what "adjusted" means
+  var showScatter = false;
+
+  // Ordinary least squares by normal equations, with standard errors so we can
+  // say whether the dew-point term is distinguishable from noise.
+  function ols(X, y) {
+    const n = X.length, k = X[0].length;
+    if (n <= k) return null;
+    const XtX = [], Xty = [];
+    for (let i = 0; i < k; i++) {
+      XtX.push(new Array(k).fill(0)); Xty.push(0);
+      for (let a = 0; a < n; a++) {
+        Xty[i] += X[a][i] * y[a];
+        for (let j = 0; j < k; j++) XtX[i][j] += X[a][i] * X[a][j];
+      }
+    }
+    // Gauss-Jordan on [XtX | I] gives the solution and the inverse together.
+    const M = XtX.map((row, i) => row.concat(Array.from({length: k}, (_, j) => (i === j ? 1 : 0))));
+    for (let c = 0; c < k; c++) {
+      let piv = c;
+      for (let r2 = c + 1; r2 < k; r2++) if (Math.abs(M[r2][c]) > Math.abs(M[piv][c])) piv = r2;
+      if (Math.abs(M[piv][c]) < 1e-12) return null;         // singular — collinear inputs
+      [M[c], M[piv]] = [M[piv], M[c]];
+      const d = M[c][c];
+      for (let j = 0; j < 2 * k; j++) M[c][j] /= d;
+      for (let r2 = 0; r2 < k; r2++) {
+        if (r2 === c) continue;
+        const f = M[r2][c];
+        if (!f) continue;
+        for (let j = 0; j < 2 * k; j++) M[r2][j] -= f * M[c][j];
+      }
+    }
+    const inv = M.map(row => row.slice(k));
+    const beta = inv.map(row => row.reduce((s, v, j) => s + v * Xty[j], 0));
+    const yBar = y.reduce((s, v) => s + v, 0) / n;
+    let rss = 0, tss = 0;
+    for (let a = 0; a < n; a++) {
+      const fit = X[a].reduce((s, v, j) => s + v * beta[j], 0);
+      rss += (y[a] - fit) ** 2; tss += (y[a] - yBar) ** 2;
+    }
+    const s2 = rss / (n - k);
+    return { beta, se: beta.map((_, i) => Math.sqrt(Math.max(0, s2 * inv[i][i]))),
+             r2: tss > 0 ? 1 - rss / tss : 0, n };
+  }
+
+  // Steady aerobic runs only. Hard sessions are fast because they were hard,
+  // not because of the weather, and letting them in would swamp the signal.
+  var HARD = { race:1, intervals:1, tempo:1, workout:1 };
+  function weatherRuns() {
+    return RUNS.filter(function(r){
+      if ((r.activity_type||'run') !== 'run') return false;
+      if (HARD[r.sub_type]) return false;
+      var d = Number(r.distance_miles)||0, sec = Number(r.duration_seconds)||0;
+      if (d < 1.5 || sec <= 0) return false;
+      if (r.dewpoint_f == null) return false;
+      var pace = sec/d;
+      return pace > 240 && pace < 1200;            // 4:00–20:00 /mi sanity band
+    }).map(function(r){
+      return { key:r.run_date, dew:Number(r.dewpoint_f), dist:Number(r.distance_miles),
+               pace:Number(r.duration_seconds)/Number(r.distance_miles) };
+    });
+  }
+
+  function weatherModel(){
+    var runs = weatherRuns();
+    if (runs.length < 12) return {tooFew:true, n:runs.length};
+    var dews = runs.map(function(r){return r.dew;});
+    var spread = Math.max.apply(null,dews) - Math.min.apply(null,dews);
+    if (spread < 15) return {tooFlat:true, n:runs.length, spread:spread};
+
+    var t0 = runs[0].key;
+    var X = runs.map(function(r){ return [1, r.dew, daysApart(t0, r.key), r.dist]; });
+    var fit = ols(X, runs.map(function(r){return r.pace;}));
+    if (!fit) return {tooFew:true, n:runs.length};
+
+    var b1 = fit.beta[1], se = fit.se[1];
+    var tstat = se > 0 ? b1/se : 0;
+    runs.forEach(function(r){ r.adj = r.pace - b1*(r.dew - DEW_REF); });
+    // The time term is the fitness signal, once weather and distance are held
+    // out. Worth reporting as a number: on the chart the seasonal swing sets
+    // the y-range, so a genuine 30-second gain reads as an almost flat line.
+    var span = daysApart(runs[0].key, runs[runs.length-1].key);
+    return { runs:runs, perDeg:b1, se:se, tstat:tstat, r2:fit.r2, n:fit.n,
+             perDay:fit.beta[2], span:span, trend:fit.beta[2]*span,
+             solid:(Math.abs(tstat) >= 2 && b1 > 0), spread:spread };
+  }
+
+  // 28-day trailing mean, so the two lines are comparable trends rather than
+  // per-run noise.
+  function rollMean(runs, field, days){
+    return runs.map(function(r, i){
+      var cut = dayAdd(r.key, -days), s = 0, c = 0;
+      for (var j = 0; j <= i; j++) if (runs[j].key > cut) { s += runs[j][field]; c++; }
+      return c ? s/c : null;
+    });
+  }
+
+  function paceLabel(sec){
+    if (sec == null || !isFinite(sec)) return '—';
+    return Math.floor(sec/60)+':'+String(Math.round(sec%60)).padStart(2,'0');
+  }
+
+  function weatherChart(M, weeks){
+    var from = key(weeks[0].monday);
+    var idx = M.runs.map(function(r,i){return i;}).filter(function(i){ return M.runs[i].key >= from; });
+    if (idx.length < 3) return '<p class="hint" style="margin:0">Not enough runs with weather inside this range — widen it above.</p>';
+    var rawRoll = rollMean(M.runs, 'pace', 28), adjRoll = rollMean(M.runs, 'adj', 28);
+
+    var vals = [];
+    idx.forEach(function(i){ [rawRoll[i], adjRoll[i], M.runs[i].pace].forEach(function(v){ if(v!=null) vals.push(v); }); });
+    var lo = Math.min.apply(null,vals), hi = Math.max.apply(null,vals);
+    var pad = (hi-lo)*0.12 || 20; lo -= pad; hi += pad;
+    var n = idx.length;
+    var X = function(k2){ return n>1 ? (k2/(n-1))*100 : 50; };
+    // Pace inverts: a faster pace is a SMALLER number but belongs at the TOP.
+    // Y() returns a distance-from-the-bottom percentage, so a fast pace gives a
+    // large Y. The HTML layer takes that straight ("bottom:Y%"); the SVG layer
+    // needs 100-Y, because its y axis counts down from the top. Mixing those two
+    // up draws the data upside down under correctly-placed axis labels.
+    var Y = function(v){ return 100 - ((v-lo)/(hi-lo))*100; };
+
+    var step = (hi-lo) > 180 ? 60 : (hi-lo) > 90 ? 30 : 15;
+    var h = '<div class="fit"><div class="fit-plot">';
+    for (var g = Math.ceil(lo/step)*step; g <= hi; g += step) {
+      h += '<div class="gl" style="bottom:'+Y(g).toFixed(2)+'%"><b>'+paceLabel(g)+'</b></div>';
+    }
+    h += '<svg class="fit-svg" viewBox="0 0 100 100" preserveAspectRatio="none">';
+    [['pace','#BE722A',1.5,rawRoll],['adj','#33733A',2,adjRoll]].forEach(function(s){
+      var d = '', pen = false;
+      idx.forEach(function(i,k2){
+        var v = s[3][i];
+        if (v == null) { pen = false; return; }
+        d += (pen?'L':'M')+X(k2).toFixed(2)+' '+(100-Y(v)).toFixed(2)+' '; pen = true;   // SVG y counts down
+      });
+      if (d) h += '<path d="'+d+'" fill="none" stroke="'+s[1]+'" stroke-width="'+s[2]+'" '+
+                  'vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>';
+    });
+    h += '</svg>';
+    idx.forEach(function(i,k2){
+      var r = M.runs[i];
+      h += '<span class="wx-dot" style="left:'+X(k2).toFixed(2)+'%;bottom:'+Y(r.pace).toFixed(2)+'%" '+
+           'data-tip="'+esc(shortDate(parseDay(r.key))+' · '+paceLabel(r.pace)+'/mi raw · '+paceLabel(r.adj)+' adjusted · dew '+Math.round(r.dew)+'°F')+'"></span>';
+    });
+    h += '</div><div class="blabels" style="padding-left:30px">';
+    var every = Math.ceil(n/5);
+    idx.forEach(function(i,k2){
+      h += '<span>'+((k2%every===0||k2===n-1) ? esc(shortDate(parseDay(M.runs[i].key))) : '')+'</span>';
+    });
+    return h+'</div></div>';
+  }
+
+  // The evidence behind the coefficient: every run as a point, dew point across.
+  function weatherScatter(M){
+    var lo = Math.min.apply(null, M.runs.map(function(r){return r.dew;}));
+    var hi = Math.max.apply(null, M.runs.map(function(r){return r.dew;}));
+    var pv = M.runs.map(function(r){return r.pace;});
+    var plo = Math.min.apply(null,pv), phi = Math.max.apply(null,pv);
+    var pad = (phi-plo)*0.1 || 20; plo -= pad; phi += pad;
+    var X = function(d){ return ((d-lo)/((hi-lo)||1))*100; };
+    var Y = function(p){ return 100 - ((p-plo)/((phi-plo)||1))*100; };   // distance from the bottom
+    var step = (phi-plo) > 180 ? 60 : (phi-plo) > 90 ? 30 : 15;
+
+    var h = '<div class="fit"><div class="fit-plot">';
+    for (var g = Math.ceil(plo/step)*step; g <= phi; g += step) {
+      h += '<div class="gl" style="bottom:'+Y(g).toFixed(2)+'%"><b>'+paceLabel(g)+'</b></div>';
+    }
+    // The fitted slope, drawn at the mean distance and mid-window date so it's
+    // a like-for-like line rather than a cloud through the points.
+    var meanDist = M.runs.reduce(function(s,r){return s+r.dist;},0)/M.runs.length;
+    var meanPace = M.runs.reduce(function(s,r){return s+r.pace;},0)/M.runs.length;
+    var meanDew = M.runs.reduce(function(s,r){return s+r.dew;},0)/M.runs.length;
+    var y1 = meanPace + M.perDeg*(lo-meanDew), y2 = meanPace + M.perDeg*(hi-meanDew);
+    void meanDist;
+    h += '<svg class="fit-svg" viewBox="0 0 100 100" preserveAspectRatio="none">'+
+         '<path d="M0 '+(100-Y(y1)).toFixed(2)+' L100 '+(100-Y(y2)).toFixed(2)+'" fill="none" stroke="#33733A" '+
+         'stroke-width="2" vector-effect="non-scaling-stroke" stroke-linecap="round"/></svg>';
+    M.runs.forEach(function(r){
+      h += '<span class="wx-dot" style="left:'+X(r.dew).toFixed(2)+'%;bottom:'+Y(r.pace).toFixed(2)+'%" '+
+           'data-tip="'+esc(shortDate(parseDay(r.key))+' · '+paceLabel(r.pace)+'/mi · dew '+Math.round(r.dew)+'°F · '+r.dist.toFixed(1)+' mi')+'"></span>';
+    });
+    h += '</div><div class="blabels" style="padding-left:30px">'+
+         '<span>'+Math.round(lo)+'°F</span><span></span><span></span><span></span><span>'+Math.round(hi)+'°F</span>'+
+         '</div></div>';
+    return h;
+  }
+
+  function renderWeather(weeks){
+    var h = '<div class="card"><h2>Weather-adjusted pace</h2>';
+    if (!weeks.length) return h+'</div>';
+    var M = weatherModel();
+
+    if (M.tooFew) {
+      return h+'<p class="hint" style="margin:0">Needs at least 12 steady runs carrying a dew point; there '+(M.n===1?'is':'are')+' '+M.n+' so far. The Strava sync fills weather in on its next run, so this should populate on its own.</p></div>';
+    }
+    if (M.tooFlat) {
+      return h+'<p class="hint" style="margin:0">'+M.n+' runs with weather, but the dew point only spans '+Math.round(M.spread)+'°F. There has to be a real range of conditions before a heat effect can be separated from everything else.</p></div>';
+    }
+
+    var perDeg = M.perDeg;
+    h += '<p class="hint">Fitted from your own runs, not a generic heat table. Easy and long runs only — a hard session is fast because it was hard.</p>';
+    h += '<div class="stats" style="margin-bottom:.8rem">'+
+      '<div class="stat"><div class="label">Dew point cost</div><div class="value">'+(perDeg>=0?'+':'−')+Math.abs(perDeg).toFixed(1)+'<span class="unit">s/mi/°F</span></div>'+
+        '<div class="delta" style="color:var(--muted)">'+M.n+' runs · R² '+M.r2.toFixed(2)+'</div></div>'+
+      '<div class="stat"><div class="label">A 75°F dew day</div><div class="value">'+(perDeg*(75-DEW_REF)>=0?'+':'−')+paceLabel(Math.abs(perDeg*(75-DEW_REF)))+'<span class="unit">/mi</span></div>'+
+        '<div class="delta" style="color:var(--muted)">vs a '+DEW_REF+'°F morning</div></div>'+
+      '<div class="stat"><div class="label">Fitness trend</div><div class="value">'+(M.trend<=0?'−':'+')+paceLabel(Math.abs(M.trend))+'<span class="unit">/mi</span></div>'+
+        '<div class="delta" style="color:'+(M.trend<=0?'var(--mark)':'var(--muted)')+'">'+(M.trend<=0?'faster':'slower')+' over '+Math.round(M.span/30)+' months, weather aside</div></div>'+
+      '</div>';
+
+    if (!M.solid) {
+      h += '<p class="hint" style="margin:-.3rem 0 .8rem;color:var(--amber)">The dew-point term isn\'t clearly separable from noise yet (t = '+M.tstat.toFixed(1)+', wants ≥ 2). Treat the adjustment as provisional.</p>';
+    }
+
+    h += showScatter ? weatherScatter(M) : weatherChart(M, weeks);
+    h += '<div class="legend">'+
+      (showScatter
+        ? '<span><i class="key" style="background:var(--mark-off)"></i>One run</span><span><i class="key" style="width:14px;height:3px;border-radius:2px;background:var(--mark)"></i>Fitted slope</span>'
+        : '<span><i class="key" style="width:14px;height:3px;border-radius:2px;background:var(--mark-accent)"></i>Raw pace (28-day)</span>'+
+          '<span><i class="key" style="width:14px;height:3px;border-radius:2px;background:var(--mark)"></i>Weather-adjusted</span>'+
+          '<span><i class="key" style="background:var(--mark-off)"></i>Single run</span>')+
+      '</div>';
+    h += '<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-top:.7rem">'+
+      '<span style="font-size:.72rem;color:var(--muted)">Adjusted to a '+DEW_REF+'°F dew point · faster is higher</span>'+
+      '<button class="toggle" id="wx-toggle">'+(showScatter?'show trend':'show the fit')+'</button></div>';
+    return h+'</div>';
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderPills(){
     document.getElementById('range-pills').innerHTML = RANGES.map(function(r){
@@ -611,12 +860,14 @@
     var weeks = buildWeeks();
     renderStats(weeks);
     document.getElementById('views').innerHTML = RUNS.length
-      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderFitness(weeks))
+      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderFitness(weeks) + renderWeather(weeks))
       : '<div class="card"><div class="empty">No activities logged yet.<br>Once runs are in, this fills up on its own.</div></div>';
     var t = document.getElementById('tbl-toggle');
     if(t) t.addEventListener('click', function(){ showTable = !showTable; render(); });
     var e = document.getElementById('est-toggle');
     if(e) e.addEventListener('click', function(){ showEst = !showEst; render(); });
+    var wx = document.getElementById('wx-toggle');
+    if(wx) wx.addEventListener('click', function(){ showScatter = !showScatter; render(); });
     wireTips();
   }
 
@@ -642,7 +893,7 @@
     if(!profile) return;
     athlete = profile.row;
     var r = await sb.from('runs')
-      .select('run_date, activity_type, sub_type, distance_miles, duration_seconds')
+      .select('run_date, activity_type, sub_type, distance_miles, duration_seconds, dewpoint_f, temperature_f')
       .eq('athlete_id', athlete.id)
       .order('run_date', {ascending:true});
     RUNS = (r.data||[]).filter(function(x){ return x.run_date; });
