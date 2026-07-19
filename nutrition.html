@@ -117,6 +117,7 @@
     view:'today', method:'type', loaded:false, userId:null,
     target:null, log:[], usuals:[], recipes:[], history:[],
     burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
+    weights:[], trendTable:false, historyLoaded:false,   // body weight from vitals + the chart/table toggle
     draft:null, label:null, barcode:null, recipeDraft:null, recipeEditId:null, editEntryId:null, editItems:null,
     text:'', recipeText:'', recipeName:'', recipeServings:'',
     libOpen:false, libQ:'',                 // the saved-ingredient picker
@@ -253,6 +254,20 @@
     var yi = await sb.from('nutrition_entries').select('total_calories').eq('log_date',S.yKey);
     S.yIntake = (yi.data||[]).reduce(function(s,e){return s+(e.total_calories||0);},0);
   }
+  // Body weight, for checking the deficit model against the scale. Lives in
+  // `vitals` (kind 'weight'), shared with vitals.html — imported from the
+  // BayCare portal PDFs and hand-entered there.
+  async function loadWeights(){
+    var r = await sb.from('vitals').select('measured_on,value,unit').eq('kind','weight').order('measured_on',{ascending:true});
+    var byDay = {};
+    (r.data||[]).forEach(function(v){
+      var lb = num(v.value); if(!(lb>0)) return;
+      if(/kg/i.test(v.unit||'')) lb = lb*2.20462;      // vitals.html writes lb, but don't assume
+      byDay[String(v.measured_on).slice(0,10)] = round1(lb);   // one reading per day, last wins
+    });
+    S.weights = Object.keys(byDay).sort().map(function(k){ return {key:k, lb:byDay[k]}; });
+  }
+
   // Expand a history day to show its entries (loaded on demand), or collapse it.
   async function expandHistoryDay(key){
     var d = S.history.filter(function(x){return x.key===key;})[0]; if(!d) return;
@@ -724,7 +739,7 @@
     }catch(e){ S.err=e.message; render(); }
   }
 
-  function setView(v){ S.view=v; S.err=''; render(); if(v==='history') loadHistory().then(render); }
+  function setView(v){ S.view=v; S.err=''; render(); if(v==='history') loadHistory().then(function(){ S.historyLoaded=true; render(); }); }
   function setMethod(m){ S.method=m; S.err=''; render(); }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -740,6 +755,7 @@
     else if(S.view==='recipes') h += viewRecipes();
     else if(S.view==='history') h += viewHistory();
     app.innerHTML = h;
+    if(S.view==='history') wireTrend();   // listeners die with the old subtree
   }
 
   function viewToday(){
@@ -1081,6 +1097,107 @@
     return h;
   }
 
+  // ── Deficit vs. the scale ──────────────────────────────────────────────────
+  // The classic rule of thumb: a 3,500 cal deficit ≈ 1 lb of fat. Running the
+  // tracked deficit through it gives a predicted weight curve, which the scale
+  // either confirms or doesn't. When the two diverge over months, one of the
+  // model's inputs is wrong — intake under-logged, Oura burn optimistic, or the
+  // loss isn't all fat. That's the whole point of the chart: it's a check on
+  // the tracking, not a diet plan.
+  var CAL_PER_LB = 3500;
+  var C_PRED = '#BE722A';   // brand amber — the model
+  var C_ACT  = '#009B8C';   // brand teal, chroma lifted to clear the CVD floor — the scale
+
+  function dayAdd(key,n){
+    var p = key.split('-').map(Number); var d = new Date(p[0],p[1]-1,p[2]);
+    d.setDate(d.getDate()+n); return localDateKey(d);
+  }
+  function daysApart(a,b){
+    var pa=a.split('-').map(Number), pb=b.split('-').map(Number);
+    return Math.abs(Date.UTC(pb[0],pb[1]-1,pb[2]) - Date.UTC(pa[0],pa[1]-1,pa[2]))/86400000;
+  }
+
+  // Returns null when there isn't enough to say anything honest.
+  function deficitModel(){
+    if(S.weights.length < 2) return null;
+
+    // A day counts only when we know BOTH sides of the balance. A day you ate
+    // but didn't log is not a zero-calorie day — it's an unknown, and it drops
+    // out entirely rather than flattering the deficit.
+    var netByDay = {};
+    S.history.forEach(function(d){
+      var burn = S.burnByDay ? S.burnByDay[d.key] : null;
+      if(burn==null || !(d.total>0)) return;
+      netByDay[d.key] = d.total - burn;          // <0 = deficit
+    });
+    var tracked = Object.keys(netByDay).sort();
+    if(!tracked.length) return null;
+
+    // Anchor BOTH curves to the same weigh-in, and start the window on that
+    // date. If the model accumulated over a different span than the scale
+    // measured, the gap between them would be part arithmetic artifact — and
+    // the coverage figure would overstate how much of the compared period was
+    // actually tracked.
+    var firstTracked = tracked[0];
+    var before = null;
+    S.weights.forEach(function(w){ if(w.key <= firstTracked) before = w; });   // last reading at/before
+    var after = S.weights.filter(function(w){ return w.key > firstTracked; })[0];
+    // A weigh-in from long before you started logging makes a poor baseline —
+    // it would drag months of untracked days into the window. Prefer a nearby
+    // one, and fall back to the first reading after tracking began.
+    var base = (before && daysApart(before.key, firstTracked) <= 14) ? before : (after || before);
+    if(!base) return null;
+    var start = base.key;
+
+    var end = tracked[tracked.length-1];
+    var lastW = S.weights[S.weights.length-1];
+    if(lastW.key > end) end = lastW.key;
+    if(end <= start) return null;
+
+    var wByDay = {}; S.weights.forEach(function(w){ wByDay[w.key] = w.lb; });
+
+    var pts = [], cum = 0, nTracked = 0, guard = 0;
+    for(var k = start; k <= end && guard < 1500; k = dayAdd(k,1), guard++){
+      if(netByDay[k]!=null){ cum += netByDay[k]; nTracked++; }
+      pts.push({ key:k, pred:(-cum/CAL_PER_LB),
+                 act:(wByDay[k]!=null ? round1(base.lb - wByDay[k]) : null),
+                 net:(netByDay[k]!=null ? netByDay[k] : null) });
+    }
+    if(pts.length < 2) return null;
+
+    var actIdx = []; pts.forEach(function(p,i){ if(p.act!=null) actIdx.push(i); });
+    if(actIdx.length < 2) return null;
+
+    // Day-to-day scale readings are mostly water. When you weigh in often
+    // enough for an average to mean something, smooth over a week — otherwise
+    // a single bloated morning swings the whole verdict. Sparse readings are
+    // left alone: a 7-day average over monthly weigh-ins would be inventing a
+    // curve we never measured.
+    var gaps = []; for(var i=1;i<actIdx.length;i++) gaps.push(actIdx[i]-actIdx[i-1]);
+    gaps.sort(function(a,b){ return a-b; });
+    var medGap = gaps.length ? gaps[Math.floor(gaps.length/2)] : 99;
+    var dense = (actIdx.length >= 10 && medGap <= 3);
+    if(dense){
+      actIdx.forEach(function(i){
+        var s=0, c=0;
+        for(var j=Math.max(0,i-3); j<=Math.min(pts.length-1,i+3); j++){ if(pts[j].act!=null){ s+=pts[j].act; c++; } }
+        pts[i].actSm = round1(s/c);
+      });
+    }
+    var plotted = function(p){ return (dense && p.actSm!=null) ? p.actSm : p.act; };
+
+    // Calibrate at the most recent weigh-in — the last point where both curves
+    // have a real value to compare.
+    var lastAct = null, predThen = null, lastActKey = null;
+    pts.forEach(function(p){ if(p.act!=null){ lastAct=plotted(p); predThen=p.pred; lastActKey=p.key; } });
+    var ratio = (predThen!=null && Math.abs(predThen) >= 1) ? (lastAct/predThen) : null;
+
+    return { pts:pts, start:start, end:end, baseline:base, dense:dense, plotted:plotted,
+             coverage:{tracked:nTracked, total:pts.length},
+             lastAct:lastAct, lastActKey:lastActKey, predThen:predThen, ratio:ratio,
+             predNow:pts[pts.length-1].pred };
+  }
+
   // Roll history days up into Mon-Sun weeks, summing net (intake − Oura burn).
   // Only days that have an Oura burn synced contribute — a deficit can't be
   // computed without it.
@@ -1111,8 +1228,201 @@
     return '<section class="card"><h2 class="h2">Weekly balance</h2>'+rows+
       '<p style="font-size:11px;color:var(--muted);margin:9px 0 0;line-height:1.45">Sum of each day\'s intake minus Oura burn, Mon–Sun. Only days with a synced burn count.</p></section>';
   }
+  // ── The deficit-vs-scale card ──────────────────────────────────────────────
+  function fmtLost(v){
+    var n = Math.abs(round1(v));
+    return {n:n.toFixed(1), word:(v<0?'gained':'lost')};
+  }
+  function trendVerdict(M){
+    if(M.ratio==null) return {tone:'muted', text:'Not enough weight change yet to compare. Come back once the model predicts a pound or two.'};
+    var r = M.ratio;
+    if(r < 0)    return {tone:'amber', text:'The scale moved the opposite way from the model. Over a short window that\'s usually water, not fat — but if it holds, the deficit isn\'t real.'};
+    if(r < 0.55) return {tone:'amber', text:'The scale is well behind the model. The usual cause is intake under-logged — untracked oils, drinks and bites — or an optimistic burn figure.'};
+    if(r < 0.85) return {tone:'amber', text:'The scale is running a little behind the model. Some of that is normal; a persistent gap points at under-logged intake or an overstated burn.'};
+    if(r <= 1.15) return {tone:'green', text:'Close match. Your logged intake and Oura burn are describing something real.'};
+    return {tone:'green', text:'You\'re losing faster than the model predicts. Either intake is over-logged, burn is understated, or some of the drop isn\'t fat.'};
+  }
+
+  function trendChartSVG(M){
+    var W=480, H=210, L=34, R=54, T=12, B=22;
+    var pts = M.pts, n = pts.length;
+    var vals = pts.map(function(p){return p.pred;}).concat(pts.filter(function(p){return p.act!=null;}).map(function(p){return p.act;})).concat([0]);
+    var plotted = M.plotted;
+    var lo = Math.min.apply(null,vals), hi = Math.max.apply(null,vals);
+    if(hi-lo < 2){ var mid=(hi+lo)/2; lo=mid-1; hi=mid+1; }
+    var pad = (hi-lo)*0.12; lo-=pad; hi+=pad;
+    var x = function(i){ return L + (n>1 ? (i/(n-1)) : 0)*(W-L-R); };
+    var y = function(v){ return T + (1-((v-lo)/(hi-lo)))*(H-T-B); };
+
+    var s = '<svg id="trendSvg" viewBox="0 0 '+W+' '+H+'" width="100%" style="display:block;overflow:visible" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Predicted weight loss from calorie deficit versus weighed loss">';
+
+    // Gridlines: solid hairlines, one step off surface, on clean pound values.
+    var step = (hi-lo)>24 ? 10 : (hi-lo)>10 ? 5 : (hi-lo)>4 ? 2 : 1;
+    for(var g=Math.ceil(lo/step)*step; g<=hi; g+=step){
+      var gy=y(g);
+      s += '<line x1="'+L+'" y1="'+gy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+gy.toFixed(1)+'" stroke="'+(Math.abs(g)<1e-9?'#D5CFC0':'#EDE8DC')+'" stroke-width="1"/>'+
+           '<text x="'+(L-6)+'" y="'+(gy+3.5).toFixed(1)+'" font-size="9.5" fill="#71776B" font-family="ui-monospace,monospace" text-anchor="end">'+g+'</text>';
+    }
+
+    // Predicted — continuous, one point per calendar day.
+    var dPred = pts.map(function(p,i){ return (i?'L':'M')+x(i).toFixed(1)+' '+y(p.pred).toFixed(1); }).join(' ');
+    s += '<path d="'+dPred+'" fill="none" stroke="'+C_PRED+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+
+    // Weighed — the trend line, plus every actual reading as a dot. The dots
+    // are the measurements; the line is what they mean. When readings are
+    // sparse the two are the same thing.
+    var actIdx = []; pts.forEach(function(p,i){ if(p.act!=null) actIdx.push(i); });
+    if(actIdx.length>1){
+      var dAct = actIdx.map(function(i,j){ return (j?'L':'M')+x(i).toFixed(1)+' '+y(plotted(pts[i])).toFixed(1); }).join(' ');
+      s += '<path d="'+dAct+'" fill="none" stroke="'+C_ACT+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    actIdx.forEach(function(i){
+      // Dense readings: small unringed dots, so ~90 of them read as a cloud
+      // around the trend instead of burying it. Sparse: full marker + ring.
+      s += M.dense
+        ? '<circle cx="'+x(i).toFixed(1)+'" cy="'+y(pts[i].act).toFixed(1)+'" r="1.9" fill="'+C_ACT+'" opacity="0.45"/>'
+        : '<circle cx="'+x(i).toFixed(1)+'" cy="'+y(pts[i].act).toFixed(1)+'" r="4" fill="'+C_ACT+'" stroke="#fff" stroke-width="2"/>';
+    });
+
+    // Direct end labels — the secondary encoding the CVD band obliges, and the
+    // fastest read of "how far apart did these two end up".
+    var lastA = actIdx.length ? actIdx[actIdx.length-1] : null;
+    var yP = y(pts[n-1].pred), yA = lastA!=null ? y(plotted(pts[lastA])) : null;
+    if(yA!=null && Math.abs(yP-yA) < 11){ var dir = yP<=yA ? -1 : 1; yP += dir*5.5; yA -= dir*5.5; }
+    // Anchor each label to where its own line actually ends. Weigh-ins often
+    // stop short of the last tracked day, and a label parked at the right
+    // margin then floats free of the line it belongs to.
+    var xP = W-R+7, xA = lastA!=null ? Math.min(W-R+7, x(lastA)+8) : 0;
+    s += '<text x="'+xP+'" y="'+(yP+3.5).toFixed(1)+'" font-size="10.5" font-weight="600" fill="#1E241C" font-family="ui-monospace,monospace">'+round1(pts[n-1].pred).toFixed(1)+'</text>';
+    if(yA!=null) s += '<text x="'+xA.toFixed(1)+'" y="'+(yA+3.5).toFixed(1)+'" font-size="10.5" font-weight="600" fill="#1E241C" font-family="ui-monospace,monospace">'+round1(M.lastAct).toFixed(1)+'</text>';
+
+    // x-axis: just the ends. Dates in between are the tooltip's job.
+    s += '<text x="'+L+'" y="'+(H-6)+'" font-size="9.5" fill="#71776B" font-family="ui-monospace,monospace">'+shortDay(M.start)+'</text>'+
+         '<text x="'+(W-R)+'" y="'+(H-6)+'" font-size="9.5" fill="#71776B" font-family="ui-monospace,monospace" text-anchor="end">'+shortDay(M.end)+'</text>';
+
+    // Crosshair + hit layer (wired up in wireTrend).
+    s += '<line id="trendCross" x1="0" y1="'+T+'" x2="0" y2="'+(H-B)+'" stroke="#B9B2A2" stroke-width="1" style="display:none"/>'+
+         '<rect id="trendHit" x="'+L+'" y="'+T+'" width="'+(W-L-R)+'" height="'+(H-T-B)+'" fill="transparent" style="cursor:crosshair"/>'+
+         '</svg>';
+    return s;
+  }
+  function shortDay(key){
+    var p = key.split('-').map(Number);
+    return new Date(p[0],p[1]-1,p[2]).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+  }
+
+  function trendTableHTML(M){
+    var rows = M.pts.filter(function(p){ return p.act!=null; });
+    return '<div style="max-height:230px;overflow-y:auto;margin-top:10px">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums">'+
+      '<thead><tr>'+['Weigh-in','Predicted','Actual','Gap'].map(function(t,i){
+        return '<th style="text-align:'+(i?'right':'left')+';padding:5px 4px;border-bottom:1px solid var(--border);font-family:var(--f-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600">'+t+'</th>';
+      }).join('')+'</tr></thead><tbody>'+
+      rows.map(function(p){
+        var a = M.plotted(p), gap = round1(a - p.pred);
+        return '<tr><td style="padding:5px 4px;border-bottom:1px solid var(--border)">'+shortDay(p.key)+'</td>'+
+          '<td style="text-align:right;padding:5px 4px;border-bottom:1px solid var(--border);font-family:var(--f-mono)">'+round1(p.pred).toFixed(1)+'</td>'+
+          '<td style="text-align:right;padding:5px 4px;border-bottom:1px solid var(--border);font-family:var(--f-mono)">'+round1(a).toFixed(1)+'</td>'+
+          '<td style="text-align:right;padding:5px 4px;border-bottom:1px solid var(--border);font-family:var(--f-mono);color:'+(Math.abs(gap)<1?'var(--muted)':'var(--ink)')+'">'+(gap>0?'+':'')+gap.toFixed(1)+'</td></tr>';
+      }).join('')+'</tbody></table><p class="note" style="margin:8px 0 0">Pounds lost since '+shortDay(M.baseline.key)+' ('+M.baseline.lb+' lb). Positive gap = losing faster than the model.'+
+      (M.dense?' Actual is a 7-day average — raw readings swing a couple of pounds on water alone.':'')+'</p></div>';
+  }
+
+  function viewTrend(){
+    var h = '<section class="card"><div class="row-between" style="align-items:baseline;margin-bottom:2px">'+
+      '<h2 class="h2" style="margin:0">Deficit vs. the scale</h2></div>';
+
+    if(!S.historyLoaded){
+      return h+'<p class="empty" style="text-align:left;padding:8px 0 0">Reading your history…</p></section>';
+    }
+    if(S.weights.length < 2){
+      return h+'<p class="empty" style="text-align:left;padding:8px 0 0">Log at least two weigh-ins in <a href="vitals.html" style="color:var(--green);font-weight:600">Vitals</a> and this will compare your tracked deficit against what the scale actually did.</p></section>';
+    }
+    var M = deficitModel();
+    if(!M){
+      return h+'<p class="empty" style="text-align:left;padding:8px 0 0">Not enough overlap yet. This needs days where both your food is logged and Oura has synced a burn figure, spanning at least two weigh-ins.</p></section>';
+    }
+
+    var P = fmtLost(M.predNow), A = fmtLost(M.lastAct);
+    var v = trendVerdict(M);
+    var cov = Math.round((M.coverage.tracked/M.coverage.total)*100);
+
+    h += '<p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.5">At '+CAL_PER_LB.toLocaleString()+' cal to the pound, since '+shortDay(M.start)+'.</p>';
+
+    h += '<div style="display:flex;gap:10px;margin-bottom:14px">'+
+      ['<div style="flex:1;background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:10px 12px">'+
+         '<div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:3px;background:'+C_PRED+';border-radius:2px;flex-shrink:0"></span>'+
+         '<span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:var(--f-mono)">Model</span></div>'+
+         '<div style="font-family:var(--f-display);font-size:26px;font-weight:600;line-height:1.15;margin-top:3px">'+P.n+'<span style="font-size:12px;color:var(--muted);font-weight:500;margin-left:3px">lb '+P.word+'</span></div></div>',
+       '<div style="flex:1;background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:10px 12px">'+
+         '<div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:3px;background:'+C_ACT+';border-radius:2px;flex-shrink:0"></span>'+
+         '<span style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:var(--f-mono)">Scale</span></div>'+
+         '<div style="font-family:var(--f-display);font-size:26px;font-weight:600;line-height:1.15;margin-top:3px">'+A.n+'<span style="font-size:12px;color:var(--muted);font-weight:500;margin-left:3px">lb '+A.word+'</span></div></div>'
+      ].join('')+'</div>';
+
+    h += '<div style="position:relative">'+(S.trendTable ? trendTableHTML(M) : trendChartSVG(M))+
+      '<div id="trendTip" style="position:absolute;display:none;pointer-events:none;background:var(--green-deep);color:#fff;padding:6px 9px;border-radius:8px;font-size:11px;font-family:var(--f-mono);line-height:1.5;white-space:nowrap;z-index:20;box-shadow:0 4px 14px rgba(44,69,48,.28)"></div></div>';
+
+    if(!S.trendTable){
+      h += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">'+
+        '<span style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)"><span style="width:14px;height:3px;background:'+C_PRED+';border-radius:2px"></span>Predicted from deficit</span>'+
+        '<span style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)"><span style="width:14px;height:3px;background:'+C_ACT+';border-radius:2px"></span>'+(M.dense?'Weighed (7-day avg)':'Weighed')+'</span></div>';
+    }
+
+    var vcol = v.tone==='green' ? 'var(--green-deep)' : v.tone==='amber' ? 'var(--amber)' : 'var(--muted)';
+    h += '<div style="background:var(--green-tint);border-radius:10px;padding:11px 13px;margin-top:14px">'+
+      (M.ratio!=null ? '<div style="font-family:var(--f-mono);font-size:13px;font-weight:600;color:'+vcol+';margin-bottom:3px">The scale is at '+Math.round(M.ratio*100)+'% of the model</div>' : '')+
+      '<div style="font-size:12.5px;color:var(--green-deep);line-height:1.5">'+v.text+'</div></div>';
+
+    // Coverage is the first thing that invalidates the comparison, so it gets
+    // stated every time — not just when it's bad.
+    h += '<div class="row-between" style="margin-top:10px;align-items:center">'+
+      '<span style="font-size:11px;color:'+(cov<70?'var(--amber)':'var(--muted)')+';font-family:var(--f-mono)">'+
+        M.coverage.tracked+' of '+M.coverage.total+' days tracked ('+cov+'%)</span>'+
+      '<button class="link" onclick="S.trendTable=!S.trendTable;render()">'+(S.trendTable?'show chart':'show table')+'</button></div>';
+    if(cov < 70) h += '<p style="font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.45">Untracked days count as neither deficit nor surplus, so the model only reflects the days you logged. Below about 70% coverage the comparison is more noise than signal.</p>';
+
+    return h+'</section>';
+  }
+
+  // Crosshair + tooltip. Wired after every render, since render() replaces the
+  // whole subtree and with it any listeners.
+  function wireTrend(){
+    var svg = el('trendSvg'), hit = el('trendHit'), tip = el('trendTip'), cross = el('trendCross');
+    if(!svg||!hit||!tip||!cross) return;
+    var M = deficitModel(); if(!M) return;
+    var W=480, L=34, R=54, n=M.pts.length;
+    function at(clientX){
+      var r = svg.getBoundingClientRect();
+      var vx = ((clientX - r.left)/r.width)*W;                    // px → viewBox units
+      var f  = (vx - L)/(W-L-R);
+      return Math.max(0, Math.min(n-1, Math.round(f*(n-1))));
+    }
+    function show(e){
+      var pt = (e.touches && e.touches[0]) || e;
+      var i = at(pt.clientX), p = M.pts[i];
+      var x = L + (n>1?(i/(n-1)):0)*(W-L-R);
+      cross.setAttribute('x1',x); cross.setAttribute('x2',x); cross.style.display='';
+      tip.innerHTML = '<b>'+shortDay(p.key)+'</b><br>model '+round1(p.pred).toFixed(1)+' lb'+
+        (p.act!=null ? '<br>scale '+round1(M.plotted(p)).toFixed(1)+' lb' : '')+
+        (p.net!=null ? '<br>'+(p.net<0?'−':'+')+Math.abs(Math.round(p.net)).toLocaleString()+' cal' : '<br>not tracked');
+      tip.style.display='block';
+      var pct = (x/W)*100;
+      tip.style.left = pct+'%';
+      tip.style.top = '0px';
+      tip.style.transform = 'translate('+(pct>62?'-100%':'0')+',0)';
+    }
+    function hide(){ cross.style.display='none'; tip.style.display='none'; }
+    hit.addEventListener('mousemove', show);
+    hit.addEventListener('mouseleave', hide);
+    hit.addEventListener('touchstart', function(e){ show(e); }, {passive:true});
+    hit.addEventListener('touchmove', function(e){ show(e); }, {passive:true});
+    hit.addEventListener('touchend', hide);
+  }
+
   function viewHistory(){
-    var h = viewWeeklyDeficit();
+    var h = viewTrend();
+    h += viewWeeklyDeficit();
     h += '<section class="card"><h2 class="h2">History</h2>';
     if(!S.history.length){ h += '<p class="empty" style="text-align:left;padding:0">No days logged yet.</p>'; }
     else h += S.history.map(function(d){
@@ -1151,7 +1461,7 @@
     S.userId = profile.user.id;
     var st = await sb.from('nutrition_settings').select('calorie_target').eq('user_id',S.userId).maybeSingle();
     S.target = st.data ? st.data.calorie_target : null;
-    await Promise.all([loadLog(), loadUsuals(), loadRecipes(), loadEnergy()]);
+    await Promise.all([loadLog(), loadUsuals(), loadRecipes(), loadEnergy(), loadWeights()]);
     S.loaded = true;
     render();
   })();
