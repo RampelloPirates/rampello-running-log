@@ -311,6 +311,39 @@
     }
     .del-run-btn:hover { background: var(--danger); color: var(--paper); }
 
+    /* re-split editor */
+    .split-btn {
+      background: var(--paper); color: var(--green); border: 1px solid var(--silver);
+      padding: 0.45rem 0.85rem; font-size: 0.8rem; font-weight: 700;
+      border-radius: 3px; cursor: pointer; font-family: var(--font-body); letter-spacing: 0.5px;
+    }
+    .split-btn:hover { background: var(--bone); border-color: var(--green); }
+    .split-box { background: var(--bone); border: 1px solid var(--silver); border-radius: 6px; padding: 0.8rem; margin-top: 0.85rem; }
+    .split-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.85rem; }
+    .split-modes { display: inline-flex; gap: 2px; background: var(--paper); border: 1px solid var(--silver); border-radius: 5px; padding: 2px; }
+    .sp-mode { border: none; background: transparent; font-family: var(--font-body); font-size: 0.72rem; font-weight: 700;
+               color: var(--slate); padding: 0.3rem 0.55rem; border-radius: 4px; cursor: pointer; }
+    .sp-mode.on { background: var(--green); color: var(--paper); }
+    .split-hint { font-size: 0.72rem; color: var(--slate); margin: 0.45rem 0 0.6rem; line-height: 1.5; }
+    .sp-amt { width: 62px; font-family: var(--font-body); font-size: 0.8rem; text-align: right;
+              border: 1px solid var(--silver); border-radius: 4px; padding: 0.28rem 0.35rem; background: var(--paper); }
+    .sp-type { font-family: var(--font-body); font-size: 0.75rem; border: 1px solid var(--silver);
+               border-radius: 4px; padding: 0.25rem; background: var(--paper); color: var(--black); }
+    .sp-auto { font-size: 0.75rem; color: var(--slate); }
+    .sp-auto em { font-size: 0.62rem; font-style: normal; color: var(--slate-2); }
+    .sp-del { border: none; background: none; color: var(--slate-2); font-size: 1rem; cursor: pointer; padding: 0 0.2rem; }
+    .sp-del:hover { color: var(--danger); }
+    .split-foot { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+                  flex-wrap: wrap; margin-top: 0.6rem; font-size: 0.75rem; }
+    .split-rem { color: var(--slate); }
+    .split-over { color: var(--danger); font-weight: 700; }
+    .split-foot button { font-family: var(--font-body); font-size: 0.75rem; font-weight: 700; border-radius: 4px;
+                         padding: 0.35rem 0.7rem; cursor: pointer; margin-left: 0.35rem; }
+    .sp-add, .sp-cancel { background: var(--paper); color: var(--slate); border: 1px solid var(--silver); }
+    .sp-save { background: var(--green); color: var(--paper); border: 1px solid var(--green); }
+    .sp-save:disabled { opacity: 0.45; cursor: default; }
+    .split-total { font-size: 0.68rem; color: var(--slate-2); margin-top: 0.5rem; }
+
     /* change-password modal */
     .pw-modal { position: fixed; inset: 0; background: rgba(30,36,28,0.55); display: none; align-items: center; justify-content: center; z-index: 200; padding: 1rem; }
     .pw-modal.show { display: flex; }
@@ -609,10 +642,14 @@
       }));
     }
 
-    function rerenderWithFilter() {
+    function currentFiltered() {
       let filtered = allRunsInRange;
       if (activeType !== 'all') filtered = filtered.filter(r => (r.activity_type || 'run') === activeType);
       if (activeType === 'run' && activeSub !== 'all') filtered = filtered.filter(r => r.sub_type === activeSub);
+      return filtered;
+    }
+    function rerenderWithFilter() {
+      const filtered = currentFiltered();
       renderStats(filtered);
       renderPaceByType(filtered);
       renderRunList(filtered);
@@ -743,6 +780,18 @@
           deleteRun(btn.dataset.delId, btn);
         });
       });
+
+      wrap.querySelectorAll('.split-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const run = allRunsInRange.find(r => r.id === btn.dataset.splitId);
+          if (run) openSplit(run);
+        });
+      });
+      if (split) {
+        const run = allRunsInRange.find(r => r.id === split.runId);
+        if (run) wireSplit(run);
+      }
     }
 
     async function deleteRun(runId, btn) {
@@ -789,6 +838,69 @@
         hr: a.hrN ? Math.round(a.hrSum / a.hrN) : null,
         hrMax: a.hrMax || null,
       }));
+    }
+
+    // ---- re-splitting a run from its sample stream -------------------------
+    // Garmin and Strava hand back "2.75 miles" plus even mile splits, which is
+    // not how the run was actually structured. This lets you re-cut it the way
+    // you ran it — half a mile of warmup, two miles building, a quarter easy —
+    // by entering only the boundaries. Time, pace, cadence and HR for each
+    // piece are read back out of the stream rather than typed.
+
+    // Interpolate the (t, mi) pair at an exact cumulative distance or time.
+    // Sample points land wherever the downsampler put them; without
+    // interpolating, a "0.5 mi" boundary would silently become 0.47 or 0.53.
+    function atValue(samples, mode, target) {
+      const n = samples.length;
+      if (!n) return null;
+      if (target <= samples[0][mode]) return { t: samples[0].t, mi: samples[0].mi };
+      for (let i = 1; i < n; i++) {
+        if (samples[i][mode] >= target) {
+          const a = samples[i - 1], b = samples[i];
+          const span = b[mode] - a[mode];
+          const f = span > 0 ? (target - a[mode]) / span : 0;
+          return { t: a.t + f * (b.t - a.t), mi: a.mi + f * (b.mi - a.mi) };
+        }
+      }
+      const last = samples[n - 1];
+      return { t: last.t, mi: last.mi };
+    }
+
+    // Cut the stream at cumulative boundaries and measure each piece.
+    // `cuts` are cumulative values in `mode` units ('mi' or 't'); the segment i
+    // spans (cuts[i-1], cuts[i]].
+    function sliceStream(samples, cuts, mode) {
+      const pts = (samples || [])
+        .filter(p => p && p.t != null && p.mi != null)
+        .map(p => ({ t: Number(p.t), mi: Number(p.mi), hr: p.hr == null ? null : Number(p.hr), cad: p.cad == null ? null : Number(p.cad) }))
+        .filter(p => isFinite(p.t) && isFinite(p.mi));
+      if (pts.length < 2) return null;
+
+      let prev = 0;
+      return cuts.map(cut => {
+        const s0 = atValue(pts, mode, prev), s1 = atValue(pts, mode, cut);
+        prev = cut;
+        const miles = Math.max(0, s1.mi - s0.mi);
+        const seconds = Math.max(0, s1.t - s0.t);
+        // Time-weight the averages: sample spacing isn't perfectly uniform, and
+        // a plain mean would over-count wherever points bunch up.
+        let hrSum = 0, hrT = 0, cadSum = 0, cadT = 0, hrMax = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          if (p.t < s0.t || p.t > s1.t) continue;
+          const nextT = (i + 1 < pts.length) ? Math.min(pts[i + 1].t, s1.t) : s1.t;
+          const dt = Math.max(nextT - Math.max(p.t, s0.t), 0.001);
+          if (p.hr != null) { hrSum += p.hr * dt; hrT += dt; hrMax = Math.max(hrMax, p.hr); }
+          if (p.cad != null) { cadSum += p.cad * dt; cadT += dt; }
+        }
+        return {
+          miles, seconds,
+          pace: (miles > 0 && seconds > 0) ? seconds / miles : null,
+          cad: cadT ? Math.round(cadSum / cadT) : null,
+          hr: hrT ? Math.round(hrSum / hrT) : null,
+          hrMax: hrMax || null,
+        };
+      });
     }
 
     // Summarize segments grouped by type (e.g. interval / rest) — time-weighted
@@ -884,6 +996,207 @@
       return `<div style="margin-bottom:0.5rem;">${cad}${hr}</div>`;
     }
 
+    // ---- the split editor --------------------------------------------------
+    const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown'];
+    let split = null;   // { runId, mode:'mi'|'t', rows:[{type, amount}] }
+
+    function runTotals(run) {
+      const s = (run.samples || []).filter(p => p && p.mi != null && p.t != null);
+      const lastMi = s.length ? Number(s[s.length - 1].mi) : Number(run.distance_miles || 0);
+      const lastT = s.length ? Number(s[s.length - 1].t) : Number(run.duration_seconds || 0);
+      return { miles: lastMi || 0, seconds: lastT || 0 };
+    }
+    // What the user typed, in the units of the active mode.
+    function splitAmount(row, mode) {
+      const v = parseFloat(row.amount);
+      if (!(v > 0)) return 0;
+      return mode === 'mi' ? v : v * 60;      // time is entered in minutes
+    }
+    // Cumulative cut points. The final segment always runs to the end of the
+    // stream, so the run is fully accounted for and nothing is silently lost.
+    function splitCuts(run) {
+      const tot = runTotals(run);
+      const cap = split.mode === 'mi' ? tot.miles : tot.seconds;
+      const cuts = [];
+      let acc = 0;
+      split.rows.forEach((r, i) => {
+        if (i === split.rows.length - 1) { cuts.push(cap); return; }
+        acc = Math.min(cap, acc + splitAmount(r, split.mode));
+        cuts.push(acc);
+      });
+      return cuts;
+    }
+    function splitRemaining(run) {
+      const tot = runTotals(run);
+      const cap = split.mode === 'mi' ? tot.miles : tot.seconds;
+      let acc = 0;
+      split.rows.forEach((r, i) => { if (i < split.rows.length - 1) acc += splitAmount(r, split.mode); });
+      return cap - acc;
+    }
+
+    function renderSplitEditor(run) {
+      const tot = runTotals(run);
+      const cuts = splitCuts(run);
+      const out = sliceStream(run.samples, cuts, split.mode) || [];
+      const rem = splitRemaining(run);
+      const unit = split.mode === 'mi' ? 'mi' : 'min';
+      const over = rem < -0.01;
+
+      const rows = split.rows.map((r, i) => {
+        const c = out[i] || {};
+        const isLast = i === split.rows.length - 1;
+        return `
+          <tr>
+            <td>
+              <select class="sp-type" data-i="${i}">
+                ${SEG_TYPES.map(t => `<option value="${t}"${r.type === t ? ' selected' : ''}>${t}</option>`).join('')}
+              </select>
+            </td>
+            <td class="num">
+              ${isLast
+                ? `<span class="sp-auto" title="The last piece always runs to the end of the run">${split.mode === 'mi' ? formatMiles(c.miles || 0) : ((c.seconds||0)/60).toFixed(1)} ${unit}<br><em>rest of run</em></span>`
+                : `<input class="sp-amt" data-i="${i}" inputmode="decimal" value="${escapeHtml(r.amount)}" placeholder="0">`}
+            </td>
+            <td class="num">${c.miles ? formatMiles(c.miles) + ' mi' : '—'}</td>
+            <td class="num">${c.seconds ? formatDuration(Math.round(c.seconds)) : '—'}</td>
+            <td class="num"><strong>${formatPace(c.pace)}</strong></td>
+            <td class="num">${c.cad || '—'}</td>
+            <td class="num">${c.hr || '—'}</td>
+            <td class="num">${split.rows.length > 1 ? `<button class="sp-del" data-i="${i}" title="Remove">×</button>` : ''}</td>
+          </tr>`;
+      }).join('');
+
+      return `
+        <div class="split-box">
+          <div class="split-head">
+            <strong>Re-split this run</strong>
+            <span class="split-modes">
+              <button class="sp-mode${split.mode === 'mi' ? ' on' : ''}" data-mode="mi">by distance</button>
+              <button class="sp-mode${split.mode === 't' ? ' on' : ''}" data-mode="t">by time</button>
+            </span>
+          </div>
+          <p class="split-hint">Enter how long each piece was. Time, pace, cadence and HR are read from the run's own stream — you don't type them. The last piece takes whatever's left.</p>
+          <table class="seg-mini-table">
+            <thead><tr><th>Type</th><th class="num">${split.mode === 'mi' ? 'Distance' : 'Time'}</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Cad</th><th class="num">HR</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="split-foot">
+            <span class="${over ? 'split-over' : 'split-rem'}">${
+              over
+                ? `Over by ${split.mode === 'mi' ? formatMiles(-rem) + ' mi' : (-rem / 60).toFixed(1) + ' min'} — trim a piece`
+                : `${split.mode === 'mi' ? formatMiles(Math.max(0, rem)) + ' mi' : (Math.max(0, rem) / 60).toFixed(1) + ' min'} left for the last piece`
+            }</span>
+            <span>
+              <button class="sp-add">+ add piece</button>
+              <button class="sp-cancel">Cancel</button>
+              <button class="sp-save"${over ? ' disabled' : ''}>Save segments</button>
+            </span>
+          </div>
+          <div class="split-total">Run total ${formatMiles(tot.miles)} mi · ${formatDuration(Math.round(tot.seconds))}</div>
+        </div>`;
+    }
+
+    async function saveSplit(run, btn) {
+      const cuts = splitCuts(run);
+      const out = sliceStream(run.samples, cuts, split.mode);
+      if (!out) { alert('This run has no sample stream to measure against.'); return; }
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        // Replace wholesale: re-splitting means the old cut points are gone.
+        const del = await sb.from('run_segments').delete().eq('run_id', run.id);
+        if (del.error) throw del.error;
+        const rows = out.map((c, i) => ({
+          run_id: run.id,
+          segment_order: i + 1,
+          segment_type: split.rows[i].type,
+          distance_miles: Math.round(c.miles * 100) / 100,
+          duration_seconds: Math.round(c.seconds),
+          avg_cadence: c.cad,
+          avg_hr: c.hr,
+          max_hr: c.hrMax,
+        })).filter(r => r.duration_seconds > 0);
+        if (rows.length) {
+          const ins = await sb.from('run_segments').insert(rows);
+          if (ins.error) throw ins.error;
+        }
+        split = null;
+        await loadAll();
+        // Re-open the run we were just editing.
+        const detail = document.querySelector(`[data-segments-for="${run.id}"]`);
+        if (detail) detail.classList.add('show');
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'Save segments';
+        alert('Could not save the segments: ' + e.message);
+      }
+    }
+
+    function openSplit(run) {
+      const segs = (run.run_segments || []).sort((a, b) => (a.segment_order || 0) - (b.segment_order || 0));
+      // Seed from whatever is already there so an existing split can be nudged
+      // rather than retyped; otherwise start with two pieces to fill in.
+      const rows = segs.length
+        ? segs.map(s => ({ type: s.segment_type || 'easy', amount: String(Math.round(Number(s.distance_miles || 0) * 100) / 100) }))
+        : [{ type: 'warmup', amount: '' }, { type: 'easy', amount: '' }];
+      split = { runId: run.id, mode: 'mi', rows };
+      renderRunList(currentFiltered());
+      const detail = document.querySelector(`[data-segments-for="${run.id}"]`);
+      if (detail) detail.classList.add('show');
+    }
+
+    // Patch just the editor in place, so typing doesn't lose focus mid-number.
+    function refreshSplit(run) {
+      const box = document.querySelector(`[data-segments-for="${run.id}"] .split-box`);
+      if (!box) return;
+      const active = document.activeElement;
+      const key = active && active.classList.contains('sp-amt') ? active.dataset.i : null;
+      const caret = key != null ? active.selectionStart : null;
+      box.outerHTML = renderSplitEditor(run);
+      wireSplit(run);
+      if (key != null) {
+        const again = document.querySelector(`[data-segments-for="${run.id}"] .sp-amt[data-i="${key}"]`);
+        if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (e) {} }
+      }
+    }
+
+    function wireSplit(run) {
+      const box = document.querySelector(`[data-segments-for="${run.id}"] .split-box`);
+      if (!box) return;
+      box.addEventListener('click', e => e.stopPropagation());   // don't collapse the row
+      box.querySelectorAll('.sp-mode').forEach(b => b.addEventListener('click', () => {
+        if (split.mode === b.dataset.mode) return;
+        split.mode = b.dataset.mode;
+        split.rows.forEach(r => { r.amount = ''; });   // the numbers meant miles; they don't mean minutes
+        refreshSplit(run);
+      }));
+      box.querySelectorAll('.sp-amt').forEach(inp => inp.addEventListener('input', () => {
+        split.rows[Number(inp.dataset.i)].amount = inp.value;
+        refreshSplit(run);
+      }));
+      box.querySelectorAll('.sp-type').forEach(sel => sel.addEventListener('change', () => {
+        split.rows[Number(sel.dataset.i)].type = sel.value;
+        refreshSplit(run);
+      }));
+      box.querySelectorAll('.sp-del').forEach(b => b.addEventListener('click', () => {
+        split.rows.splice(Number(b.dataset.i), 1);
+        if (!split.rows.length) split.rows = [{ type: 'easy', amount: '' }];
+        refreshSplit(run);
+      }));
+      const add = box.querySelector('.sp-add');
+      if (add) add.addEventListener('click', () => {
+        split.rows.push({ type: 'cooldown', amount: '' });
+        refreshSplit(run);
+      });
+      const cancel = box.querySelector('.sp-cancel');
+      if (cancel) cancel.addEventListener('click', () => {
+        split = null;
+        renderRunList(currentFiltered());
+        const d = document.querySelector(`[data-segments-for="${run.id}"]`);
+        if (d) d.classList.add('show');
+      });
+      const save = box.querySelector('.sp-save');
+      if (save) save.addEventListener('click', () => saveSplit(run, save));
+    }
+
     function renderSegmentDetail(segs, run) {
       let body = '';
       body += renderCharts(run);
@@ -951,6 +1264,17 @@
 
       if (run.notes) {
         body += `<div class="run-notes">${escapeHtml(run.notes)}</div>`;
+      }
+
+      // Re-splitting needs a stream to measure against; a summary-only row has
+      // nothing to derive the times from, so the button stays hidden there.
+      const canSplit = Array.isArray(run.samples) && run.samples.length > 5;
+      if (split && split.runId === run.id) {
+        body += renderSplitEditor(run);
+      } else if (canSplit) {
+        body += `<div class="run-actions" style="border:none;padding-bottom:0">
+          <button class="split-btn" data-split-id="${run.id}">✂ Re-split this run</button>
+        </div>`;
       }
 
       body += `<div class="run-actions">
