@@ -1738,6 +1738,26 @@
       .eq('athlete_id', athlete.id)
       .order('run_date', {ascending:true});
     RUNS = (r.data||[]).filter(function(x){ return x.run_date; });
+
+    // Segments marked as walks come out of distance and duration everywhere.
+    // Done here, once, so the calendar, the weekly bars, the monthly totals and
+    // every derived metric all agree about what a run was.
+    var wq = await sb.from('run_segments')
+      .select('run_id, distance_miles, duration_seconds')
+      .eq('segment_type', 'walk');
+    var walkBy = {};
+    (wq.data||[]).forEach(function(w){
+      var acc = walkBy[w.run_id] = walkBy[w.run_id] || {mi:0, sec:0};
+      acc.mi  += Number(w.distance_miles)||0;
+      acc.sec += Number(w.duration_seconds)||0;
+    });
+    RUNS.forEach(function(x){
+      var w = walkBy[x.id];
+      if(!w) return;
+      x.walk_miles = w.mi; x.walk_seconds = w.sec;
+      if(x.distance_miles!=null)   x.distance_miles   = Math.max(0, Number(x.distance_miles) - w.mi);
+      if(x.duration_seconds!=null) x.duration_seconds = Math.max(0, Number(x.duration_seconds) - w.sec);
+    });
     render();
     // Sample streams are heavy, so the log paints first and the fitness card
     // fills in behind it.

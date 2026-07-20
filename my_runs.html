@@ -225,6 +225,7 @@
     .seg-fartlek { background:#fce4ec; color:#880e4f; }
     .seg-strides { background:#e0f7fa; color:#006064; }
     .seg-cooldown { background:#e0e0e0; color:#424242; }
+    .seg-walk   { background:#f3e5d8; color:#8a4b12; }
 
     /* run-list */
     .run-list { padding: 0; }
@@ -711,11 +712,18 @@
     }
 
     function renderStats(runs) {
-      let totalSec = 0, totalMiles = 0, pMiles = 0, pSec = 0;
+      let totalSec = 0, totalMiles = 0, pMiles = 0, pSec = 0, walkMi = 0, walkSec = 0;
       runs.forEach(r => {
-        if (r.duration_seconds) totalSec += Number(r.duration_seconds);
-        if (r.distance_miles) totalMiles += Number(r.distance_miles);
-        if (r.distance_miles && r.duration_seconds) { pMiles += Number(r.distance_miles); pSec += Number(r.duration_seconds); }
+        // Marked walk segments come out of the totals — that is the whole point
+        // of marking them.
+        const w = runningOnly(r.run_segments);
+        const wMi = w ? w.walkMi : 0, wSec = w ? w.walkSec : 0;
+        walkMi += wMi; walkSec += wSec;
+        if (r.duration_seconds) totalSec += Number(r.duration_seconds) - wSec;
+        if (r.distance_miles) totalMiles += Number(r.distance_miles) - wMi;
+        if (r.distance_miles && r.duration_seconds) {
+          pMiles += Number(r.distance_miles) - wMi; pSec += Number(r.duration_seconds) - wSec;
+        }
       });
       const tiles = [
         `<div class="stat"><div class="label">Activities</div><div class="value">${runs.length}</div></div>`,
@@ -727,6 +735,9 @@
         tiles.push(`<div class="stat"><div class="label">Total miles</div><div class="value">${totalMiles ? formatMiles(totalMiles) + '<span class="unit">mi</span>' : '—'}</div></div>`);
         const pace = (pMiles > 0 && pSec > 0) ? pSec / pMiles : null;
         tiles.push(`<div class="stat"><div class="label">Avg pace</div><div class="value">${pace ? formatPace(pace) : '—'}</div></div>`);
+      }
+      if (walkSec > 0) {
+        tiles.push(`<div class="stat"><div class="label">Walking</div><div class="value" style="color:var(--slate)">${formatDuration(Math.round(walkSec))}</div><div class="label" style="text-transform:none;letter-spacing:0">excluded${walkMi ? ' · ' + formatMiles(walkMi) + ' mi' : ''}</div></div>`);
       }
       document.getElementById('stats').innerHTML = tiles.join('');
     }
@@ -921,6 +932,25 @@
       return { t: last.t, mi: last.mi };
     }
 
+    // Segments you marked as walks. These are authoritative — an auto-detector
+    // guesses from cadence, but a mark is a statement. 'rest' is deliberately
+    // NOT excluded: jogging between intervals is still running.
+    function runningOnly(segs) {
+      if (!segs || !segs.length) return null;
+      const walks = segs.filter(x => x.segment_type === 'walk');
+      if (!walks.length) return null;
+      const sum = (list, f) => list.reduce((a, x) => a + (Number(x[f]) || 0), 0);
+      const runMi  = sum(segs, 'distance_miles')  - sum(walks, 'distance_miles');
+      const runSec = sum(segs, 'duration_seconds') - sum(walks, 'duration_seconds');
+      return {
+        runMi, runSec,
+        walkMi: sum(walks, 'distance_miles'),
+        walkSec: sum(walks, 'duration_seconds'),
+        walkCount: walks.length,
+        pace: (runMi > 0 && runSec > 0) ? runSec / runMi : null,
+      };
+    }
+
     // ---- walk detection ---------------------------------------------------
     // Walk breaks wreck a pace figure: the distance still counts but the time
     // balloons, so an 8:30 run with two minutes of walking reports 9:15 and
@@ -1095,7 +1125,9 @@
     }
 
     // ---- the split editor --------------------------------------------------
-    const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown'];
+    // 'walk' last: it is the one type that is not a kind of running, and it is
+// the one that gets excluded from pace and mileage.
+    const SEG_TYPES = ['warmup','easy','tempo','threshold','interval','rest','hill','fartlek','strides','cooldown','walk'];
     let split = null;   // { runId, mode:'mi'|'t', rows:[{type, amount}] }
 
     function runTotals(run) {
@@ -1377,12 +1409,17 @@
       // Walk breaks, separated out. Shown rather than silently applied: the
       // headline distance still has to match what Strava and Garmin say, or
       // the numbers look broken next to the watch.
-      const ws = walkSplit(run.samples);
+      const marked = runningOnly(segs);
+      const ws = marked || walkSplit(run.samples);
       if (ws) {
+        const runMi = marked ? marked.runMi : ws.runMi;
+        const runSec = marked ? marked.runSec : ws.runSec;
+        const pace = marked ? marked.pace : ws.runPace;
         body += `<div class="walk-note">
-          <strong>Running only:</strong> ${formatMiles(ws.runMi)} mi in ${formatDuration(Math.round(ws.runSec))}
-          at <strong>${formatPace(ws.runPace)}</strong>
-          <span class="walk-sub">· ${formatDuration(Math.round(ws.walkSec))} walking (${formatMiles(ws.walkMi)} mi) left out</span>
+          <strong>Running only:</strong> ${formatMiles(runMi)} mi in ${formatDuration(Math.round(runSec))}
+          at <strong>${formatPace(pace)}</strong>
+          <span class="walk-sub">· ${formatDuration(Math.round(ws.walkSec))} walking (${formatMiles(ws.walkMi)} mi) left out${
+            marked ? ` — ${marked.walkCount} segment${marked.walkCount === 1 ? '' : 's'} you marked` : ' — detected from cadence'}</span>
         </div>`;
       }
 
