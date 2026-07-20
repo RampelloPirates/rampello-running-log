@@ -324,6 +324,21 @@
     }
     .del-run-btn:hover { background: var(--danger); color: var(--paper); }
 
+    .gym-cta { margin-top: 0.7rem; padding: 0.8rem; background: var(--paper);
+               border: 1px dashed var(--silver); border-radius: 6px; text-align: center; }
+    .gym-cta p { margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--slate); }
+    .gym-btn { display: inline-block; background: var(--green); color: var(--paper);
+               padding: 0.45rem 0.9rem; border-radius: 4px; font-size: 0.8rem; font-weight: 700;
+               text-decoration: none; letter-spacing: 0.5px; }
+    .gym-link { margin-top: 0.5rem; text-align: right; }
+    .gym-link a { color: var(--green); font-size: 0.78rem; font-weight: 700; text-decoration: none; }
+    .walk-note {
+      margin-top: 0.7rem; padding: 0.55rem 0.75rem;
+      background: var(--paper); border: 1px solid var(--silver-2); border-left: 3px solid var(--green);
+      border-radius: 0 4px 4px 0; font-size: 0.85rem;
+    }
+    .walk-sub { color: var(--slate-2); font-size: 0.78rem; }
+
     /* re-split editor */
     .split-btn {
       background: var(--paper); color: var(--green); border: 1px solid var(--silver);
@@ -595,6 +610,7 @@
     let activeType = 'all';
     let activeSub = 'all';
     let allRunsInRange = [];
+    let gymByRun = {};
 
     // Activity + sub-type vocabularies (mirror log_run.html and the sync worker).
     const ACT_LABEL = { run:'Run', ride:'Ride', swim:'Swim', walk:'Walk', hike:'Hike', strength:'Strength', workout:'Workout', other:'Other' };
@@ -629,6 +645,20 @@
       }
 
       allRunsInRange = runs || [];
+
+      // Gym sessions attached to these activities. A strength workout recorded
+      // on the watch carries duration and heart rate but nothing about what was
+      // lifted; this is the other half.
+      gymByRun = {};
+      const strengthIds = allRunsInRange
+        .filter(r => ['strength','workout'].includes(r.activity_type || ''))
+        .map(r => r.id);
+      if (strengthIds.length) {
+        const { data: sess } = await sb.from('workout_sessions')
+          .select('id, run_id, muscle_group, workout_sets(exercise, equipment, set_no, reps, weight, unit)')
+          .in('run_id', strengthIds);
+        (sess || []).forEach(x => { if (x.run_id) gymByRun[x.run_id] = x; });
+      }
       // A range change can leave an active type/sub that no longer exists.
       if (activeType !== 'all' && !allRunsInRange.some(r => (r.activity_type || 'run') === activeType)) { activeType = 'all'; activeSub = 'all'; }
       buildTypeChips();
@@ -891,6 +921,41 @@
       return { t: last.t, mi: last.mi };
     }
 
+    // ---- walk detection ---------------------------------------------------
+    // Walk breaks wreck a pace figure: the distance still counts but the time
+    // balloons, so an 8:30 run with two minutes of walking reports 9:15 and
+    // looks like a bad day. Cadence is what separates them — running sits
+    // around 160–185 spm, walking around 95–125 — and it beats using pace,
+    // which can't tell a walk from a slow grind up a hill. Pace is only the
+    // fallback for streams with no cadence at all.
+    const WALK_CAD_MAX = 130;     // spm; below this you are not running
+    const WALK_PACE_MIN = 900;    // sec/mile; 15:00 pace, used only without cadence
+    const WALK_MIN_SECONDS = 30;  // ignore a stray sample or two
+
+    function walkSplit(samples) {
+      const pts = (samples || [])
+        .filter(p => p && p.t != null && p.mi != null)
+        .map(p => ({ t: Number(p.t), mi: Number(p.mi), cad: p.cad == null ? null : Number(p.cad) }))
+        .filter(p => isFinite(p.t) && isFinite(p.mi));
+      if (pts.length < 3) return null;
+
+      let runMi = 0, runSec = 0, walkMi = 0, walkSec = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const dSec = pts[i].t - pts[i - 1].t;
+        const dMi = pts[i].mi - pts[i - 1].mi;
+        if (!(dSec > 0) || dMi < 0) continue;
+        const cad = pts[i - 1].cad != null ? pts[i - 1].cad : pts[i].cad;
+        const walking = (cad != null && cad > 0)
+          ? cad < WALK_CAD_MAX
+          : (dMi > 0 ? (dSec / dMi) > WALK_PACE_MIN : true);   // stopped counts as walking
+        if (walking) { walkMi += dMi; walkSec += dSec; }
+        else { runMi += dMi; runSec += dSec; }
+      }
+      if (walkSec < WALK_MIN_SECONDS) return null;             // nothing worth separating
+      return { runMi, runSec, walkMi, walkSec,
+               runPace: (runMi > 0 && runSec > 0) ? runSec / runMi : null };
+    }
+
     // Cut the stream at cumulative boundaries and measure each piece.
     // `cuts` are cumulative values in `mode` units ('mi' or 't'); the segment i
     // spans (cuts[i-1], cuts[i]].
@@ -918,9 +983,14 @@
           if (p.hr != null) { hrSum += p.hr * dt; hrT += dt; hrMax = Math.max(hrMax, p.hr); }
           if (p.cad != null) { cadSum += p.cad * dt; cadT += dt; }
         }
+        // Walk-excluded figures for this window, so a piece containing a walk
+        // break reports the pace you actually ran it at.
+        const win = pts.filter(p => p.t >= s0.t && p.t <= s1.t);
+        const w = walkSplit(win);
         return {
           miles, seconds,
           pace: (miles > 0 && seconds > 0) ? seconds / miles : null,
+          walk: w,
           cad: cadT ? Math.round(cadSum / cadT) : null,
           hr: hrT ? Math.round(hrSum / hrT) : null,
           hrMax: hrMax || null,
@@ -1083,7 +1153,9 @@
           c.pace ? paceOnly(c.pace) + '/mi' : null,
           c.cad ? c.cad + ' spm' : null,
           c.hr ? c.hr + ' bpm' : null,
-        ].filter(Boolean).join(' · ');
+        ].filter(Boolean).join(' · ')
+          + (c.walk && c.walk.runPace
+              ? ` <span class="walk-sub">· running only ${paceOnly(c.walk.runPace)}/mi</span>` : '');
         return `
           <div class="sp-row">
             <div class="sp-controls">
@@ -1272,6 +1344,46 @@
         body += renderSegmentSummary(segs, stat);
       } else if (run.mile_splits && run.mile_splits.length) {
         body += renderMileSplits(run.mile_splits);
+      }
+
+      // Strength work: the exercises logged against this activity, or a way in.
+      const act = run.activity_type || 'run';
+      if (act === 'strength' || act === 'workout') {
+        const sess = gymByRun[run.id];
+        const sets = (sess && sess.workout_sets) || [];
+        if (sets.length) {
+          const byEx = {};
+          sets.forEach(x => { (byEx[x.exercise] = byEx[x.exercise] || []).push(x); });
+          body += `<div class="tbl-scroll"><table class="seg-mini-table">
+            <thead><tr><th>Exercise</th><th class="num">Sets</th><th class="num">Reps</th><th class="num">Top</th></tr></thead>
+            <tbody>${Object.keys(byEx).map(name => {
+              const g = byEx[name].slice().sort((a,b)=>(a.set_no||0)-(b.set_no||0));
+              const reps = g.map(x => x.reps == null ? '—' : x.reps).join(', ');
+              const top = g.reduce((m,x) => (x.weight != null && (m == null || Number(x.weight) > m)) ? Number(x.weight) : m, null);
+              const unit = (g.find(x => x.unit) || {}).unit || 'lb';
+              return `<tr><td>${escapeHtml(name)}</td><td class="num">${g.length}</td>
+                <td class="num">${escapeHtml(reps)}</td>
+                <td class="num">${top == null ? '<span style="color:var(--slate-2)">body</span>' : top + ' ' + escapeHtml(unit)}</td></tr>`;
+            }).join('')}</tbody></table></div>
+            <div class="gym-link"><a href="gym.html?attach=${run.id}&on=${run.run_date}">Add more exercises →</a></div>`;
+        } else {
+          body += `<div class="gym-cta">
+            <p>The watch caught the time and heart rate. Add what you actually lifted.</p>
+            <a class="gym-btn" href="gym.html?attach=${run.id}&on=${run.run_date}">Log exercises</a>
+          </div>`;
+        }
+      }
+
+      // Walk breaks, separated out. Shown rather than silently applied: the
+      // headline distance still has to match what Strava and Garmin say, or
+      // the numbers look broken next to the watch.
+      const ws = walkSplit(run.samples);
+      if (ws) {
+        body += `<div class="walk-note">
+          <strong>Running only:</strong> ${formatMiles(ws.runMi)} mi in ${formatDuration(Math.round(ws.runSec))}
+          at <strong>${formatPace(ws.runPace)}</strong>
+          <span class="walk-sub">· ${formatDuration(Math.round(ws.walkSec))} walking (${formatMiles(ws.walkMi)} mi) left out</span>
+        </div>`;
       }
 
       // extras

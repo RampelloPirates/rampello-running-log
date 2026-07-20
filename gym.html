@@ -143,6 +143,7 @@
             gyms:[], gymId:null, kit:[],
             muscle:null, groups:[], note:'',
             menus:{}, menuFrom:'',           // saved menus for this gym, by muscle
+            attachRunId:null, attachDate:null,   // a Garmin activity we're logging against
             session:null, sets:[],           // the workout in progress
             history:[], openId:null,         // past workouts — NOT scoped to a gym
             favs:[], matches:{}, matching:false,   // saved workouts + can-I-do-it-here
@@ -597,14 +598,31 @@
   // sets you log have somewhere to go — but an unused one is harmless: it just
   // has no sets, and the history view ignores empty sessions.
   async function ensureSession(muscle){
-    var today = new Date().toISOString().slice(0,10);
+    // When we arrived from a Garmin strength activity, the session belongs to
+    // THAT day and points back at it — otherwise a workout logged the morning
+    // after would file itself under today and never join up.
+    var day = S.attachDate || new Date().toISOString().slice(0,10);
+
+    // An existing session already attached to this activity wins, whatever its
+    // muscle group — you're adding to the same workout, not starting another.
+    if(S.attachRunId){
+      var ex = await sb.from('workout_sessions').select('*').eq('run_id', S.attachRunId).limit(1);
+      if(ex.data && ex.data.length){ S.session = ex.data[0]; return; }
+    }
     var r = await sb.from('workout_sessions').select('*')
-      .eq('gym_id', S.gymId).eq('muscle_group', muscle).eq('worked_on', today)
+      .eq('gym_id', S.gymId).eq('muscle_group', muscle).eq('worked_on', day)
       .is('finished_at', null).limit(1);
-    if(r.data && r.data.length){ S.session = r.data[0]; return; }
-    var c = await sb.from('workout_sessions').insert({
-      user_id:S.userId, gym_id:S.gymId, muscle_group:muscle, worked_on:today
-    }).select('*').single();
+    if(r.data && r.data.length){
+      S.session = r.data[0];
+      if(S.attachRunId && !S.session.run_id){
+        await sb.from('workout_sessions').update({run_id:S.attachRunId}).eq('id', S.session.id);
+        S.session.run_id = S.attachRunId;
+      }
+      return;
+    }
+    var payload = {user_id:S.userId, gym_id:S.gymId, muscle_group:muscle, worked_on:day};
+    if(S.attachRunId) payload.run_id = S.attachRunId;
+    var c = await sb.from('workout_sessions').insert(payload).select('*').single();
     S.session = c.data;
   }
 
@@ -774,6 +792,15 @@
 
     var h = '<header><a href="home.html" class="home-back">‹ Home</a>'+
       '<h1 class="logo">Tally<span>.</span><small>Gym</small></h1></header>';
+
+    // Say what we're attached to, so it's never a mystery why this session is
+    // dated to a day that isn't today.
+    if(S.attachRunId){
+      h += '<div class="attach-note">Logging against your <strong>'+
+        (S.attachDate ? esc(new Date(S.attachDate+'T00:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})) : 'recorded')+
+        '</strong> strength activity. Everything you add lands on that workout in the Workout Log.'+
+        ' <a href="my_runs.html">back to it</a></div>';
+    }
 
     // ── Gyms
     h += '<section class="card"><h2 class="h2">Your gyms</h2>';
@@ -964,6 +991,14 @@
     var s = await sb.auth.getSession();
     S.userId = s.data.session.user.id;
     S.athleteId = p.row ? p.row.id : null;
+
+    // Arriving from a Garmin strength activity in the Workout Log: everything
+    // logged here attaches to it, and dates to the day it happened.
+    var q = new URLSearchParams(location.search);
+    if(q.get('attach')){
+      S.attachRunId = q.get('attach');
+      S.attachDate  = q.get('on') || null;
+    }
 
     await loadGyms();
     await loadKit();
