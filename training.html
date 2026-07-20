@@ -109,6 +109,19 @@
     .wx-dot{position:absolute;width:5px;height:5px;border-radius:50%;background:var(--mark-off);
             opacity:.55;transform:translate(-50%,50%);z-index:2;}
     .fit .gl{left:0;}
+    /* Zone rows: label, bpm range, bar, time, share. Grid so the numbers line
+       up in columns; the bar takes whatever width is left. */
+    .zrows{display:flex;flex-direction:column;gap:.35rem;}
+    .zrow{display:grid;grid-template-columns:auto auto 1fr auto auto;align-items:center;gap:.5rem;font-size:.78rem;}
+    .zname{display:flex;align-items:center;gap:.4rem;white-space:nowrap;font-weight:600;}
+    .zkey{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+    .zsub{font-weight:400;color:var(--muted);font-size:.72rem;}
+    .zbpm{font-family:var(--f-mono);font-size:.66rem;color:var(--muted);white-space:nowrap;}
+    .zbar{background:var(--surface-warm);border-radius:4px;height:12px;overflow:hidden;min-width:20px;}
+    .zbar i{display:block;height:100%;border-radius:4px;}
+    .ztime,.zpct{font-family:var(--f-mono);font-size:.72rem;white-space:nowrap;text-align:right;}
+    .zpct{font-weight:600;min-width:2.4em;}
+    @media(max-width:420px){ .zbpm{display:none;} }
     .tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
     table.pb{width:100%;border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-nums;}
     table.pb th,table.pb td{padding:.45rem .3rem;border-bottom:1px solid var(--silver);text-align:left;white-space:nowrap;}
@@ -185,7 +198,13 @@
   function buildWeeks(){
     if(!RUNS.length) return [];
     var lastMon = mondayOf(new Date());
-    var firstMon = mondayOf(parseDay(RUNS[0].run_date));
+    // Scan for the earliest date rather than trusting RUNS[0]. The query orders
+    // ascending so they agree today, but a caller that ever hands this an
+    // unsorted array would silently get a window starting at whatever happened
+    // to be first — and a chart quietly missing most of its history.
+    var earliest = RUNS[0].run_date;
+    RUNS.forEach(function(r){ if(r.run_date && r.run_date < earliest) earliest = r.run_date; });
+    var firstMon = mondayOf(parseDay(earliest));
     if(range>0){
       var limit = addDays(lastMon, -7*(range-1));
       if(limit > firstMon) firstMon = limit;
@@ -1312,36 +1331,52 @@
     return HR_ZONES[z-1];
   }
 
-  // One activity's Relative Effort, in weighted minutes. Three tiers of
-  // precision, best first; `method` records which was used so the card can say
-  // how much of the curve is estimated rather than measured.
-  function runLoad(r, stream, maxHR){
+  // Seconds spent in each zone, best source first. Everything zone-shaped —
+  // Relative Effort and the distribution card — reads this one function, so
+  // the two can never disagree about how a run was binned.
+  function zoneTimes(r, stream, maxHR){
     var dur = Number(r.duration_seconds)||0;
     if (!(dur > 0)) return null;
+    var secs = [0,0,0,0,0];
 
     if (maxHR && Array.isArray(stream) && stream.length > 5){
       var pts = stream.filter(function(p){ return p && p.t!=null && p.hr!=null; })
                       .map(function(p){ return {t:Number(p.t), hr:Number(p.hr)}; })
                       .filter(function(p){ return isFinite(p.t) && isFinite(p.hr) && p.hr>0; });
       if (pts.length > 5){
-        var sum = 0;
+        var any = false;
         for (var i=0;i<pts.length;i++){
           var next = (i+1<pts.length) ? pts[i+1].t : pts[i].t;
           var dt = Math.max(0, Math.min(next - pts[i].t, 120));   // cap a pause, don't credit it
-          sum += (dt/60) * zoneFor(pts[i].hr, maxHR).weight;
+          if (dt <= 0) continue;
+          secs[zoneFor(pts[i].hr, maxHR).z - 1] += dt;
+          any = true;
         }
-        if (sum > 0) return {load: sum/60, method:'stream'};
+        if (any) return {secs:secs, method:'stream'};
       }
     }
     if (maxHR && Number(r.avg_hr) > 0){
       // Whole run in the zone its average lands in. Under-counts an interval
       // session, whose average sits in Z3 while the work was Z2 and Z5.
-      return {load: ((dur/60) * zoneFor(Number(r.avg_hr), maxHR).weight)/60, method:'avg'};
+      secs[zoneFor(Number(r.avg_hr), maxHR).z - 1] = dur;
+      return {secs:secs, method:'avg'};
     }
     if (Number(r.effort_rpe) > 0){
-      return {load: ((dur/60) * zoneForRPE(Number(r.effort_rpe)).weight)/60, method:'rpe'};
+      secs[zoneForRPE(Number(r.effort_rpe)).z - 1] = dur;
+      return {secs:secs, method:'rpe'};
     }
     return null;
+  }
+
+  // One activity's Relative Effort, in weighted minutes. `method` records which
+  // tier of precision it came from, so the card can say how much of the curve
+  // is estimated rather than measured.
+  function runLoad(r, stream, maxHR){
+    var zt = zoneTimes(r, stream, maxHR);
+    if (!zt) return null;
+    var load = 0;
+    zt.secs.forEach(function(sec, i){ load += (sec/60) * HR_ZONES[i].weight; });
+    return load > 0 ? {load: load/60, method: zt.method} : null;
   }
 
   function ffModel(weeks){
@@ -1564,6 +1599,90 @@
     return h+'</div>';
   }
 
+  // ── Heart-rate zone distribution ───────────────────────────────────────────
+  // The question this answers is not "how hard did I train" — Fitness &
+  // Freshness covers that — but "was my easy running actually easy". The
+  // common failure is a pile of Z3: too hard to recover from, too soft to
+  // drive adaptation. Zones are ORDINAL, so they get one hue stepping
+  // light→dark rather than five categorical colours; the order is the meaning.
+  var ZONE_RAMP = ['#78C677','#5BAB5F','#3A8D44','#17732C','#005904'];   // validated ordinal
+  var ZONE_NAMES = ['Recovery','Easy','Steady','Threshold','Hard'];
+
+  function zoneModel(weeks){
+    if (!weeks.length) return null;
+    var maxHR = FIT.maxHR.length ? FIT.maxHR[FIT.maxHR.length-1].value : null;
+    if (!maxHR) return {noMaxHR:true};
+    var from = key(weeks[0].monday);
+    var streams = {};
+    (FIT.runs||[]).forEach(function(r){ if (r.id) streams[r.id] = r.samples; });
+
+    var secs = [0,0,0,0,0], counts = {stream:0, avg:0, rpe:0, none:0};
+    RUNS.forEach(function(r){
+      if (r.run_date < from) return;
+      var zt = zoneTimes(r, streams[r.id], maxHR);
+      if (!zt) { counts.none++; return; }
+      counts[zt.method]++;
+      zt.secs.forEach(function(s,i){ secs[i] += s; });
+    });
+    var total = secs.reduce(function(a,b){ return a+b; }, 0);
+    if (!total) return null;
+    return {secs:secs, total:total, maxHR:maxHR, counts:counts,
+            easy:(secs[0]+secs[1])/total, gray:secs[2]/total, hard:(secs[3]+secs[4])/total};
+  }
+
+  function renderZones(weeks){
+    var h = '<div class="card"><h2>Heart-rate zones</h2>';
+    if (!FIT.loaded) return h+'<div class="empty">Loading…</div></div>';
+    var Z = zoneModel(weeks);
+    if (!Z){
+      return h+'<p class="hint" style="margin:0">Nothing with heart rate in this range yet.</p></div>';
+    }
+    if (Z.noMaxHR){
+      return h+'<p class="hint" style="margin:0">Add your max heart rate in <a href="vitals.html" style="color:var(--green);font-weight:600">Vitals</a> — the zone boundaries are percentages of it.</p></div>';
+    }
+
+    var pct = function(v){ return Math.round(v*100); };
+    h += '<p class="hint">Where your training time actually went. Zones are shares of your '+Z.maxHR+' bpm max.</p>';
+    h += '<div class="stats" style="margin-bottom:.8rem">'+
+      '<div class="stat"><div class="label">Easy</div><div class="value">'+pct(Z.easy)+'<span class="unit">%</span></div>'+
+        '<div class="delta" style="color:var(--muted)">Z1–Z2</div></div>'+
+      '<div class="stat"><div class="label">Steady</div><div class="value">'+pct(Z.gray)+'<span class="unit">%</span></div>'+
+        '<div class="delta" style="color:'+(Z.gray>0.35?'var(--amber)':'var(--muted)')+'">Z3</div></div>'+
+      '<div class="stat"><div class="label">Hard</div><div class="value">'+pct(Z.hard)+'<span class="unit">%</span></div>'+
+        '<div class="delta" style="color:var(--muted)">Z4–Z5</div></div>'+
+      '</div>';
+
+    // A row per zone: name, the bpm range it covers, a bar, time and share.
+    h += '<div class="zrows">';
+    HR_ZONES.forEach(function(z, i){
+      var loBpm = i===0 ? 0 : Math.round(HR_ZONES[i-1].upTo * Z.maxHR);
+      var hiBpm = i===HR_ZONES.length-1 ? null : Math.round(z.upTo * Z.maxHR);
+      var share = Z.total ? Z.secs[i]/Z.total : 0;
+      h += '<div class="zrow">'+
+        '<div class="zname"><span class="zkey" style="background:'+ZONE_RAMP[i]+'"></span>Z'+z.z+
+          ' <span class="zsub">'+esc(ZONE_NAMES[i])+'</span></div>'+
+        '<div class="zbpm">'+(hiBpm ? loBpm+'–'+hiBpm : loBpm+'+')+' bpm</div>'+
+        '<div class="zbar"><i style="width:'+(share*100).toFixed(1)+'%;background:'+ZONE_RAMP[i]+'"></i></div>'+
+        '<div class="ztime">'+hhmm(Z.secs[i])+'</div>'+
+        '<div class="zpct">'+pct(share)+'%</div>'+
+        '</div>';
+    });
+    h += '</div>';
+
+    // The read that matters, in words.
+    var verdict;
+    if (Z.gray > 0.35) verdict = 'A lot of time in Z3 — the classic trap. It is too hard to recover from and too easy to drive much adaptation. Slowing the easy runs down is usually what fixes it.';
+    else if (Z.easy > 0.75) verdict = 'Most of your time is genuinely easy, which is what builds the base. The hard days are what should be hard.';
+    else verdict = 'A reasonable spread. Most training plans aim for roughly 80% easy, with the rest deliberately hard rather than drifting into the middle.';
+    h += '<p class="hint" style="margin:.8rem 0 0">'+verdict+'</p>';
+
+    var est = Z.counts.avg + Z.counts.rpe, tot = est + Z.counts.stream;
+    if (tot && est/tot > 0.3){
+      h += '<p class="hint" style="margin:.5rem 0 0">'+Z.counts.stream+' of '+tot+' activities had a full heart-rate stream. The rest are counted wholly in the zone their average landed in, which flattens an interval session into the middle instead of splitting it between the ends.</p>';
+    }
+    return h+'</div>';
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderPills(){
     document.getElementById('range-pills').innerHTML = RANGES.map(function(r){
@@ -1578,7 +1697,7 @@
     var weeks = buildWeeks();
     renderStats(weeks);
     document.getElementById('views').innerHTML = RUNS.length
-      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFF(weeks) + renderFitness(weeks) + renderPredict(weeks) + renderAerobic(weeks) + renderWeather(weeks))
+      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFF(weeks) + renderZones(weeks) + renderFitness(weeks) + renderPredict(weeks) + renderAerobic(weeks) + renderWeather(weeks))
       : '<div class="card"><div class="empty">No activities logged yet.<br>Once runs are in, this fills up on its own.</div></div>';
     var t = document.getElementById('tbl-toggle');
     if(t) t.addEventListener('click', function(){ showTable = !showTable; render(); });
