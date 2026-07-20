@@ -629,7 +629,7 @@
     // out. Everything downstream of FIT.runs — bests, VDOT, decoupling —
     // depends on this being runs only.
     var q = await sb.from('runs')
-      .select('run_date, activity_type, sub_type, distance_miles, duration_seconds, samples')
+      .select('id, run_date, activity_type, sub_type, distance_miles, duration_seconds, samples')
       .eq('athlete_id', athlete.id)
       .eq('activity_type', 'run')
       .or('samples.not.is.null,sub_type.eq.race')
@@ -1248,6 +1248,193 @@
     return new Date(p[0],p[1]-1,p[2]).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   }
 
+  // ── Fitness & Freshness ────────────────────────────────────────────────────
+  // Strava's headline subscriber feature, rebuilt from the same public parts.
+  //
+  //   Relative Effort  time in each heart-rate zone, weighted so intensity
+  //                    counts for far more than duration. Strava's published
+  //                    weights: a minute in Z1 is worth 12 seconds, Z5 120.
+  //   Fitness (CTL)    42-day exponentially weighted average of that load
+  //   Fatigue (ATL)    the same over 7 days
+  //   Form  (TSB)      Fitness − Fatigue. Positive is rested, negative is
+  //                    mid-block, deeply negative is digging a hole.
+  //
+  // Every activity counts, not just runs — a ride and a lift both cost
+  // recovery, and a fitness curve that ignores them lies on your gym days.
+  var HR_ZONES = [
+    {z:1, upTo:0.60, weight:12},   // fractions of max HR; weights in seconds
+    {z:2, upTo:0.70, weight:24},   //   per minute spent in the zone
+    {z:3, upTo:0.80, weight:45},
+    {z:4, upTo:0.90, weight:100},
+    {z:5, upTo:9.99, weight:120},
+  ];
+  var CTL_DAYS = 42, ATL_DAYS = 7;
+
+  function zoneFor(hr, maxHR){
+    var f = hr/maxHR;
+    for (var i=0;i<HR_ZONES.length;i++) if (f < HR_ZONES[i].upTo) return HR_ZONES[i];
+    return HR_ZONES[HR_ZONES.length-1];
+  }
+  // RPE stands in when there's no heart rate at all — Strava does the same with
+  // perceived exertion. Coarse, but a logged hard session counting for nothing
+  // would leave a hole in the curve.
+  function zoneForRPE(rpe){
+    var z = rpe<=2 ? 1 : rpe<=4 ? 2 : rpe<=6 ? 3 : rpe<=8 ? 4 : 5;
+    return HR_ZONES[z-1];
+  }
+
+  // One activity's Relative Effort, in weighted minutes. Three tiers of
+  // precision, best first; `method` records which was used so the card can say
+  // how much of the curve is estimated rather than measured.
+  function runLoad(r, stream, maxHR){
+    var dur = Number(r.duration_seconds)||0;
+    if (!(dur > 0)) return null;
+
+    if (maxHR && Array.isArray(stream) && stream.length > 5){
+      var pts = stream.filter(function(p){ return p && p.t!=null && p.hr!=null; })
+                      .map(function(p){ return {t:Number(p.t), hr:Number(p.hr)}; })
+                      .filter(function(p){ return isFinite(p.t) && isFinite(p.hr) && p.hr>0; });
+      if (pts.length > 5){
+        var sum = 0;
+        for (var i=0;i<pts.length;i++){
+          var next = (i+1<pts.length) ? pts[i+1].t : pts[i].t;
+          var dt = Math.max(0, Math.min(next - pts[i].t, 120));   // cap a pause, don't credit it
+          sum += (dt/60) * zoneFor(pts[i].hr, maxHR).weight;
+        }
+        if (sum > 0) return {load: sum/60, method:'stream'};
+      }
+    }
+    if (maxHR && Number(r.avg_hr) > 0){
+      // Whole run in the zone its average lands in. Under-counts an interval
+      // session, whose average sits in Z3 while the work was Z2 and Z5.
+      return {load: ((dur/60) * zoneFor(Number(r.avg_hr), maxHR).weight)/60, method:'avg'};
+    }
+    if (Number(r.effort_rpe) > 0){
+      return {load: ((dur/60) * zoneForRPE(Number(r.effort_rpe)).weight)/60, method:'rpe'};
+    }
+    return null;
+  }
+
+  function ffModel(weeks){
+    if (!weeks.length || !RUNS.length) return null;
+    var maxHR = FIT.maxHR.length ? FIT.maxHR[FIT.maxHR.length-1].value : null;
+    var streams = {};
+    (FIT.runs||[]).forEach(function(r){ if (r.id) streams[r.id] = r.samples; });
+
+    var byDay = {}, counts = {stream:0, avg:0, rpe:0, none:0};
+    RUNS.forEach(function(r){
+      var L = runLoad(r, streams[r.id], maxHR);
+      if (!L) { counts.none++; return; }
+      counts[L.method]++;
+      byDay[r.run_date] = (byDay[r.run_date]||0) + L.load;
+    });
+    var days = Object.keys(byDay);
+    if (!days.length) return null;
+
+    // Accumulate from the very first activity, not from the start of the shown
+    // range — a 42-day average that begins at zero inside the window would read
+    // as a fitness ramp that never happened.
+    var first = days.sort()[0], last = key(new Date());
+    var ctl = 0, atl = 0, pts = [], guard = 0;
+    for (var d = first; d <= last && guard < 4000; d = dayAdd(d,1), guard++){
+      var load = byDay[d] || 0;                       // a rest day decays both
+      ctl += (load - ctl)/CTL_DAYS;
+      atl += (load - atl)/ATL_DAYS;
+      pts.push({day:d, load:load, ctl:ctl, atl:atl, form:ctl-atl});
+    }
+    var from = key(weeks[0].monday);
+    var warmup = daysApart(first, from);              // days of run-in before the window
+    return {pts:pts, shown:pts.filter(function(p){ return p.day >= from; }),
+            counts:counts, maxHR:maxHR, warmup:warmup, first:first};
+  }
+
+  // TrainingPeaks' conventional Form bands.
+  function formRead(f){
+    if (f > 25)  return {word:'very fresh', tone:'amber', note:'Well rested — good before a race, a sign of detraining if it sits here for weeks.'};
+    if (f > 5)   return {word:'fresh',      tone:'green', note:'Rested and ready. This is where you want to be on a start line.'};
+    if (f > -10) return {word:'neutral',    tone:'green', note:'Training and recovery are balanced.'};
+    if (f > -30) return {word:'building',   tone:'green', note:'The productive zone — working harder than you are recovering, on purpose.'};
+    return {word:'overreaching', tone:'amber', note:'Deep in the hole. Sustainable for a short block, not for months.'};
+  }
+
+  function ffChart(F){
+    var pts = F.shown, n = pts.length;
+    if (n < 7) return '<p class="hint" style="margin:0">Not enough days in this range yet.</p>';
+    var vals = [];
+    pts.forEach(function(p){ vals.push(p.ctl, p.atl); });
+    // Not pinned to zero. These are lines, where position carries the value —
+    // unlike bars, whose length has to start from zero to be honest. Forcing a
+    // zero baseline here spends most of the plot on empty space below the data
+    // and flattens the week-to-week movement that the chart exists to show.
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    var pad = (hi-lo)*0.12 || 2; lo = Math.max(0, lo-pad); hi += pad;
+    var X = function(i){ return n>1 ? (i/(n-1))*100 : 50; };
+    var Y = function(v){ return ((v-lo)/(hi-lo))*100; };     // distance from the bottom
+    var span = hi-lo;
+    var step = span > 80 ? 20 : span > 40 ? 10 : span > 16 ? 5 : span > 8 ? 2 : 1;
+
+    var h = '<div class="fit"><div class="fit-plot">';
+    for (var g=Math.ceil(lo/step)*step; g<=hi; g+=step){
+      h += '<div class="gl" style="bottom:'+Y(g).toFixed(2)+'%"><b>'+g+'</b></div>';
+    }
+    h += '<svg class="fit-svg" viewBox="0 0 100 100" preserveAspectRatio="none">';
+    [['ctl','#33733A',2],['atl','#BE722A',1.5]].forEach(function(s){
+      var d = pts.map(function(p,i){ return (i?'L':'M')+X(i).toFixed(2)+' '+(100-Y(p[s[0]])).toFixed(2); }).join(' ');
+      h += '<path d="'+d+'" fill="none" stroke="'+s[1]+'" stroke-width="'+s[2]+'" '+
+           'vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>';
+    });
+    h += '</svg></div><div class="blabels" style="padding-left:30px">';
+    var every = Math.ceil(n/5);
+    pts.forEach(function(p,i){
+      h += '<span>'+((i%every===0||i===n-1) ? esc(shortDate(parseDay(p.day))) : '')+'</span>';
+    });
+    return h+'</div></div>';
+  }
+
+  function renderFF(weeks){
+    var h = '<div class="card"><h2>Fitness &amp; Freshness</h2>';
+    if (!FIT.loaded) return h+'<div class="empty">Loading…</div></div>';
+    var F = ffModel(weeks);
+    if (!F){
+      return h+'<p class="hint" style="margin:0">Needs activities carrying heart rate, or an effort rating. Add a max HR in <a href="vitals.html" style="color:var(--green);font-weight:600">Vitals</a> so heart rate can be turned into zones.</p></div>';
+    }
+    if (!F.maxHR){
+      return h+'<p class="hint" style="margin:0">Add your max heart rate in <a href="vitals.html" style="color:var(--green);font-weight:600">Vitals</a> — without it there are no zones to weight effort by, and Relative Effort is what these curves are built from.</p></div>';
+    }
+    var last = F.pts[F.pts.length-1];
+    var fr = formRead(last.form);
+    var col = fr.tone==='amber' ? 'var(--amber)' : 'var(--mark)';
+
+    h += '<p class="hint">Relative Effort — time in each heart-rate zone, weighted so intensity counts far more than duration — averaged over 42 days for fitness and 7 for fatigue. Every activity counts, not just runs.</p>';
+    h += '<div class="stats" style="margin-bottom:.8rem">'+
+      '<div class="stat"><div class="label">Fitness</div><div class="value">'+Math.round(last.ctl)+'</div>'+
+        '<div class="delta" style="color:var(--muted)">42-day load</div></div>'+
+      '<div class="stat"><div class="label">Fatigue</div><div class="value">'+Math.round(last.atl)+'</div>'+
+        '<div class="delta" style="color:var(--muted)">7-day load</div></div>'+
+      '<div class="stat"><div class="label">Form</div><div class="value" style="color:'+col+'">'+(last.form>=0?'+':'−')+Math.abs(Math.round(last.form))+'</div>'+
+        '<div class="delta" style="color:'+col+'">'+fr.word+'</div></div>'+
+      '</div>';
+    h += ffChart(F);
+    h += '<div class="legend">'+
+      '<span><i class="key" style="width:14px;height:3px;border-radius:2px"></i>Fitness (42-day)</span>'+
+      '<span><i class="key" style="width:14px;height:3px;border-radius:2px;background:var(--mark-accent)"></i>Fatigue (7-day)</span>'+
+      '</div>';
+    h += '<p class="hint" style="margin:.7rem 0 0">'+esc(fr.note)+' Fitness above fatigue means form is positive.</p>';
+
+    // Two things can quietly make these curves wrong, so both are stated.
+    if (F.warmup < CTL_DAYS){
+      h += '<p class="hint" style="margin:.5rem 0 0;color:var(--amber)">Only '+Math.max(0,F.warmup)+' days of history before this window, against the 42 the fitness average needs. The curve is still climbing out of a cold start — read it as provisional until there is more behind it.</p>';
+    }
+    var est = F.counts.avg + F.counts.rpe, tot = est + F.counts.stream;
+    if (tot && est/tot > 0.3){
+      h += '<p class="hint" style="margin:.5rem 0 0">'+F.counts.stream+' of '+tot+' activities had a full heart-rate stream; the rest were scored from their average'+(F.counts.rpe?' or effort rating':'')+'. That under-counts interval sessions, whose average sits mid-zone while the work was at both ends.</p>';
+    }
+    if (F.counts.none){
+      h += '<p class="hint" style="margin:.5rem 0 0">'+F.counts.none+' activit'+(F.counts.none===1?'y is':'ies are')+' missing from the load entirely — no heart rate and no effort rating.</p>';
+    }
+    return h+'</div>';
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderPills(){
     document.getElementById('range-pills').innerHTML = RANGES.map(function(r){
@@ -1262,7 +1449,7 @@
     var weeks = buildWeeks();
     renderStats(weeks);
     document.getElementById('views').innerHTML = RUNS.length
-      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFitness(weeks) + renderAerobic(weeks) + renderWeather(weeks))
+      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFF(weeks) + renderFitness(weeks) + renderAerobic(weeks) + renderWeather(weeks))
       : '<div class="card"><div class="empty">No activities logged yet.<br>Once runs are in, this fills up on its own.</div></div>';
     var t = document.getElementById('tbl-toggle');
     if(t) t.addEventListener('click', function(){ showTable = !showTable; render(); });
@@ -1299,7 +1486,7 @@
     if(!profile) return;
     athlete = profile.row;
     var r = await sb.from('runs')
-      .select('run_date, activity_type, sub_type, distance_miles, duration_seconds, dewpoint_f, temperature_f, avg_hr')
+      .select('id, run_date, activity_type, sub_type, distance_miles, duration_seconds, dewpoint_f, temperature_f, avg_hr, effort_rpe')
       .eq('athlete_id', athlete.id)
       .order('run_date', {ascending:true});
     RUNS = (r.data||[]).filter(function(x){ return x.run_date; });
