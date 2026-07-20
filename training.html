@@ -434,6 +434,7 @@
   // The best VDOT a single run demonstrates, over any of the standard distances
   // (plus the whole run, when it was a race).
   function runVdot(r){
+    if ((r.activity_type||'run') !== 'run') return null;
     var best = null, from = null;
     if(r.sub_type === 'race'){
       var v = vdotFor(Number(r.distance_miles)||0, Number(r.duration_seconds)||0);
@@ -623,9 +624,14 @@
   }
 
   async function loadFitness(){
+    // activity_type matters here: a ride carries a sample stream just like a
+    // run does, and 24 mph on a bike reads as a 2:30 mile if nothing filters it
+    // out. Everything downstream of FIT.runs — bests, VDOT, decoupling —
+    // depends on this being runs only.
     var q = await sb.from('runs')
-      .select('run_date, sub_type, distance_miles, duration_seconds, samples')
+      .select('run_date, activity_type, sub_type, distance_miles, duration_seconds, samples')
       .eq('athlete_id', athlete.id)
+      .eq('activity_type', 'run')
       .or('samples.not.is.null,sub_type.eq.race')
       .order('run_date',{ascending:true});
     FIT.runs = q.data || [];
@@ -946,7 +952,7 @@
   // by hand; this does it by rule).
   var WARMUP_SKIP = 600;      // seconds dropped before the halves are measured
   function runDecoupling(r){
-    if (HARD[r.sub_type]) return null;
+    if ((r.activity_type||'run') !== 'run' || HARD[r.sub_type]) return null;
     var s = r.samples;
     if (!Array.isArray(s) || s.length < 20) return null;
     var pts = s.filter(function(p){ return p && p.t!=null && p.mi!=null && p.hr!=null; })
@@ -1102,6 +1108,10 @@
   // drift out of step with the runs behind it. The `personal_bests` table
   // carries what predates the app (Garmin's years of history), and the board
   // shows whichever is better.
+  // Nothing on foot covers ground faster than this. The mile world record is
+  // 3:43, so 4:00/mi as a floor rejects bad data without ever rejecting a real
+  // effort of yours.
+  var PB_FLOOR_PACE = 240;      // seconds per mile
   var PB_DISTS = [
     {key:'0.5mi', label:'½ mile', mi:0.5},
     {key:'1k',    label:'1K',     mi:0.621371},
@@ -1136,9 +1146,12 @@
                  .filter(function(p){ return isFinite(p.t) && isFinite(p.mi); });
       if (pts.length < 5) return;
       var yr = r.run_date.slice(0,4);
+      if ((r.activity_type||'run') !== 'run') return;
       PB_DISTS.forEach(function(d){
         var sec = bestEffort(pts, d.mi);
         if (sec == null || !(sec > 0)) return;
+        if (sec/d.mi < PB_FLOOR_PACE) return;          // impossible on foot — bad data
+
         if (!derived[d.key] || sec < derived[d.key].seconds) derived[d.key] = {seconds:sec, date:r.run_date};
         byYear[yr] = byYear[yr] || {};
         if (!byYear[yr][d.key] || sec < byYear[yr][d.key].seconds) byYear[yr][d.key] = {seconds:sec, date:r.run_date};
