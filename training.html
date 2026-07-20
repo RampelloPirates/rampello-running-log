@@ -393,7 +393,18 @@
   var MI_5K = 3.106856, MI_10K = 6.213712, MI_HALF = 13.109375;
 
   // Daniels & Gilbert. VO2 at the velocity run, divided by the fraction of
-  // VO2max sustainable for that duration.
+  // VO2max sustainable for that duration. Kept free of guards so the race
+  // predictor can invert it — the guards belong to the measurement path, not
+  // to the maths.
+  function vdotRaw(miles, seconds){
+    var t = seconds/60;
+    if(!(miles>0) || !(t>0)) return null;
+    var v = (miles*1609.344)/t;                       // metres per minute
+    var vo2 = -4.60 + 0.182258*v + 0.000104*v*v;
+    var pct = 0.8 + 0.1894393*Math.exp(-0.012778*t) + 0.2989558*Math.exp(-0.1932605*t);
+    if(!(pct>0) || !(vo2>0)) return null;
+    return vo2/pct;
+  }
   function vdotFor(miles, seconds){
     var t = seconds/60;
     if(!(miles>0) || !(t>0)) return null;
@@ -403,12 +414,26 @@
     // A long effort tends to under-read anyway, and since the series takes the
     // best effort in the window, an under-reading one simply never wins.
     if(t < 5 || t > 240) return null;
-    var v = (miles*1609.344)/t;                       // metres per minute
-    var vo2 = -4.60 + 0.182258*v + 0.000104*v*v;
-    var pct = 0.8 + 0.1894393*Math.exp(-0.012778*t) + 0.2989558*Math.exp(-0.1932605*t);
-    if(!(pct>0) || !(vo2>0)) return null;
-    var out = vo2/pct;
-    return (out>20 && out<95) ? out : null;           // outside this, the input was junk
+    var out = vdotRaw(miles, seconds);
+    return (out!=null && out>20 && out<95) ? out : null;   // outside this, the input was junk
+  }
+
+  // The inverse: what time does this VDOT predict over this distance? VDOT
+  // falls monotonically as the time rises for a fixed distance, so a bisection
+  // is exact to the second in ~25 steps and needs no closed form.
+  function timeForVdot(miles, vdot){
+    if(!(miles>0) || !(vdot>0)) return null;
+    // Same band vdotFor will ever hand back. Without it the bisection happily
+    // inverts a physically impossible VDOT into a physically impossible time.
+    if(vdot < 20 || vdot > 95) return null;
+    var lo = 30, hi = 6*3600;                          // 30 s … 6 h
+    if(vdotRaw(miles, lo) < vdot) return null;         // faster than the model goes
+    if(vdotRaw(miles, hi) > vdot) return null;         // slower than the model goes
+    for(var i=0;i<40;i++){
+      var mid = (lo+hi)/2;
+      if(vdotRaw(miles, mid) > vdot) lo = mid; else hi = mid;
+    }
+    return (lo+hi)/2;
   }
 
   // Fastest time to cover targetMiles anywhere inside a run's sample stream.
@@ -436,9 +461,11 @@
   function runVdot(r){
     if ((r.activity_type||'run') !== 'run') return null;
     var best = null, from = null;
+    var bestMi = null;
     if(r.sub_type === 'race'){
-      var v = vdotFor(Number(r.distance_miles)||0, Number(r.duration_seconds)||0);
-      if(v!=null){ best = v; from = 'race'; }
+      var raceMi = Number(r.distance_miles)||0;
+      var v = vdotFor(raceMi, Number(r.duration_seconds)||0);
+      if(v!=null){ best = v; from = 'race'; bestMi = raceMi; }
     }
     var s = r.samples;
     if(Array.isArray(s) && s.length > 5){
@@ -448,10 +475,10 @@
       [[MI_5K,'5K'],[MI_10K,'10K'],[MI_HALF,'half']].forEach(function(d){
         var sec = bestEffort(pts, d[0]);
         var vv = sec!=null ? vdotFor(d[0], sec) : null;
-        if(vv!=null && (best===null || vv>best)){ best = vv; from = d[1]; }
+        if(vv!=null && (best===null || vv>best)){ best = vv; from = d[1]; bestMi = d[0]; }
       });
     }
-    return best==null ? null : {vdot:best, from:from, date:r.run_date};
+    return best==null ? null : {vdot:best, from:from, mi:bestMi, date:r.run_date};
   }
 
   // Max HR in effect on a given day — the latest reading dated on or before it.
@@ -484,9 +511,11 @@
     for(var d=from; d<=to && guard<1500; d=dayAdd(d,1), guard++){
       var cut = dayAdd(d, -VDOT_WINDOW);
       var win = efforts.filter(function(e){ return e.date>cut && e.date<=d; });
-      var bestV = win.length ? Math.max.apply(null, win.map(function(e){return e.vdot;})) : null;
+      var bestE = null;
+      win.forEach(function(e){ if(!bestE || e.vdot > bestE.vdot) bestE = e; });
+      var bestV = bestE ? bestE.vdot : null;
       var mh = maxHrOn(d), rh = restBy[d];
-      pts.push({ day:d, vdot:bestV,
+      pts.push({ day:d, vdot:bestV, vdotFrom:(bestE?bestE.from:null), vdotMi:(bestE?bestE.mi:null),
                  oura:(ouraBy[d]!=null?ouraBy[d]:null),
                  estRaw:(mh && rh) ? (15.3*(mh/rh)) : null });
     }
@@ -1435,6 +1464,106 @@
     return h+'</div>';
   }
 
+  // ── Race predictions ───────────────────────────────────────────────────────
+  // The same Daniels equation the VDOT card measures with, run backwards. What
+  // makes this worth showing over a generic calculator is the second column:
+  // your actual best at each distance, so a prediction that beats it reads as
+  // "you are due one" rather than as an abstract number.
+  var RACE_DISTS = [
+    {key:'1mi',  label:'1 mile',   mi:1},
+    {key:'5k',   label:'5K',       mi:3.106856},
+    {key:'10k',  label:'10K',      mi:6.213712},
+    {key:'half', label:'Half',     mi:13.109375},
+    {key:'mar',  label:'Marathon', mi:26.21875},
+  ];
+
+  function racePredictions(weeks){
+    var F = fitnessSeries(weeks);
+    if (!F) return null;
+    var vdot = null, from = null, fromMi = null;
+    F.pts.forEach(function(p){ if (p.vdot!=null){ vdot = p.vdot; from = p.vdotFrom; fromMi = p.vdotMi; } });
+    if (vdot == null) return null;
+    // The distance the VDOT was measured over predicts itself exactly, which
+    // reads as a glitch unless the table says so. Matched on distance rather
+    // than on the source label, so a race counts the same as an extracted
+    // effort — a 5K race and a 5K found inside a long run both land on 5K.
+    var sourceKey = null;
+    if (fromMi > 0){
+      RACE_DISTS.forEach(function(d){
+        if (Math.abs(d.mi - fromMi)/d.mi < 0.02) sourceKey = d.key;
+      });
+    }
+
+    var B = bestsModel();
+    var bestBy = {};
+    B.rows.forEach(function(r){ if (r.seconds!=null) bestBy[r.key] = r; });
+
+    var rows = RACE_DISTS.map(function(d){
+      var sec = timeForVdot(d.mi, vdot);
+      var pb = bestBy[d.key];
+      return { label:d.label, key:d.key, mi:d.mi, seconds:sec,
+               pb:(pb ? pb.seconds : null), pbSrc:(pb ? pb.src : null),
+               isSource:(d.key === sourceKey),
+               delta:(sec!=null && pb ? sec - pb.seconds : null) };
+    });
+    return {vdot:vdot, rows:rows, from:from, sourceKey:sourceKey};
+  }
+
+  function signedTime(sec){
+    var s = Math.abs(Math.round(sec));
+    return (sec <= 0 ? '−' : '+') + hms(s);
+  }
+
+  function renderPredict(weeks){
+    var h = '<div class="card"><h2>Race predictions</h2>';
+    if (!FIT.loaded) return h+'<div class="empty">Loading…</div></div>';
+    var P = racePredictions(weeks);
+    if (!P){
+      return h+'<p class="hint" style="margin:0">Needs a VDOT first — race something, or log a run whose stream holds a 5K or longer.</p></div>';
+    }
+
+    h += '<p class="hint">Equivalent times at your current VDOT of '+P.vdot.toFixed(1)+', against your actual bests. A prediction faster than your best means the fitness is there and the result hasn\'t caught up.</p>';
+    h += '<div class="tblwrap"><table class="pb"><thead><tr>'+
+      '<th>Distance</th><th class="num">Predicted</th><th class="num">Your best</th><th class="num">Gap</th>'+
+      '</tr></thead><tbody>'+
+      P.rows.map(function(r){
+        var gap = '—';
+        if (r.delta != null){
+          // Negative means the prediction is faster than the best on record.
+          var due = r.delta < -1;
+          gap = '<span style="color:'+(due?'var(--mark)':'var(--muted)')+'">'+signedTime(r.delta)+'</span>';
+        }
+        return '<tr><td>'+esc(r.label)+
+            (r.isSource ? ' <span class="pb-src">sets vdot</span>' : '')+'</td>'+
+          '<td class="num"><strong>'+(r.seconds!=null?hms(r.seconds):'—')+'</strong></td>'+
+          '<td class="num">'+(r.pb!=null?hms(r.pb):'—')+
+            (r.pbSrc && r.pbSrc!=='run' ? ' <span class="pb-src">'+esc(r.pbSrc)+'</span>' : '')+'</td>'+
+          '<td class="num">'+gap+'</td></tr>';
+      }).join('')+'</tbody></table></div>';
+
+    // Three things that make a prediction wrong, each stated rather than buried.
+    if (P.sourceKey){
+      h += '<p class="hint" style="margin:.7rem 0 0">The row marked <span class="pb-src">sets vdot</span> is the effort the whole table is derived from, so it predicts itself — the other four are the ones that tell you something.</p>';
+    }
+    h += '<p class="hint" style="margin:.5rem 0 0">These read <strong>conservative</strong>. Your VDOT comes from the best stretch inside a training run, not a maximal race effort, so the real number is higher than the one driving this table.</p>';
+    h += '<p class="hint" style="margin:.5rem 0 0">The marathon assumes you have done the long-run mileage to hold that pace. Equivalency says what your engine is worth; it cannot know whether your legs have been that far.</p>';
+
+    // If the weather model is solid, say what today's air costs on top.
+    var W = weatherModel();
+    if (W && W.solid && W.perDeg > 0){
+      var recent = RUNS.filter(function(r){ return r.dewpoint_f!=null; }).slice(-10);
+      var dew = median(recent.map(function(r){ return Number(r.dewpoint_f); }));
+      if (dew != null && dew > DEW_REF + 5){
+        var perMi = W.perDeg * (dew - DEW_REF);
+        var five = P.rows.filter(function(r){ return r.key==='5k'; })[0];
+        h += '<p class="hint" style="margin:.5rem 0 0">And they assume cool air. At the '+Math.round(dew)+
+          '°F dew point you have been running in, your own fitted cost is about '+Math.round(perMi)+
+          ' sec/mile more'+(five && five.seconds!=null ? ' — roughly '+hms(perMi*five.mi)+' onto that 5K' : '')+'.</p>';
+      }
+    }
+    return h+'</div>';
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderPills(){
     document.getElementById('range-pills').innerHTML = RANGES.map(function(r){
@@ -1449,7 +1578,7 @@
     var weeks = buildWeeks();
     renderStats(weeks);
     document.getElementById('views').innerHTML = RUNS.length
-      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFF(weeks) + renderFitness(weeks) + renderAerobic(weeks) + renderWeather(weeks))
+      ? (renderGrid(weeks) + renderWeekly(weeks) + renderMonthly(weeks) + renderBests() + renderFF(weeks) + renderFitness(weeks) + renderPredict(weeks) + renderAerobic(weeks) + renderWeather(weeks))
       : '<div class="card"><div class="empty">No activities logged yet.<br>Once runs are in, this fills up on its own.</div></div>';
     var t = document.getElementById('tbl-toggle');
     if(t) t.addEventListener('click', function(){ showTable = !showTable; render(); });
