@@ -201,6 +201,68 @@ def build_laps(sid, headers):
     return rows
 
 
+# ── Stream backfill ─────────────────────────────────────────────────────────
+# The import loop fetches streams per activity, and Strava rate-limits per 15
+# minutes. A big one-time backfill blows straight through that, so the tail of
+# it lands as summary-only rows — and because the importer dedups on
+# import_ref, the next sync skips them and those streams are lost for good.
+# That would quietly gut personal bests, VDOT and decoupling, all of which read
+# the sample stream.
+#
+# So: a bounded pass that fills in whatever is still missing, newest first. It
+# stops the moment it is rate-limited and picks up where it left off on the next
+# sync, which turns a backfill that needs thousands of requests into something
+# that completes over a few days without ever tripping the quota.
+STREAM_BACKFILL_LIMIT = int(env("STREAM_BACKFILL_LIMIT", default="40"))
+
+def backfill_streams(sb, headers, athlete_id):
+    try:
+        q = (sb.table("runs")
+             .select("id,import_ref,run_date")
+             .eq("athlete_id", athlete_id)
+             .like("import_ref", "strava:%")
+             .is_("samples", "null")
+             .order("run_date", desc=True)
+             .limit(STREAM_BACKFILL_LIMIT).execute())
+    except Exception as e:
+        print(f"Stream backfill skipped ({e})")
+        return
+    rows = q.data or []
+    if not rows:
+        print("Streams: nothing to backfill.")
+        return
+
+    print(f"Streams: {len(rows)} run(s) missing a stream; filling newest first")
+    filled = 0
+    for r in rows:
+        ref = r.get("import_ref") or ""
+        if ":" not in ref:
+            continue
+        sid = ref.split(":", 1)[1]
+        try:
+            sr = requests.get(f"{API}/activities/{sid}/streams", headers=headers,
+                              params={"keys": "time,distance,heartrate,cadence,velocity_smooth",
+                                      "key_by_type": "true"}, timeout=30)
+            if sr.status_code == 429:
+                print(f"  rate-limited after {filled}; the rest resume on the next sync")
+                break
+            if sr.status_code != 200:
+                print(f"  {r['run_date']}: HTTP {sr.status_code}")
+                continue
+            samples, splits, max_cad = compute_from_streams(sr.json())
+            if not samples:
+                continue          # no HR/distance data on this one; nothing to store
+            patch = {"samples": samples, "mile_splits": splits}
+            if max_cad:
+                patch["max_cadence"] = clamp(max_cad, 100, 250)
+            sb.table("runs").update(patch).eq("id", r["id"]).execute()
+            filled += 1
+            time.sleep(1)         # same courtesy as the import loop
+        except Exception as e:
+            print(f"  {r['run_date']}: stream backfill failed ({e})")
+    print(f"Streams: filled {filled} run(s).")
+
+
 # ── Weather ─────────────────────────────────────────────────────────────────
 # Strava returns no weather, so runs imported by this worker arrive without it.
 # That matters beyond decoration: dewpoint is what the weather-adjusted pace
@@ -395,6 +457,7 @@ def main():
             print(f"  {ref}: FAILED ({e})")
 
     print(f"Done. Imported {added} new run(s).")
+    backfill_streams(sb, headers, athlete_id)
     backfill_weather(sb, athlete_id)
 
 
