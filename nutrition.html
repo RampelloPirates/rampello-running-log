@@ -1117,26 +1117,6 @@
     return Math.abs(Date.UTC(pb[0],pb[1]-1,pb[2]) - Date.UTC(pa[0],pa[1]-1,pa[2]))/86400000;
   }
 
-  // Body weight on an arbitrary day. Between two weigh-ins it interpolates;
-  // outside them it carries the nearest reading and reports how far away it
-  // was, so the card can say when the baseline is a reach rather than a
-  // measurement.
-  function weightOn(day){
-    var W = S.weights;
-    if(!W.length) return null;
-    var before = null, after = null;
-    W.forEach(function(w){ if(w.key <= day) before = w; });
-    after = W.filter(function(w){ return w.key > day; })[0];
-    if(before && before.key === day) return {lb:before.lb, gapDays:0};
-    if(before && after){
-      var span = daysApart(before.key, after.key);
-      var f = span > 0 ? daysApart(before.key, day)/span : 0;
-      return {lb: before.lb + f*(after.lb - before.lb), gapDays:0, interpolated:true};
-    }
-    var near = before || after;
-    return {lb:near.lb, gapDays:daysApart(near.key, day), nearKey:near.key};
-  }
-
   // Returns null when there isn't enough to say anything honest.
   function deficitModel(){
     if(S.weights.length < 2) return null;
@@ -1153,20 +1133,25 @@
     var tracked = Object.keys(netByDay).sort();
     if(!tracked.length) return null;
 
-    // The window starts where the FOOD LOG starts, not at whichever weigh-in
-    // happens to sit nearby. Anchoring to the weigh-in meant a reading taken
-    // days before the first logged meal pulled the start back with it, and
-    // every day in between counted against coverage as untracked — which made
-    // the model look like it was under-predicting when really it just had
-    // nothing to work with yet.
+    // The window starts at the first weigh-in, not the first logged meal. That
+    // reading is a real measurement of where you began; starting later would
+    // replace it with an interpolated estimate, and the whole comparison hangs
+    // off the baseline being solid.
     //
-    // Both curves still have to begin on the same day, so the baseline weight
-    // is interpolated to the start date rather than lifted from a reading on a
-    // different one. Otherwise the scale would be credited with change from
-    // before the model was even accumulating.
-    var start = tracked[0];
-    var base = weightOn(start);
+    // The cost is that days between the weigh-in and the first logged meal have
+    // no intake to score, so they sit in the window as untracked and pull
+    // coverage down. That is the honest reading — the model genuinely knows
+    // nothing about those days — and the coverage line says so out loud.
+    var firstTracked = tracked[0];
+    var before = null;
+    S.weights.forEach(function(w){ if(w.key <= firstTracked) before = w; });   // last reading at/before
+    var after = S.weights.filter(function(w){ return w.key > firstTracked; })[0];
+    // A weigh-in from months earlier would drag in a wall of untracked days, so
+    // there is still a limit — but it is generous enough to keep a normal gap
+    // between stepping on the scale and starting to log.
+    var base = (before && daysApart(before.key, firstTracked) <= 45) ? before : (after || before);
     if(!base) return null;
+    var start = base.key;
 
     var end = tracked[tracked.length-1];
     var lastW = S.weights[S.weights.length-1];
@@ -1216,7 +1201,7 @@
     var ratio = (predThen!=null && Math.abs(predThen) >= 1) ? (lastAct/predThen) : null;
 
     return { pts:pts, start:start, end:end, dense:dense, plotted:plotted,
-             baseline:{key:start, lb:round1(base.lb), interpolated:!!base.interpolated, gapDays:base.gapDays},
+             baseline:{key:start, lb:round1(base.lb), leadDays:Math.max(0, daysApart(start, firstTracked))},
              coverage:{tracked:nTracked, total:pts.length},
              lastAct:lastAct, lastActKey:lastActKey, predThen:predThen, ratio:ratio,
              predNow:pts[pts.length-1].pred };
@@ -1371,16 +1356,13 @@
     var v = trendVerdict(M);
     var cov = Math.round((M.coverage.tracked/M.coverage.total)*100);
 
-    // Say where the window starts and where the baseline weight came from. An
-    // interpolated baseline is a reasonable estimate, not a reading, and a big
-    // gap to the nearest weigh-in makes everything downstream shakier.
-    var baseNote = M.baseline.interpolated
-      ? ' Baseline '+M.baseline.lb+' lb, interpolated between the weigh-ins either side.'
-      : (M.baseline.gapDays > 3
-          ? ' Baseline '+M.baseline.lb+' lb, carried from a weigh-in '+M.baseline.gapDays+' days away — weigh in nearer the start for a firmer footing.'
-          : ' Baseline '+M.baseline.lb+' lb.');
+    // Anchored to the first weigh-in. When food logging started later, say so
+    // — otherwise the untracked stretch at the front looks like a fault in the
+    // model rather than days it was never given anything to score.
+    var lead = M.baseline.leadDays;
     h += '<p style="font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.5">At '+CAL_PER_LB.toLocaleString()+
-      ' cal to the pound, from '+shortDay(M.start)+' — the first day with food logged.'+baseNote+'</p>';
+      ' cal to the pound, from your first weigh-in on '+shortDay(M.start)+' ('+M.baseline.lb+' lb).'+
+      (lead > 1 ? ' Food logging began '+lead+' days later, so that stretch counts as untracked below.' : '')+'</p>';
 
     h += '<div style="display:flex;gap:10px;margin-bottom:14px">'+
       ['<div style="flex:1;background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:10px 12px">'+
