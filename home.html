@@ -55,6 +55,7 @@
     .feature .desc { color: var(--muted); font-size: 0.85rem; line-height: 1.35; }
     .feature .chev { margin-left: auto; color: var(--silver); font-size: 1.4rem; align-self: center; }
     .feature:hover .chev { color: var(--green); }
+    .feature.family .icon { background: #F0EAD8; }
     .feature.gym .icon { background: #E3E7F0; }
     .feature.supplements .icon { background: #E5EDEA; }
     .feature.medical .icon { background: #EDE3E1; }
@@ -85,8 +86,22 @@
     <!-- Order is deliberate: the things you touch daily first (vitals,
          nutrition, supplements), then the training you do (run log, gym), then
          the things you read rather than enter (labs, oura), with the recap —
-         which is a report ABOUT all of the above — last. -->
+         which is a report ABOUT all of the above — last.
+
+         Family sits above all of it because it isn't part of that sequence at
+         all: everything below this is your own health, and Family is the one
+         section the whole household shares. Keeping it visibly separate is the
+         point — see the privacy note at the top of 34_household.sql. -->
     <div class="cards">
+      <a class="feature family" href="family.html">
+        <span class="icon">🏡</span>
+        <span class="copy">
+          <span class="title">Family</span>
+          <span class="desc">Shared calendar, chores &amp; lists</span>
+        </span>
+        <span class="chev">›</span>
+      </a>
+
       <a class="feature vitals" href="vitals.html">
         <span class="icon">🩺</span>
         <span class="copy">

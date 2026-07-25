@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Family · Tally</title>
+  <meta name="theme-color" content="#2C4530">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #3A5A40; --green-deep: #2C4530; --amber: #BE722A;
+      --ink: #1E241C; --bone: #F4F1E9; --paper: #FFFFFF; --surface-warm: #FBF9F3;
+      --muted: #71776B; --silver: #E2DCCF; --green-tint: #EBF0E8; --danger: #A8443A;
+      --f-display: 'Space Grotesk', system-ui, sans-serif;
+      --f-body: 'Inter', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; font-family: var(--f-body); background: var(--bone); color: var(--ink); min-height: 100vh; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+    .topbar { background: var(--green-deep); color: var(--paper); padding: 0.85rem 1.25rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 4px solid var(--amber); }
+    .brand { display: flex; align-items: baseline; gap: 0.5rem; text-decoration: none; color: inherit; }
+    .brand .name { font-family: var(--f-display); font-weight: 700; font-size: 1.15rem; }
+    .brand .name .dot { color: var(--amber); }
+    .user-area { position: relative; }
+    .menu-btn { background: transparent; color: var(--paper); border: 1px solid rgba(255,255,255,.35); width: 38px; height: 38px; border-radius: 8px; cursor: pointer; font-size: 1.3rem; line-height: 1; }
+    .menu-btn:hover { background: var(--green); border-color: var(--green); }
+    .menu { position: absolute; top: calc(100% + 8px); right: 0; background: var(--paper); color: var(--ink); border: 1px solid var(--silver); border-radius: 10px; min-width: 220px; box-shadow: 0 10px 30px rgba(44,69,48,.22); display: none; z-index: 50; overflow: hidden; }
+    .menu.show { display: block; }
+    .menu-user { padding: 0.85rem 1rem; font-size: 0.85rem; color: var(--muted); border-bottom: 1px solid var(--silver); background: var(--surface-warm); }
+    .menu-item { display: block; width: 100%; text-align: left; background: none; border: none; padding: 0.8rem 1rem; font-size: 0.92rem; cursor: pointer; font-family: var(--f-body); color: var(--ink); text-decoration: none; }
+    .menu-item:hover { background: var(--green-tint); }
+    .menu-item.danger { color: var(--danger); }
+
+    main { max-width: 640px; margin: 0 auto; padding: 1.25rem 1.1rem 5rem; }
+    h1.page { font-family: var(--f-display); font-size: 1.5rem; font-weight: 600; color: var(--green-deep); margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 1.25rem; }
+
+    .tabs { display: flex; gap: 0.35rem; background: var(--surface-warm); border: 1px solid var(--silver); border-radius: 12px; padding: 0.3rem; margin-bottom: 1.25rem; }
+    .tab { flex: 1; border: none; background: none; font-family: var(--f-body); font-size: 0.88rem; font-weight: 500; color: var(--muted); padding: 0.55rem 0.3rem; border-radius: 9px; cursor: pointer; }
+    .tab.active { background: var(--paper); color: var(--green-deep); font-weight: 600; box-shadow: 0 1px 3px rgba(44,69,48,.12); }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .card { background: var(--paper); border: 1px solid var(--silver); border-radius: 16px; padding: 1.1rem; margin-bottom: 0.9rem; }
+    .card h2 { font-family: var(--f-display); font-size: 1.05rem; margin: 0 0 0.75rem; color: var(--green-deep); }
+
+    .daygroup { margin-bottom: 1.25rem; }
+    .dayhead { font-family: var(--f-display); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 0.5rem 0.15rem; }
+    .dayhead.today { color: var(--amber); }
+
+    .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
+    .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
+    .row .body { min-width: 0; flex: 1; }
+    .row .t { font-weight: 600; font-size: 0.97rem; word-break: break-word; }
+    .row .meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
+    .row .who { display: flex; gap: 0.25rem; margin-top: 0.35rem; flex-wrap: wrap; }
+    .chip { font-size: 0.72rem; padding: 0.12rem 0.5rem; border-radius: 99px; color: #fff; font-weight: 600; }
+    .row .act { display: flex; gap: 0.3rem; flex-shrink: 0; }
+    .iconbtn { border: 1px solid var(--silver); background: var(--paper); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 0.9rem; line-height: 1; color: var(--muted); }
+    .iconbtn:hover { border-color: var(--green); color: var(--green); }
+    .iconbtn.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+    .check { flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--silver); background: var(--paper); cursor: pointer; font-size: 0.9rem; line-height: 1; color: transparent; padding: 0; }
+    .check.on { background: var(--green); border-color: var(--green); color: #fff; }
+    .row.done .t { text-decoration: line-through; color: var(--muted); }
+
+    .empty { text-align: center; color: var(--muted); font-size: 0.9rem; padding: 2rem 1rem; background: var(--surface-warm); border: 1px dashed var(--silver); border-radius: 14px; }
+
+    label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--muted); margin: 0 0 0.3rem; }
+    input[type=text], input[type=date], input[type=time], input[type=number], select, textarea {
+      width: 100%; font-family: var(--f-body); font-size: 0.95rem; padding: 0.6rem 0.7rem;
+      border: 1px solid var(--silver); border-radius: 10px; background: var(--paper); color: var(--ink);
+    }
+    textarea { resize: vertical; min-height: 60px; }
+    .field { margin-bottom: 0.8rem; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .inline { display: flex; align-items: center; gap: 0.5rem; }
+    .inline input[type=checkbox] { width: 18px; height: 18px; }
+    .inline label { margin: 0; }
+
+    .btn { font-family: var(--f-body); font-size: 0.92rem; font-weight: 600; padding: 0.65rem 1.1rem; border-radius: 10px; border: 1px solid var(--green); background: var(--green); color: #fff; cursor: pointer; }
+    .btn:hover { background: var(--green-deep); }
+    .btn.ghost { background: var(--paper); color: var(--green); }
+    .btn.ghost:hover { background: var(--green-tint); }
+    .btn.danger { border-color: var(--danger); background: var(--paper); color: var(--danger); }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .btnrow { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+    .fab { position: fixed; right: max(1.1rem, env(safe-area-inset-right)); bottom: calc(1.3rem + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%; border: none; background: var(--amber); color: #fff; font-size: 1.8rem; line-height: 1; cursor: pointer; box-shadow: 0 8px 22px rgba(190,114,42,.4); z-index: 40; }
+
+    .sheet-bg { position: fixed; inset: 0; background: rgba(30,36,28,.45); display: none; z-index: 60; }
+    .sheet-bg.show { display: block; }
+    .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-radius: 18px 18px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom)); max-height: 92vh; overflow-y: auto; z-index: 61; display: none; }
+    .sheet.show { display: block; }
+    @media (min-width: 560px) {
+      .sheet { left: 50%; right: auto; bottom: auto; top: 50%; transform: translate(-50%,-50%); width: 520px; border-radius: 18px; }
+    }
+    .sheet h2 { font-family: var(--f-display); font-size: 1.15rem; margin: 0 0 1rem; color: var(--green-deep); }
+
+    .pickers { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .pick { border: 1px solid var(--silver); background: var(--paper); border-radius: 99px; padding: 0.35rem 0.75rem; font-size: 0.82rem; font-family: var(--f-body); cursor: pointer; color: var(--muted); }
+    .pick.on { border-color: var(--green); background: var(--green-tint); color: var(--green-deep); font-weight: 600; }
+
+    .swatches { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    .sw { width: 32px; height: 32px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; }
+    .sw.on { border-color: var(--ink); }
+
+    .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 5.5rem; background: var(--ink); color: #fff; font-size: 0.86rem; padding: 0.6rem 1rem; border-radius: 10px; z-index: 80; display: none; }
+    .toast.show { display: block; }
+
+    .listpick { display: flex; gap: 0.4rem; overflow-x: auto; padding-bottom: 0.4rem; margin-bottom: 0.9rem; }
+    .listpick .pick { white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <a href="home.html" class="brand"><span class="name">Tally<span class="dot">.</span></span></a>
+    <div class="user-area">
+      <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
+      <div class="menu" id="menu" role="menu">
+        <div class="menu-user" id="user-name">…</div>
+        <a class="menu-item" href="home.html" role="menuitem">Back to Tally</a>
+        <button class="menu-item danger" id="signout-btn" role="menuitem">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <h1 class="page" id="page-title">Family</h1>
+    <p class="sub" id="page-sub">Loading…</p>
+
+    <!-- First run: no household yet. -->
+    <div id="setup" style="display:none">
+      <div class="card">
+        <h2>Set up your household</h2>
+        <p class="sub" style="margin-bottom:1rem">One shared calendar, chore list, and set of lists for everyone at home. Your own health data stays private — it isn't part of this.</p>
+        <div class="field">
+          <label for="hh-name">Household name</label>
+          <input type="text" id="hh-name" placeholder="e.g. Smith" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="hh-me">Your name on the calendar</label>
+          <input type="text" id="hh-me" placeholder="e.g. Jeff" autocomplete="off">
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="hh-create">Create household</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="app" style="display:none">
+      <div class="tabs">
+        <button class="tab active" data-tab="calendar">Calendar</button>
+        <button class="tab" data-tab="chores">Chores</button>
+        <button class="tab" data-tab="lists">Lists</button>
+        <button class="tab" data-tab="family">Family</button>
+      </div>
+
+      <section class="panel active" id="panel-calendar"><div id="cal-body"></div></section>
+      <section class="panel" id="panel-chores"><div id="chore-body"></div></section>
+      <section class="panel" id="panel-lists">
+        <div class="listpick" id="list-tabs"></div>
+        <div id="list-body"></div>
+      </section>
+      <section class="panel" id="panel-family"><div id="fam-body"></div></section>
+    </div>
+  </main>
+
+  <button class="fab" id="fab" style="display:none" aria-label="Add">+</button>
+  <div class="toast" id="toast"></div>
+
+  <div class="sheet-bg" id="sheet-bg"></div>
+  <div class="sheet" id="sheet"><div id="sheet-content"></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  // ==========================================================================
+  // Family — household calendar, chores and lists.
+  //
+  // This is the phone side: where things get entered. wall.html is the display.
+  //
+  // Nothing here touches the personal-health tables. The household schema
+  // (34_household.sql) is deliberately separate from runs/labs/vitals/medical,
+  // so there is no query on this page that could reach them even by accident.
+  // ==========================================================================
+
+  const MEMBER_COLORS = ['#4f7cff','#e8734a','#3a9d7e','#b455c9','#d4a017','#d1476b','#5c8ab8','#7a9e3f'];
+  const DOW = ['SU','MO','TU','WE','TH','FR','SA'];
+  const DOW_LABEL = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  let HH = null;          // households row
+  let ME = null;          // my household_members row
+  let MEMBERS = [];
+  let EVENTS = [];        // raw rows (recurring stored once, expanded on read)
+  let CHORES = [];
+  let COMPLETIONS = [];
+  let LISTS = [];
+  let ITEMS = [];
+  let ACTIVE_LIST = null;
+  let TAB = 'calendar';
+
+  // ── Small helpers ────────────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+  function fail(e, what) {
+    console.error(what, e);
+    toast((e && e.message) ? e.message : ('Could not ' + what));
+  }
+
+  // Dates are handled as local calendar days. The household lives in one
+  // timezone, which is the assumption baked into households.time_zone; a
+  // date input means that day where the family is, not UTC.
+  const pad = (n) => String(n).padStart(2, '0');
+  function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+  function parseYmd(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+  function todayYmd() { return ymd(new Date()); }
+  function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+
+  function fmtDayHead(dateStr) {
+    const d = parseYmd(dateStr);
+    const t = todayYmd();
+    if (dateStr === t) return 'Today';
+    if (dateStr === ymd(addDays(new Date(), 1))) return 'Tomorrow';
+    return d.toLocaleDateString(undefined, { weekday:'long', month:'short', day:'numeric' });
+  }
+  function fmtTime(iso) {
+    return new Date(iso).toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
+  }
+  // Build a timestamptz from a local date + time input pair.
+  function localIso(dateStr, timeStr) {
+    const [y,m,d] = dateStr.split('-').map(Number);
+    const [hh,mm] = (timeStr || '00:00').split(':').map(Number);
+    return new Date(y, m-1, d, hh, mm).toISOString();
+  }
+
+  function memberById(id) { return MEMBERS.find(m => m.id === id) || null; }
+  function memberChips(ids) {
+    if (!ids || !ids.length) return '';
+    return '<div class="who">' + ids.map(id => {
+      const m = memberById(id);
+      if (!m) return '';
+      return '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  // ── Recurrence ───────────────────────────────────────────────────────────
+  // Deliberately a small hand-rolled expander, NOT a general RRULE engine. It
+  // only ever sees rules this page's own picker produced:
+  //
+  //   FREQ=DAILY|WEEKLY|MONTHLY[;BYDAY=MO,WE][;UNTIL=YYYYMMDD]
+  //
+  // When iCloud sync lands (Phase 3) the calendar starts receiving arbitrary
+  // rules from the wild — nested BYSETPOS, BYMONTHDAY lists, EXDATE runs — and
+  // this should be swapped for rrule.js rather than extended. Parsing what you
+  // generated yourself is a different problem from parsing what Apple sends.
+  function parseRule(rrule) {
+    const out = {};
+    (rrule || '').split(';').forEach(p => {
+      const [k, v] = p.split('=');
+      if (k) out[k.toUpperCase()] = v;
+    });
+    return out;
+  }
+  function ruleMatches(rule, day, anchor) {
+    const r = parseRule(rule);
+    if (r.UNTIL) {
+      const u = r.UNTIL.slice(0,8);
+      const until = new Date(+u.slice(0,4), +u.slice(4,6)-1, +u.slice(6,8));
+      if (day > until) return false;
+    }
+    if (day < anchor) return false;
+    const freq = (r.FREQ || '').toUpperCase();
+    if (freq === 'DAILY') return true;
+    if (freq === 'WEEKLY') {
+      const days = r.BYDAY ? r.BYDAY.split(',') : [DOW[anchor.getDay()]];
+      return days.indexOf(DOW[day.getDay()]) !== -1;
+    }
+    if (freq === 'MONTHLY') return day.getDate() === anchor.getDate();
+    return false;
+  }
+  function ruleLabel(rrule) {
+    if (!rrule) return '';
+    const r = parseRule(rrule);
+    const f = (r.FREQ || '').toUpperCase();
+    if (f === 'DAILY') return 'Every day';
+    if (f === 'MONTHLY') return 'Monthly';
+    if (f === 'WEEKLY') {
+      if (!r.BYDAY) return 'Weekly';
+      const names = r.BYDAY.split(',').map(d => DOW_LABEL[DOW.indexOf(d)]).filter(Boolean);
+      return names.length === 7 ? 'Every day' : names.join(', ');
+    }
+    return 'Repeats';
+  }
+
+  // Expand events into { dateStr -> [occurrence] } over a window.
+  function expandEvents(days) {
+    const start = new Date(); start.setHours(0,0,0,0);
+    const byDay = {};
+    for (let i = 0; i < days; i++) {
+      const d = addDays(start, i);
+      byDay[ymd(d)] = [];
+    }
+    EVENTS.forEach(ev => {
+      const anchorStr = ev.all_day ? ev.start_date : ymd(new Date(ev.starts_at));
+      const anchor = parseYmd(anchorStr);
+      const ex = (ev.exdates || []).map(x => ymd(new Date(x)));
+      if (!ev.rrule) {
+        if (byDay[anchorStr]) byDay[anchorStr].push({ ev, dateStr: anchorStr });
+        // Multi-day all-day events fill the days between.
+        if (ev.all_day && ev.end_date && ev.end_date !== ev.start_date) {
+          let d = addDays(parseYmd(ev.start_date), 1);
+          const end = parseYmd(ev.end_date);
+          while (d <= end) {
+            const k = ymd(d);
+            if (byDay[k]) byDay[k].push({ ev, dateStr: k, cont: true });
+            d = addDays(d, 1);
+          }
+        }
+        return;
+      }
+      Object.keys(byDay).forEach(k => {
+        if (ex.indexOf(k) !== -1) return;
+        if (ruleMatches(ev.rrule, parseYmd(k), anchor)) byDay[k].push({ ev, dateStr: k });
+      });
+    });
+    Object.keys(byDay).forEach(k => {
+      byDay[k].sort((a, b) => {
+        if (a.ev.all_day !== b.ev.all_day) return a.ev.all_day ? -1 : 1;
+        if (a.ev.all_day) return 0;
+        return new Date(a.ev.starts_at).getHours() * 60 + new Date(a.ev.starts_at).getMinutes()
+             - (new Date(b.ev.starts_at).getHours() * 60 + new Date(b.ev.starts_at).getMinutes());
+      });
+    });
+    return byDay;
+  }
+
+  function choresDueOn(dateStr) {
+    const day = parseYmd(dateStr);
+    return CHORES.filter(c => {
+      if (!c.active) return false;
+      const anchor = parseYmd(c.starts_on);
+      if (!c.rrule) return c.starts_on === dateStr;
+      return ruleMatches(c.rrule, day, anchor);
+    });
+  }
+
+  // ── Load ─────────────────────────────────────────────────────────────────
+  async function loadHousehold(uid) {
+    const { data: mem, error } = await sb
+      .from('household_members')
+      .select('id, household_id, user_id, display_name, color, role, sort_order, active')
+      .eq('user_id', uid)
+      .eq('active', true)
+      .maybeSingle();
+    if (error) throw error;
+    if (!mem) {
+      // Possible half-finished setup: household created, membership insert failed.
+      const { data: owned } = await sb.from('households')
+        .select('id, name, time_zone').eq('created_by', uid).maybeSingle();
+      if (owned) { HH = owned; return 'needs-member'; }
+      return 'none';
+    }
+    ME = mem;
+    const { data: hh, error: e2 } = await sb.from('households')
+      .select('id, name, time_zone').eq('id', mem.household_id).single();
+    if (e2) throw e2;
+    HH = hh;
+    return 'ok';
+  }
+
+  async function loadAll() {
+    const hid = HH.id;
+    const from = ymd(addDays(new Date(), -1));
+    const [mRes, eRes, cRes, kRes, lRes] = await Promise.all([
+      sb.from('household_members').select('*').eq('household_id', hid)
+        .eq('active', true).order('sort_order'),
+      // Non-recurring events from yesterday forward, plus every series. Series
+      // have to come back whole because their occurrences aren't rows.
+      sb.from('events').select('*').eq('household_id', hid)
+        .or('rrule.not.is.null,starts_at.gte.' + from + 'T00:00:00Z,start_date.gte.' + from),
+      sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
+      sb.from('chore_completions').select('*').eq('household_id', hid).gte('due_on', from),
+      sb.from('lists').select('*').eq('household_id', hid).order('sort_order')
+    ]);
+    for (const r of [mRes, eRes, cRes, kRes, lRes]) if (r.error) throw r.error;
+    MEMBERS = mRes.data || [];
+    EVENTS = eRes.data || [];
+    CHORES = cRes.data || [];
+    COMPLETIONS = kRes.data || [];
+    LISTS = lRes.data || [];
+    if (LISTS.length) {
+      if (!ACTIVE_LIST || !LISTS.some(l => l.id === ACTIVE_LIST)) ACTIVE_LIST = LISTS[0].id;
+      const { data: items, error } = await sb.from('list_items').select('*')
+        .eq('list_id', ACTIVE_LIST).order('checked').order('position');
+      if (error) throw error;
+      ITEMS = items || [];
+    } else { ACTIVE_LIST = null; ITEMS = []; }
+  }
+
+  async function refresh() {
+    try { await loadAll(); render(); }
+    catch (e) { fail(e, 'load your household'); }
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  function render() {
+    $('page-sub').textContent = HH.name + ' · ' + MEMBERS.length +
+      (MEMBERS.length === 1 ? ' member' : ' members');
+    renderCalendar(); renderChores(); renderLists(); renderFamily();
+  }
+
+  function renderCalendar() {
+    const byDay = expandEvents(21);
+    const keys = Object.keys(byDay).sort();
+    let html = '';
+    let shown = 0;
+    keys.forEach(k => {
+      const occ = byDay[k];
+      if (!occ.length) return;
+      shown += occ.length;
+      html += '<div class="daygroup"><p class="dayhead' + (k === todayYmd() ? ' today' : '') + '">' +
+              esc(fmtDayHead(k)) + '</p>';
+      occ.forEach(o => {
+        const ev = o.ev;
+        const color = ev.color || (ev.attendee_ids && ev.attendee_ids.length
+          ? (memberById(ev.attendee_ids[0]) || {}).color : null) || '#3A5A40';
+        const when = ev.all_day
+          ? (o.cont ? 'All day (continues)' : 'All day')
+          : fmtTime(ev.starts_at) + (ev.ends_at ? ' – ' + fmtTime(ev.ends_at) : '');
+        const bits = [when];
+        if (ev.location) bits.push(esc(ev.location));
+        if (ev.rrule) bits.push(esc(ruleLabel(ev.rrule)));
+        html += '<div class="row">' +
+          '<span class="swatch" style="background:' + esc(color) + '"></span>' +
+          '<span class="body"><span class="t">' + esc(ev.title) + '</span>' +
+          '<div class="meta">' + bits.join(' · ') + '</div>' +
+          memberChips(ev.attendee_ids) + '</span>' +
+          '<span class="act">' +
+          '<button class="iconbtn" data-edit-event="' + ev.id + '" aria-label="Edit">✎</button>' +
+          '<button class="iconbtn danger" data-del-event="' + ev.id + '" data-day="' + k + '" aria-label="Delete">🗑</button>' +
+          '</span></div>';
+      });
+      html += '</div>';
+    });
+    $('cal-body').innerHTML = shown ? html :
+      '<div class="empty">Nothing on the calendar for the next three weeks.<br>Tap + to add something.</div>';
+  }
+
+  function renderChores() {
+    const today = todayYmd();
+    const due = choresDueOn(today);
+    let html = '<div class="daygroup"><p class="dayhead today">Today</p>';
+    if (!due.length) {
+      html += '<div class="empty">No chores due today.</div>';
+    } else {
+      due.forEach(c => {
+        const done = COMPLETIONS.find(x => x.chore_id === c.id && x.due_on === today);
+        const m = c.assigned_to ? memberById(c.assigned_to) : null;
+        const bits = [];
+        if (m) bits.push(esc(m.display_name));
+        if (c.rrule) bits.push(esc(ruleLabel(c.rrule)));
+        if (c.points) bits.push(c.points + ' pts');
+        html += '<div class="row' + (done ? ' done' : '') + '">' +
+          '<button class="check' + (done ? ' on' : '') + '" data-chore="' + c.id + '" aria-label="Toggle">✓</button>' +
+          '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
+          (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '') +
+          '</span><span class="act">' +
+          '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
+          '</span></div>';
+      });
+    }
+    html += '</div>';
+
+    const others = CHORES.filter(c => due.indexOf(c) === -1);
+    if (others.length) {
+      html += '<div class="daygroup"><p class="dayhead">Other chores</p>';
+      others.forEach(c => {
+        html += '<div class="row"><span class="swatch"></span><span class="body">' +
+          '<span class="t">' + esc(c.title) + '</span>' +
+          '<div class="meta">' + esc(ruleLabel(c.rrule) || ('From ' + c.starts_on)) + '</div>' +
+          '</span><span class="act">' +
+          '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
+          '</span></div>';
+      });
+      html += '</div>';
+    }
+    $('chore-body').innerHTML = html;
+  }
+
+  function renderLists() {
+    $('list-tabs').innerHTML = LISTS.map(l =>
+      '<button class="pick' + (l.id === ACTIVE_LIST ? ' on' : '') + '" data-list="' + l.id + '">' +
+      esc(l.name) + '</button>').join('') +
+      '<button class="pick" data-new-list="1">+ New list</button>';
+
+    if (!ACTIVE_LIST) {
+      $('list-body').innerHTML = '<div class="empty">No lists yet. Make one for groceries.</div>';
+      return;
+    }
+    if (!ITEMS.length) {
+      $('list-body').innerHTML = '<div class="empty">This list is empty. Tap + to add.</div>';
+      return;
+    }
+    $('list-body').innerHTML = ITEMS.map(it => {
+      const by = it.checked_by ? memberById(it.checked_by) : null;
+      return '<div class="row' + (it.checked ? ' done' : '') + '">' +
+        '<button class="check' + (it.checked ? ' on' : '') + '" data-item="' + it.id + '" aria-label="Toggle">✓</button>' +
+        '<span class="body"><span class="t">' + esc(it.body) + '</span>' +
+        (by ? '<div class="meta">' + esc(by.display_name) + '</div>' : '') +
+        '</span><span class="act">' +
+        '<button class="iconbtn danger" data-del-item="' + it.id + '" aria-label="Delete">🗑</button>' +
+        '</span></div>';
+    }).join('');
+  }
+
+  function renderFamily() {
+    let html = '<div class="card"><h2>' + esc(HH.name) + '</h2>' +
+      '<p class="sub" style="margin:0">Everyone below shares the calendar, chores and lists. ' +
+      'Health data stays private to each person.</p></div>';
+    MEMBERS.forEach(m => {
+      html += '<div class="row">' +
+        '<span class="swatch" style="background:' + esc(m.color) + '"></span>' +
+        '<span class="body"><span class="t">' + esc(m.display_name) + '</span>' +
+        '<div class="meta">' + esc(m.role) + (m.user_id ? ' · has a login' : ' · no login yet') + '</div>' +
+        '</span><span class="act">' +
+        '<button class="iconbtn" data-edit-member="' + m.id + '" aria-label="Edit">✎</button>' +
+        '</span></div>';
+    });
+    html += '<div class="btnrow"><button class="btn ghost" id="add-member">Add someone</button></div>';
+    $('fam-body').innerHTML = html;
+  }
+
+  // ── Sheet (modal) ────────────────────────────────────────────────────────
+  function openSheet(html) {
+    $('sheet-content').innerHTML = html;
+    $('sheet').classList.add('show'); $('sheet-bg').classList.add('show');
+  }
+  function closeSheet() {
+    $('sheet').classList.remove('show'); $('sheet-bg').classList.remove('show');
+    $('sheet-content').innerHTML = '';
+  }
+  $('sheet-bg').addEventListener('click', closeSheet);
+
+  function attendeePicker(selected) {
+    return '<div class="pickers" id="pick-who">' + MEMBERS.map(m =>
+      '<button type="button" class="pick' + (selected.indexOf(m.id) !== -1 ? ' on' : '') +
+      '" data-who="' + m.id + '">' + esc(m.display_name) + '</button>').join('') + '</div>';
+  }
+  function repeatPicker(rrule) {
+    const r = parseRule(rrule);
+    const freq = (r.FREQ || '').toUpperCase();
+    const byday = r.BYDAY ? r.BYDAY.split(',') : [];
+    return '<div class="field"><label>Repeat</label>' +
+      '<select id="f-freq">' +
+      ['','DAILY','WEEKLY','MONTHLY'].map(v =>
+        '<option value="' + v + '"' + (v === freq ? ' selected' : '') + '>' +
+        (v === '' ? 'Does not repeat' : v === 'DAILY' ? 'Every day' : v === 'WEEKLY' ? 'Weekly' : 'Monthly') +
+        '</option>').join('') + '</select></div>' +
+      '<div class="field" id="byday-wrap" style="display:' + (freq === 'WEEKLY' ? 'block' : 'none') + '">' +
+      '<label>On these days</label><div class="pickers" id="pick-days">' +
+      DOW.map((d, i) => '<button type="button" class="pick' + (byday.indexOf(d) !== -1 ? ' on' : '') +
+        '" data-dow="' + d + '">' + DOW_LABEL[i] + '</button>').join('') + '</div></div>';
+  }
+  function wireRepeat() {
+    const sel = $('f-freq');
+    if (!sel) return;
+    sel.addEventListener('change', () => {
+      $('byday-wrap').style.display = sel.value === 'WEEKLY' ? 'block' : 'none';
+    });
+    document.querySelectorAll('#pick-days .pick, #pick-who .pick').forEach(b =>
+      b.addEventListener('click', () => b.classList.toggle('on')));
+  }
+  function readRepeat() {
+    const sel = $('f-freq');
+    if (!sel || !sel.value) return null;
+    let rule = 'FREQ=' + sel.value;
+    if (sel.value === 'WEEKLY') {
+      const days = Array.from(document.querySelectorAll('#pick-days .pick.on')).map(b => b.dataset.dow);
+      if (days.length) rule += ';BYDAY=' + days.join(',');
+    }
+    return rule;
+  }
+  function readWho() {
+    return Array.from(document.querySelectorAll('#pick-who .pick.on')).map(b => b.dataset.who);
+  }
+
+  // ── Event form ───────────────────────────────────────────────────────────
+  function eventSheet(ev) {
+    const isNew = !ev;
+    ev = ev || {};
+    const allDay = !!ev.all_day;
+    const sDate = allDay ? (ev.start_date || todayYmd())
+                         : (ev.starts_at ? ymd(new Date(ev.starts_at)) : todayYmd());
+    const eDate = allDay ? (ev.end_date || sDate)
+                         : (ev.ends_at ? ymd(new Date(ev.ends_at)) : sDate);
+    const sTime = ev.starts_at ? new Date(ev.starts_at).toTimeString().slice(0,5) : '09:00';
+    const eTime = ev.ends_at ? new Date(ev.ends_at).toTimeString().slice(0,5) : '10:00';
+
+    openSheet(
+      '<h2>' + (isNew ? 'New event' : 'Edit event') + '</h2>' +
+      '<div class="field"><label for="f-title">What</label>' +
+      '<input type="text" id="f-title" value="' + esc(ev.title || '') + '" placeholder="Soccer practice"></div>' +
+      '<div class="field inline"><input type="checkbox" id="f-allday"' + (allDay ? ' checked' : '') + '>' +
+      '<label for="f-allday">All day</label></div>' +
+      '<div class="field grid2">' +
+      '<div><label for="f-sdate">Starts</label><input type="date" id="f-sdate" value="' + sDate + '"></div>' +
+      '<div id="stime-wrap" style="display:' + (allDay ? 'none' : 'block') + '">' +
+      '<label for="f-stime">At</label><input type="time" id="f-stime" value="' + sTime + '"></div></div>' +
+      '<div class="field grid2">' +
+      '<div><label for="f-edate">Ends</label><input type="date" id="f-edate" value="' + eDate + '"></div>' +
+      '<div id="etime-wrap" style="display:' + (allDay ? 'none' : 'block') + '">' +
+      '<label for="f-etime">At</label><input type="time" id="f-etime" value="' + eTime + '"></div></div>' +
+      '<div class="field"><label for="f-loc">Where</label>' +
+      '<input type="text" id="f-loc" value="' + esc(ev.location || '') + '" placeholder="Optional"></div>' +
+      '<div class="field"><label>Who</label>' + attendeePicker(ev.attendee_ids || []) + '</div>' +
+      repeatPicker(ev.rrule) +
+      '<div class="field"><label for="f-notes">Notes</label>' +
+      '<textarea id="f-notes" placeholder="Optional">' + esc(ev.notes || '') + '</textarea></div>' +
+      '<div class="btnrow">' +
+      '<button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
+    );
+    wireRepeat();
+    const ad = $('f-allday');
+    ad.addEventListener('change', () => {
+      const hide = ad.checked ? 'none' : 'block';
+      $('stime-wrap').style.display = hide; $('etime-wrap').style.display = hide;
+    });
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', () => saveEvent(ev.id));
+  }
+
+  async function saveEvent(id) {
+    const title = $('f-title').value.trim();
+    if (!title) { toast('Give it a name'); return; }
+    const allDay = $('f-allday').checked;
+    const sDate = $('f-sdate').value, eDate = $('f-edate').value || $('f-sdate').value;
+    if (!sDate) { toast('Pick a date'); return; }
+
+    // The events_time_shape constraint makes the mixed form unrepresentable —
+    // one branch or the other, never both.
+    const row = {
+      household_id: HH.id,
+      title: title,
+      location: $('f-loc').value.trim() || null,
+      notes: $('f-notes').value.trim() || null,
+      all_day: allDay,
+      starts_at: allDay ? null : localIso(sDate, $('f-stime').value),
+      ends_at:   allDay ? null : localIso(eDate, $('f-etime').value),
+      start_date: allDay ? sDate : null,
+      end_date:   allDay ? eDate : null,
+      time_zone: HH.time_zone,
+      rrule: readRepeat(),
+      attendee_ids: readWho(),
+      created_by: ME.user_id
+    };
+    if (!allDay && new Date(row.ends_at) < new Date(row.starts_at)) {
+      toast('Ends before it starts'); return;
+    }
+    try {
+      const q = id ? sb.from('events').update(row).eq('id', id)
+                   : sb.from('events').insert(row);
+      const { error } = await q;
+      if (error) throw error;
+      closeSheet(); toast(id ? 'Updated' : 'Added'); await refresh();
+    } catch (e) { fail(e, 'save the event'); }
+  }
+
+  // Deleting one occurrence of a series appends to exdates rather than
+  // removing the series — see the exdates note in 34_household.sql.
+  //
+  // Recurring events need a three-way choice, which confirm() can't express:
+  // squeezing it in would make "Cancel" delete a day instead of cancelling.
+  // A sheet keeps the destructive options explicit and backing out free.
+  async function deleteEvent(id, dayStr) {
+    const ev = EVENTS.find(e => e.id === id);
+    if (!ev) return;
+
+    const dropSeries = async () => {
+      try {
+        const { error } = await sb.from('events').delete().eq('id', id);
+        if (error) throw error;
+        closeSheet(); toast('Deleted'); await refresh();
+      } catch (e) { fail(e, 'delete the event'); }
+    };
+
+    if (!ev.rrule) {
+      openSheet(
+        '<h2>Delete this event?</h2>' +
+        '<p class="sub">' + esc(ev.title) + '</p>' +
+        '<div class="btnrow"><button class="btn ghost" id="d-cancel">Keep it</button>' +
+        '<button class="btn danger" id="d-all">Delete</button></div>'
+      );
+      $('d-cancel').addEventListener('click', closeSheet);
+      $('d-all').addEventListener('click', dropSeries);
+      return;
+    }
+
+    openSheet(
+      '<h2>This one repeats</h2>' +
+      '<p class="sub">' + esc(ev.title) + ' · ' + esc(ruleLabel(ev.rrule)) + '</p>' +
+      '<div class="btnrow" style="flex-direction:column;align-items:stretch;gap:.5rem">' +
+      '<button class="btn ghost" id="d-one">Just ' + esc(fmtDayHead(dayStr)) + '</button>' +
+      '<button class="btn danger" id="d-all">Delete the whole series</button>' +
+      '<button class="btn ghost" id="d-cancel">Keep it</button></div>'
+    );
+    $('d-cancel').addEventListener('click', closeSheet);
+    $('d-all').addEventListener('click', dropSeries);
+    $('d-one').addEventListener('click', async () => {
+      try {
+        const ex = (ev.exdates || []).slice();
+        ex.push(localIso(dayStr, '00:00'));
+        const { error } = await sb.from('events').update({ exdates: ex }).eq('id', id);
+        if (error) throw error;
+        closeSheet(); toast('Removed that day'); await refresh();
+      } catch (e) { fail(e, 'remove that day'); }
+    });
+  }
+
+  // ── Chore form ───────────────────────────────────────────────────────────
+  function choreSheet(c) {
+    const isNew = !c;
+    c = c || {};
+    openSheet(
+      '<h2>' + (isNew ? 'New chore' : 'Edit chore') + '</h2>' +
+      '<div class="field"><label for="f-title">What</label>' +
+      '<input type="text" id="f-title" value="' + esc(c.title || '') + '" placeholder="Take the bins out"></div>' +
+      '<div class="field"><label for="f-who1">Who</label><select id="f-who1">' +
+      '<option value="">Anyone</option>' + MEMBERS.map(m =>
+        '<option value="' + m.id + '"' + (c.assigned_to === m.id ? ' selected' : '') + '>' +
+        esc(m.display_name) + '</option>').join('') + '</select></div>' +
+      '<div class="field grid2">' +
+      '<div><label for="f-start">Starting</label>' +
+      '<input type="date" id="f-start" value="' + (c.starts_on || todayYmd()) + '"></div>' +
+      '<div><label for="f-points">Points</label>' +
+      '<input type="number" id="f-points" min="0" value="' + (c.points || 0) + '"></div></div>' +
+      repeatPicker(c.rrule) +
+      '<div class="btnrow">' +
+      (isNew ? '' : '<button class="btn danger" id="f-del">Delete</button>') +
+      '<button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
+    );
+    wireRepeat();
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', () => saveChore(c.id));
+    if (!isNew) $('f-del').addEventListener('click', () => deleteChore(c.id, c.title));
+  }
+
+  async function saveChore(id) {
+    const title = $('f-title').value.trim();
+    if (!title) { toast('Give it a name'); return; }
+    const row = {
+      household_id: HH.id,
+      title: title,
+      assigned_to: $('f-who1').value || null,
+      starts_on: $('f-start').value || todayYmd(),
+      points: parseInt($('f-points').value, 10) || 0,
+      rrule: readRepeat(),
+      created_by: ME.user_id
+    };
+    try {
+      const q = id ? sb.from('chores').update(row).eq('id', id)
+                   : sb.from('chores').insert(row);
+      const { error } = await q;
+      if (error) throw error;
+      closeSheet(); toast(id ? 'Updated' : 'Added'); await refresh();
+    } catch (e) { fail(e, 'save the chore'); }
+  }
+
+  async function deleteChore(id, title) {
+    if (!confirm('Delete "' + title + '"? Its completion history goes too.')) return;
+    try {
+      const { error } = await sb.from('chores').delete().eq('id', id);
+      if (error) throw error;
+      closeSheet(); toast('Deleted'); await refresh();
+    } catch (e) { fail(e, 'delete the chore'); }
+  }
+
+  async function toggleChore(choreId) {
+    const today = todayYmd();
+    const done = COMPLETIONS.find(x => x.chore_id === choreId && x.due_on === today);
+    try {
+      if (done) {
+        const { error } = await sb.from('chore_completions').delete().eq('id', done.id);
+        if (error) throw error;
+      } else {
+        // The unique index on (chore_id, due_on) means two people tapping at
+        // once is a conflict, not two completions. Treat that as success.
+        const { error } = await sb.from('chore_completions').insert({
+          household_id: HH.id, chore_id: choreId, member_id: ME.id, due_on: today
+        });
+        if (error && error.code !== '23505') throw error;
+      }
+      await refresh();
+    } catch (e) { fail(e, 'update the chore'); }
+  }
+
+  // ── Lists ────────────────────────────────────────────────────────────────
+  function listSheet() {
+    openSheet(
+      '<h2>New list</h2>' +
+      '<div class="field"><label for="f-name">Name</label>' +
+      '<input type="text" id="f-name" placeholder="Groceries"></div>' +
+      '<div class="field"><label for="f-kind">Kind</label><select id="f-kind">' +
+      '<option value="grocery">Grocery</option><option value="todo">To-do</option>' +
+      '<option value="packing">Packing</option><option value="other">Other</option>' +
+      '</select></div>' +
+      '<div class="btnrow"><button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">Create</button></div>'
+    );
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', async () => {
+      const name = $('f-name').value.trim();
+      if (!name) { toast('Name it'); return; }
+      try {
+        const { data, error } = await sb.from('lists').insert({
+          household_id: HH.id, name: name, kind: $('f-kind').value,
+          sort_order: LISTS.length
+        }).select('id').single();
+        if (error) throw error;
+        ACTIVE_LIST = data.id;
+        closeSheet(); toast('List created'); await refresh();
+      } catch (e) { fail(e, 'create the list'); }
+    });
+  }
+
+  function itemSheet() {
+    if (!ACTIVE_LIST) { listSheet(); return; }
+    openSheet(
+      '<h2>Add to list</h2>' +
+      '<div class="field"><label for="f-body">Item</label>' +
+      '<input type="text" id="f-body" placeholder="Milk" autocomplete="off"></div>' +
+      '<p class="sub" style="margin:0 0 .5rem">Adds and stays open, so you can rattle off a few.</p>' +
+      '<div class="btnrow"><button class="btn ghost" id="f-cancel">Done</button>' +
+      '<button class="btn" id="f-save">Add</button></div>'
+    );
+    const input = $('f-body');
+    input.focus();
+    const add = async () => {
+      const body = input.value.trim();
+      if (!body) return;
+      try {
+        const { error } = await sb.from('list_items').insert({
+          household_id: HH.id, list_id: ACTIVE_LIST, body: body, position: ITEMS.length
+        });
+        if (error) throw error;
+        input.value = ''; input.focus();
+        await loadAll(); renderLists();
+      } catch (e) { fail(e, 'add the item'); }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+    $('f-save').addEventListener('click', add);
+    $('f-cancel').addEventListener('click', closeSheet);
+  }
+
+  async function toggleItem(id) {
+    const it = ITEMS.find(x => x.id === id);
+    if (!it) return;
+    try {
+      const { error } = await sb.from('list_items').update({
+        checked: !it.checked,
+        checked_by: !it.checked ? ME.id : null,
+        checked_at: !it.checked ? new Date().toISOString() : null
+      }).eq('id', id);
+      if (error) throw error;
+      await loadAll(); renderLists();
+    } catch (e) { fail(e, 'update the item'); }
+  }
+
+  async function deleteItem(id) {
+    try {
+      const { error } = await sb.from('list_items').delete().eq('id', id);
+      if (error) throw error;
+      await loadAll(); renderLists();
+    } catch (e) { fail(e, 'delete the item'); }
+  }
+
+  // ── Members ──────────────────────────────────────────────────────────────
+  function memberSheet(m) {
+    const isNew = !m;
+    m = m || { color: MEMBER_COLORS[MEMBERS.length % MEMBER_COLORS.length], role: 'adult' };
+    openSheet(
+      '<h2>' + (isNew ? 'Add someone' : 'Edit ' + esc(m.display_name)) + '</h2>' +
+      '<div class="field"><label for="f-name">Name</label>' +
+      '<input type="text" id="f-name" value="' + esc(m.display_name || '') + '" placeholder="Emma"></div>' +
+      '<div class="field"><label for="f-role">Role</label><select id="f-role">' +
+      ['admin','adult','kid'].map(r => '<option value="' + r + '"' + (m.role === r ? ' selected' : '') +
+        '>' + r + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label>Colour</label><div class="swatches" id="pick-color">' +
+      MEMBER_COLORS.map(c => '<button type="button" class="sw' + (m.color === c ? ' on' : '') +
+        '" data-color="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>').join('') +
+      '</div></div>' +
+      '<p class="sub" style="margin:0 0 .5rem">They get their own login by signing in with their email — ' +
+      'link it once they have, from here.</p>' +
+      '<div class="btnrow">' +
+      (isNew || m.user_id ? '' : '<button class="btn danger" id="f-del">Remove</button>') +
+      '<button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
+    );
+    document.querySelectorAll('#pick-color .sw').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#pick-color .sw').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    }));
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', async () => {
+      const name = $('f-name').value.trim();
+      if (!name) { toast('Name them'); return; }
+      const sel = document.querySelector('#pick-color .sw.on');
+      const row = {
+        household_id: HH.id, display_name: name, role: $('f-role').value,
+        color: sel ? sel.dataset.color : MEMBER_COLORS[0],
+        sort_order: m.sort_order != null ? m.sort_order : MEMBERS.length
+      };
+      try {
+        const q = m.id ? sb.from('household_members').update(row).eq('id', m.id)
+                       : sb.from('household_members').insert(row);
+        const { error } = await q;
+        if (error) throw error;
+        closeSheet(); toast(m.id ? 'Updated' : 'Added'); await refresh();
+      } catch (e) { fail(e, 'save that person'); }
+    });
+    const del = $('f-del');
+    if (del) del.addEventListener('click', async () => {
+      if (!confirm('Remove ' + m.display_name + ' from the household?')) return;
+      try {
+        const { error } = await sb.from('household_members').update({ active: false }).eq('id', m.id);
+        if (error) throw error;
+        closeSheet(); toast('Removed'); await refresh();
+      } catch (e) { fail(e, 'remove them'); }
+    });
+  }
+
+  // ── Setup ────────────────────────────────────────────────────────────────
+  async function createHousehold(uid, email) {
+    const name = $('hh-name').value.trim();
+    const mine = $('hh-me').value.trim();
+    if (!name) { toast('Name your household'); return; }
+    if (!mine) { toast('What should the calendar call you?'); return; }
+    const btn = $('hh-create'); btn.disabled = true;
+    try {
+      let hid = HH ? HH.id : null;
+      if (!hid) {
+        const { data, error } = await sb.from('households')
+          .insert({ name: name, created_by: uid }).select('id, name, time_zone').single();
+        if (error) throw error;
+        HH = data; hid = data.id;
+      }
+      const { error: e2 } = await sb.from('household_members').insert({
+        household_id: hid, user_id: uid, display_name: mine,
+        role: 'admin', color: MEMBER_COLORS[0], sort_order: 0
+      });
+      if (e2) throw e2;
+      await start(uid, email);
+    } catch (e) {
+      btn.disabled = false;
+      fail(e, 'create the household');
+    }
+  }
+
+  // ── Wiring ───────────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    TAB = t.dataset.tab;
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+    document.querySelectorAll('.panel').forEach(p =>
+      p.classList.toggle('active', p.id === 'panel-' + TAB));
+    $('fab').style.display = TAB === 'family' ? 'none' : 'block';
+  }));
+
+  $('fab').addEventListener('click', () => {
+    if (TAB === 'calendar') eventSheet(null);
+    else if (TAB === 'chores') choreSheet(null);
+    else if (TAB === 'lists') itemSheet();
+  });
+
+  // One delegated listener rather than rebinding after every render.
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('button');
+    if (!t) return;
+    if (t.dataset.editEvent) { const ev = EVENTS.find(x => x.id === t.dataset.editEvent); if (ev) eventSheet(ev); }
+    else if (t.dataset.delEvent) deleteEvent(t.dataset.delEvent, t.dataset.day);
+    else if (t.dataset.chore) toggleChore(t.dataset.chore);
+    else if (t.dataset.editChore) { const c = CHORES.find(x => x.id === t.dataset.editChore); if (c) choreSheet(c); }
+    else if (t.dataset.item) toggleItem(t.dataset.item);
+    else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
+    else if (t.dataset.list) { ACTIVE_LIST = t.dataset.list; refresh(); }
+    else if (t.dataset.newList) listSheet();
+    else if (t.dataset.editMember) { const m = MEMBERS.find(x => x.id === t.dataset.editMember); if (m) memberSheet(m); }
+    else if (t.id === 'add-member') memberSheet(null);
+  });
+
+  const menuBtn = $('menu-btn'), menu = $('menu');
+  menuBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('show'); });
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target) && e.target !== menuBtn) menu.classList.remove('show');
+  });
+  $('signout-btn').addEventListener('click', () => {
+    if (!confirm("Sign out? You'll go back to the sign-in screen.")) return;
+    signOut();
+  });
+
+  async function start(uid, email) {
+    let state;
+    try { state = await loadHousehold(uid); }
+    catch (e) { fail(e, 'load your household'); $('page-sub').textContent = 'Something went wrong.'; return; }
+
+    if (state === 'ok') {
+      $('setup').style.display = 'none';
+      $('app').style.display = 'block';
+      $('fab').style.display = 'block';
+      await refresh();
+    } else {
+      $('app').style.display = 'none';
+      $('fab').style.display = 'none';
+      $('setup').style.display = 'block';
+      $('page-sub').textContent = 'Let’s get you set up.';
+      if (HH) $('hh-name').value = HH.name;
+      $('hh-me').value = (email || '').split('@')[0] || '';
+      $('hh-create').onclick = () => createHousehold(uid, email);
+    }
+  }
+
+  (async () => {
+    const auth = await requireUser();   // auth.js — redirects if not signed in
+    if (!auth) return;
+    $('user-name').textContent = auth.user.email || '';
+    await start(auth.user.id, auth.user.email);
+  })();
+  </script>
+</body>
+</html>
