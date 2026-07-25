@@ -19,9 +19,36 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from supabase import create_client
 
 API = "https://www.strava.com/api/v3"
+HTTP_TIMEOUT = 30
+
+
+def http_session():
+    """A session that rides out Strava's transient server-side blips.
+
+    Strava's edge occasionally answers with a 5xx — including non-standard
+    codes like 597 — and a single one used to abort the whole sync. Retrying
+    the full 5xx range covers those oddballs; 429 is deliberately NOT retried,
+    because rate limits are handled by the callers, which stop and let the
+    next scheduled run pick up where this one left off.
+    """
+    retry = Retry(
+        total=3,
+        backoff_factor=1,               # 0s, 2s, 4s between attempts
+        status_forcelist=range(500, 600),
+        allowed_methods=frozenset(["GET", "POST"]),
+        raise_on_status=False,          # hand back the last response, not a RetryError,
+    )                                   # so callers' status checks behave as before
+    s = requests.Session()
+    s.mount("https://", HTTPAdapter(max_retries=retry))
+    return s
+
+
+HTTP = http_session()
 
 
 def env(key, required=False, default=None):
@@ -86,10 +113,10 @@ def activity_type_from_sport(sport):
 
 
 def strava_access_token():
-    r = requests.post("https://www.strava.com/oauth/token", data={
+    r = HTTP.post("https://www.strava.com/oauth/token", data={
         "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
         "grant_type": "refresh_token", "refresh_token": REFRESH_TOKEN,
-    })
+    }, timeout=HTTP_TIMEOUT)
     r.raise_for_status()
     return r.json()["access_token"]
 
@@ -156,7 +183,7 @@ def build_laps(sid, headers):
     Segment type is auto-guessed from lap pace (fast=interval, slow=rest); the
     user can re-classify in the app."""
     try:
-        r = requests.get(f"{API}/activities/{sid}/laps", headers=headers)
+        r = HTTP.get(f"{API}/activities/{sid}/laps", headers=headers, timeout=HTTP_TIMEOUT)
         if r.status_code != 200:
             return None
         laps = r.json()
@@ -240,9 +267,9 @@ def backfill_streams(sb, headers, athlete_id):
             continue
         sid = ref.split(":", 1)[1]
         try:
-            sr = requests.get(f"{API}/activities/{sid}/streams", headers=headers,
-                              params={"keys": "time,distance,heartrate,cadence,velocity_smooth",
-                                      "key_by_type": "true"}, timeout=30)
+            sr = HTTP.get(f"{API}/activities/{sid}/streams", headers=headers,
+                          params={"keys": "time,distance,heartrate,cadence,velocity_smooth",
+                                  "key_by_type": "true"}, timeout=HTTP_TIMEOUT)
             if sr.status_code == 429:
                 print(f"  rate-limited after {filled}; the rest resume on the next sync")
                 break
@@ -280,7 +307,7 @@ def _weather_call(url, params):
     """Fetch one Open-Meteo range into {'YYYY-MM-DDTHH:00': {...}}."""
     out = {}
     try:
-        r = requests.get(url, params=params, timeout=30)
+        r = HTTP.get(url, params=params, timeout=HTTP_TIMEOUT)
         if r.status_code != 200:
             print(f"  weather: HTTP {r.status_code} {r.text[:120]}")
             return out
@@ -378,8 +405,9 @@ def main():
 
     activities, page = [], 1
     while True:
-        r = requests.get(f"{API}/athlete/activities", headers=headers,
-                         params={"after": after, "per_page": 50, "page": page})
+        r = HTTP.get(f"{API}/athlete/activities", headers=headers,
+                     params={"after": after, "per_page": 50, "page": page},
+                     timeout=HTTP_TIMEOUT)
         r.raise_for_status()
         batch = r.json()
         activities += batch
@@ -421,9 +449,9 @@ def main():
             }
 
             try:
-                sr = requests.get(f"{API}/activities/{sid}/streams", headers=headers,
-                                  params={"keys": "time,distance,heartrate,cadence,velocity_smooth",
-                                          "key_by_type": "true"})
+                sr = HTTP.get(f"{API}/activities/{sid}/streams", headers=headers,
+                              params={"keys": "time,distance,heartrate,cadence,velocity_smooth",
+                                      "key_by_type": "true"}, timeout=HTTP_TIMEOUT)
                 if sr.status_code == 200:
                     samples, splits, max_cad = compute_from_streams(sr.json())
                     row["samples"] = samples
