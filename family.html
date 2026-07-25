@@ -3,14 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Family · Tally</title>
+  <title>Family — Calendar, chores and lists</title>
   <meta name="theme-color" content="#2C4530">
-  <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="manifest" href="manifest.json">
+  <!-- Family installs as its own app, the same way Crate does — its own icon
+       and manifest, deliberately NOT Tally's. The reason here is the audience
+       rather than the subject: everything in Tally is one person's health, and
+       this is the one section the whole household shares. A partner or kid who
+       installs Family should never land in a health log they have no rows in. -->
+  <link rel="icon" type="image/svg+xml" href="family-icon.svg">
+  <link rel="apple-touch-icon" href="family-touch-icon.png">
+  <link rel="manifest" href="family-manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Tally">
+  <meta name="apple-mobile-web-app-title" content="Family">
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -122,7 +127,7 @@
 </head>
 <body>
   <div class="topbar">
-    <a href="home.html" class="brand"><span class="name">Tally<span class="dot">.</span></span></a>
+    <a href="family.html" class="brand"><span class="name">Family<span class="dot">.</span></span></a>
     <div class="user-area">
       <button class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true">⋯</button>
       <div class="menu" id="menu" role="menu">
@@ -420,7 +425,10 @@
 
   // ── Render ───────────────────────────────────────────────────────────────
   function render() {
-    $('page-sub').textContent = HH.name + ' · ' + MEMBERS.length +
+    // The topbar already says "Family", so the heading carries the household
+    // name instead of repeating it.
+    $('page-title').textContent = HH.name;
+    $('page-sub').textContent = MEMBERS.length +
       (MEMBERS.length === 1 ? ' member' : ' members');
     renderCalendar(); renderChores(); renderLists(); renderFamily();
   }

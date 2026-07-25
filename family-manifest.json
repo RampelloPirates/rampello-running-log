@@ -1,0 +1,16 @@
+{
+  "name": "Family",
+  "short_name": "Family",
+  "description": "The household calendar, chores and lists.",
+  "start_url": "/family.html",
+  "_scope": "Same reasoning as Crate: an installed iOS app gets its own storage container, so Family always launches signed out and has to reach index.html to sign in. A narrower scope would send that navigation to Safari, and the session would be stored there instead of in the app — signed out again on every launch.",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F1E9",
+  "theme_color": "#2C4530",
+  "icons": [
+    { "src": "/family-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/family-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
