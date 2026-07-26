@@ -125,6 +125,18 @@
     .stepn { min-width: 18px; text-align: center; font-weight: 700; font-size: 0.95rem; }
     .worth { font-family: var(--f-display); font-weight: 700; color: var(--green-deep); }
 
+    .patotal { display: flex; align-items: baseline; gap: 0.4rem; font-size: 0.86rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .patotal .panum { font-family: var(--f-display); font-size: 1.5rem; font-weight: 700; color: var(--green-deep); }
+    .patotal.over .panum { color: var(--amber); }
+    .patotal .papct { margin-left: auto; font-weight: 600; }
+    .parow { display: grid; grid-template-columns: 1fr 84px 34px; gap: 0.4rem; margin-bottom: 0.4rem; align-items: center; }
+    .parow > * { min-width: 0; }
+    .pabk { border: 1px solid var(--silver); border-radius: 11px; padding: 0.6rem 0.7rem; margin-bottom: 0.5rem; background: var(--surface-warm); }
+    .pabkhead { display: flex; font-size: 0.8rem; font-weight: 600; color: var(--green-deep); margin-bottom: 0.3rem; }
+    .pabkhead .pasub { margin-left: auto; color: var(--muted); font-weight: 500; }
+    .pachore { display: flex; font-size: 0.78rem; color: var(--muted); padding: 0.1rem 0; }
+    .pachore span { margin-left: auto; }
+
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
     .row .body { min-width: 0; flex: 1; }
@@ -296,6 +308,9 @@
           <button class="pick" data-kind-filter="extra">Extras</button>
         </div>
         <div class="listpick" id="who-tabs"></div>
+        <div class="filterbar" id="points-bar" style="display:none">
+          <button class="pick" id="open-points">⚖ Points allocation</button>
+        </div>
         <div id="chore-body"></div>
       </section>
       <section class="panel" id="panel-meals">
@@ -365,6 +380,7 @@
   let ITEMS = [];
   let MEALS = [];
   let RECIPES = [];
+  let BUCKETS = [];
   let MEAL_VIEW = 'week';         // 'week' | 'recipes'
   let W_CURSOR = null;            // Sunday of the displayed week
   let ACTIVE_LIST = null;
@@ -706,7 +722,7 @@
     const hid = HH.id;
     const from = ymd(addDays(new Date(), -1));
     if (!WIN_FROM) { WIN_FROM = from; WIN_TO = ymd(addDays(new Date(), 120)); }
-    const [mRes, cRes, kRes, lRes, rRes] = await Promise.all([
+    const [mRes, cRes, kRes, lRes, rRes, bRes] = await Promise.all([
       sb.from('household_members').select('*').eq('household_id', hid)
         .eq('active', true).order('sort_order'),
       sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
@@ -715,13 +731,15 @@
       sb.from('chore_completions').select('*').eq('household_id', hid)
         .gte('due_on', minYmd(from, ymd(startOfPayWeek(new Date())))),
       sb.from('lists').select('*').eq('household_id', hid).order('sort_order'),
-      sb.from('recipes').select('*').eq('household_id', hid).order('title')
+      sb.from('recipes').select('*').eq('household_id', hid).order('title'),
+      sb.from('point_buckets').select('*').eq('household_id', hid).order('sort_order')
     ]);
-    for (const r of [mRes, cRes, kRes, lRes, rRes]) if (r.error) throw r.error;
+    for (const r of [mRes, cRes, kRes, lRes, rRes, bRes]) if (r.error) throw r.error;
     await loadEvents();
     await loadMeals();
     MEMBERS = mRes.data || [];
     RECIPES = rRes.data || [];
+    BUCKETS = bRes.data || [];
     CHORES = cRes.data || [];
     COMPLETIONS = kRes.data || [];
     LISTS = lRes.data || [];
@@ -865,6 +883,41 @@
                      : '<div class="empty">Nothing on this day.</div>');
   }
 
+  // ── Points: buckets and what a week adds up to ───────────────────────────
+  // A chore's worth comes from its tier when it has one, and from its own
+  // column when it doesn't — so nothing that predates buckets has to be
+  // migrated to keep working.
+  function bucketOf(c) {
+    return c.bucket_id ? (BUCKETS.filter(b => b.id === c.bucket_id)[0] || null) : null;
+  }
+  function effPoints(c, buckets) {
+    const list = buckets || BUCKETS;
+    const b = c.bucket_id ? list.filter(x => x.id === c.bucket_id)[0] : null;
+    return b ? (b.points || 0) : (c.points || 0);
+  }
+
+  // The number that actually matters: a chore is worth its value times how
+  // often it comes round. Daily-at-5 is 35 a week; Tuesday-at-20 is 20.
+  // Counted by walking a representative week rather than parsing the rule,
+  // so it uses the same matcher the calendar does.
+  function occurrencesPerWeek(c) {
+    if (isExtra(c)) return 0;                 // not part of the routine target
+    if (!c.rrule) return 1;                   // a one-off counts once
+    const anchor = parseYmd(c.starts_on);
+    const thisWeek = startOfPayWeek(new Date());
+    // A chore that starts later would score zero this week, which says
+    // nothing about how often it recurs — so measure from whichever week it
+    // is actually running in.
+    const start = anchor > thisWeek ? startOfPayWeek(anchor) : thisWeek;
+    let n = 0;
+    for (let i = 0; i < 7; i++) if (ruleMatches(c.rrule, addDays(start, i), anchor)) n++;
+    return n;
+  }
+  function weeklyPoints(c, buckets) { return effPoints(c, buckets) * occurrencesPerWeek(c); }
+  function weeklyTotal(chores, buckets) {
+    return (chores || CHORES).reduce((n, c) => n + weeklyPoints(c, buckets), 0);
+  }
+
   // ── Allowance ────────────────────────────────────────────────────────────
   // Points are what the kids see. The conversion to money happens once, at
   // the week's total, so no individual chore ever carries a price — the point
@@ -957,7 +1010,8 @@
                        : 'border-color:' + col;
     const bits = [];
     if (c.rrule) bits.push(esc(ruleLabel(c.rrule)));
-    if (c.points) bits.push(c.points + ' pts');
+    const pts = effPoints(c);
+    if (pts) bits.push(pts + ' pts');
     return '<div class="row' + (done ? ' done' : '') + '">' +
       '<button class="check' + (done ? ' on' : '') + '" style="' + style +
       '" data-chore="' + c.id + '" aria-label="Toggle">✓</button>' +
@@ -994,6 +1048,8 @@
   function renderChores() {
     const today = todayYmd();
     renderWhoTabs();
+    // Setup, not daily use — and it shows the target, which is half the rate.
+    $('points-bar').style.display = (ME && ME.role === 'admin') ? 'flex' : 'none';
     let visible = CHORES;
     if (WHO_FILTER && WHO_FILTER !== 'all') {
       visible = visible.filter(c => choreForMember(c, WHO_FILTER));
@@ -1539,10 +1595,17 @@
         '<button type="button" class="pick' + (slotOf(c) === s.key ? ' on' : '') +
         '" data-slot="' + (s.key || '') + '">' + s.label + '</button>').join('') +
       '</div></div>' +
+      '<div class="field"><label for="f-bucket">Worth</label><select id="f-bucket">' +
+      BUCKETS.map(b => '<option value="' + b.id + '"' +
+        (c.bucket_id === b.id ? ' selected' : '') + '>' +
+        esc(b.name) + ' — ' + (b.points || 0) + ' pts</option>').join('') +
+      '<option value=""' + (c.bucket_id ? '' : ' selected') + '>Custom…</option>' +
+      '</select></div>' +
       '<div class="field grid2">' +
       '<div><label for="f-start">Starting</label>' +
       '<input type="date" id="f-start" value="' + (c.starts_on || todayYmd()) + '"></div>' +
-      '<div><label for="f-points">Points</label>' +
+      '<div id="pts-wrap"' + (c.bucket_id ? ' style="display:none"' : '') + '>' +
+      '<label for="f-points">Points</label>' +
       '<input type="number" id="f-points" min="0" value="' + (c.points || 0) + '"></div></div>' +
       repeatPicker(c.rrule) + '</div>' +
       '<div id="extra-wrap"' + (kind === 'extra' ? '' : ' style="display:none"') + '>' +
@@ -1572,6 +1635,11 @@
         $('sched-wrap').style.display = isX ? 'none' : 'block';
         $('extra-wrap').style.display = isX ? 'block' : 'none';
       }));
+    // A tier supplies the number, so the raw box only appears for Custom.
+    const bk = $('f-bucket');
+    if (bk) bk.addEventListener('change', () => {
+      $('pts-wrap').style.display = bk.value ? 'none' : 'block';
+    });
     // Radio group: a chore is in one part of the day or none.
     const slots = Array.from(document.querySelectorAll('#pick-slot .pick'));
     slots.forEach(b => b.addEventListener('click', () =>
@@ -1604,6 +1672,7 @@
       // recurrence, no part of the day. Those columns are cleared rather than
       // left holding whatever the form last showed.
       starts_on: isX ? todayYmd() : ($('f-start').value || todayYmd()),
+      bucket_id:   isX ? null : (($('f-bucket') || {}).value || null),
       points:      isX ? 0 : (parseInt($('f-points').value, 10) || 0),
       time_of_day: isX ? null : readSlot(),
       rrule:       isX ? null : readRepeat(),
@@ -1697,9 +1766,9 @@
         // With nobody or several assigned there's no such answer, so it falls
         // to the tapper.
         const credit = assignees.length === 1 ? assignees[0] : ME.id;
-        // Captured now, so re-pricing or deleting the chore later can't
-        // rewrite what was earned this week.
-        const worth = (chore && chore.points) || 0;
+        // Captured now, so re-pricing the tier later can't rewrite what was
+        // earned this week — which is the point of buckets being editable.
+        const worth = chore ? effPoints(chore) : 0;
         // The unique index on (chore_id, due_on) means two people tapping at
         // once is a conflict, not two completions. Treat that as success.
         const { error } = await sb.from('chore_completions').insert({
@@ -1710,6 +1779,143 @@
       }
       await refresh();
     } catch (e) { fail(e, 'update the chore'); }
+  }
+
+  // ── Points allocation ────────────────────────────────────────────────────
+  // The tool exists because the total is not the sum of the values — it's the
+  // sum of value times frequency — and that's not arithmetic anyone wants to
+  // redo by hand every time a chore is added. Editing a tier here re-totals
+  // the whole week live, so you tune against a number instead of guessing.
+  let PA = [];        // working copy of the buckets; nothing is written until Save
+
+  function paRecalc() {
+    const target = (HH.allowance_points_target || 500);
+    // Read the inputs rather than PA, so the total tracks typing.
+    const working = PA.map(b => ({
+      id: b.id,
+      points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0
+    }));
+    const total = weeklyTotal(CHORES.filter(c => !isExtra(c)), working);
+    const pct = Math.round(total / target * 100);
+    const over = total > target;
+    $('pa-total').innerHTML =
+      '<div class="patotal' + (over ? ' over' : '') + '">' +
+      '<span class="panum">' + total + '</span> of ' + target + ' points a week' +
+      '<span class="papct">' + pct + '%</span></div>' +
+      '<div class="bar"><span style="width:' + Math.min(100, pct) + '%;background:' +
+      (over ? 'var(--amber)' : 'var(--green)') + '"></span></div>' +
+      (total === target ? '<p class="allownote">Exactly on target.</p>'
+       : over ? '<p class="allownote">' + (total - target) + ' over — doing everything ' +
+                'would pay more than the full allowance.</p>'
+              : '<p class="allownote">' + (target - total) + ' short — doing everything ' +
+                'would still fall ' + Math.max(0, 100 - pct) + '% shy of the full amount.</p>');
+
+    // Per-tier breakdown, recomputed with whatever is currently typed.
+    const rows = BUCKETS.map(b => {
+      const w = working.filter(x => x.id === b.id)[0];
+      const pts = w ? w.points : b.points;
+      const on = CHORES.filter(c => !isExtra(c) && c.bucket_id === b.id);
+      const sub = on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0);
+      return { name: b.name, pts: pts, count: on.length, sub: sub, chores: on };
+    });
+    const loose = CHORES.filter(c => !isExtra(c) && !c.bucket_id);
+    let html = rows.filter(r => r.count).map(r =>
+      '<div class="pabk"><div class="pabkhead">' + esc(r.name) + ' · ' + r.pts + ' pts · ' +
+      r.count + ' chore' + (r.count === 1 ? '' : 's') +
+      '<span class="pasub">' + r.sub + '/wk</span></div>' +
+      r.chores.map(c => '<div class="pachore">' + esc(c.title) +
+        '<span>' + occurrencesPerWeek(c) + '×</span></div>').join('') + '</div>').join('');
+    if (loose.length) {
+      const sub = loose.reduce((n, c) => n + (c.points || 0) * occurrencesPerWeek(c), 0);
+      html += '<div class="pabk"><div class="pabkhead">No tier · ' + loose.length +
+        ' chore' + (loose.length === 1 ? '' : 's') + '<span class="pasub">' + sub + '/wk</span></div>' +
+        loose.map(c => '<div class="pachore">' + esc(c.title) +
+          '<span>' + (c.points || 0) + ' × ' + occurrencesPerWeek(c) + '</span></div>').join('') +
+        '</div>';
+    }
+    $('pa-breakdown').innerHTML = html ||
+      '<div class="empty">No chores yet. Add some and they\'ll appear here.</div>';
+  }
+
+  function paRows() {
+    return PA.map(b =>
+      '<div class="parow">' +
+      '<input type="text" id="pa-n-' + b.key + '" value="' + esc(b.name) + '" placeholder="Tier">' +
+      '<input type="number" id="pa-p-' + b.key + '" min="0" value="' + (b.points || 0) + '">' +
+      '<button class="iconbtn danger" data-pa-del="' + b.key + '" aria-label="Remove">🗑</button>' +
+      '</div>').join('');
+  }
+
+  function paRender() {
+    $('pa-buckets').innerHTML = paRows();
+    PA.forEach(b => {
+      const p = $('pa-p-' + b.key);
+      if (p) p.addEventListener('input', paRecalc);
+    });
+    paRecalc();
+  }
+
+  function pointsSheet() {
+    let seq = 0;
+    PA = BUCKETS.map(b => ({ key: 'k' + (seq++), id: b.id, name: b.name, points: b.points,
+                             sort_order: b.sort_order }));
+    openSheet(
+      '<h2>Points allocation</h2>' +
+      '<div id="pa-total"></div>' +
+      '<label style="margin-top:1rem">Tiers</label>' +
+      '<div id="pa-buckets"></div>' +
+      '<button class="btn ghost" id="pa-add" style="margin-bottom:1rem">+ Add a tier</button>' +
+      '<label>Where the week goes</label>' +
+      '<div id="pa-breakdown"></div>' +
+      '<div class="btnrow"><button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">Save</button></div>'
+    );
+    paRender();
+    $('pa-add').addEventListener('click', () => {
+      // Capture what's typed before re-rendering, or it's lost.
+      PA = PA.map(b => ({ key: b.key, id: b.id, sort_order: b.sort_order,
+        name: ($('pa-n-' + b.key) || {}).value || b.name,
+        points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0 }));
+      PA.push({ key: 'k' + (seq++), id: null, name: '', points: 0, sort_order: PA.length });
+      paRender();
+    });
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', savePoints);
+  }
+
+  async function savePoints() {
+    const rows = PA.map((b, i) => ({
+      id: b.id,
+      household_id: HH.id,
+      name: (($('pa-n-' + b.key) || {}).value || '').trim(),
+      points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0,
+      sort_order: i
+    }));
+    if (rows.some(r => !r.name)) { toast('Every tier needs a name'); return; }
+    try {
+      const updates = rows.filter(r => r.id);
+      const inserts = rows.filter(r => !r.id).map(r => {
+        const { id, ...rest } = r; return rest;
+      });
+      for (const u of updates) {
+        const { id, ...rest } = u;
+        const { error } = await sb.from('point_buckets').update(rest).eq('id', id);
+        if (error) throw error;
+      }
+      if (inserts.length) {
+        const { error } = await sb.from('point_buckets').insert(inserts);
+        if (error) throw error;
+      }
+      // Anything dropped from the list goes; chores on it fall back to their
+      // own points column rather than disappearing (FK is ON DELETE SET NULL).
+      const keptIds = updates.map(u => u.id);
+      const gone = BUCKETS.filter(b => keptIds.indexOf(b.id) === -1);
+      for (const g of gone) {
+        const { error } = await sb.from('point_buckets').delete().eq('id', g.id);
+        if (error) throw error;
+      }
+      closeSheet(); toast('Saved'); await refresh();
+    } catch (e) { fail(e, 'save the tiers'); }
   }
 
   // ── Meal + recipe forms ──────────────────────────────────────────────────
@@ -2170,6 +2376,15 @@
     else if (t.dataset.editMember) { const m = MEMBERS.find(x => x.id === t.dataset.editMember); if (m) memberSheet(m); }
     else if (t.id === 'add-member') memberSheet(null);
     else if (t.id === 'hh-settings') householdSheet();
+    else if (t.id === 'open-points') pointsSheet();
+    else if (t.dataset.paDel) {
+      PA = PA.filter(b => b.key !== t.dataset.paDel).map(b => ({
+        key: b.key, id: b.id, sort_order: b.sort_order,
+        name: ($('pa-n-' + b.key) || {}).value || b.name,
+        points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0
+      }));
+      paRender();
+    }
   });
 
   const menuBtn = $('menu-btn'), menu = $('menu');
