@@ -591,6 +591,9 @@
     for (const r of [mRes, cRes, kRes, lRes, rRes, bRes, vRes]) if (r.error) throw r.error;
     await loadEvents();
     await loadMeals();
+    // Your own Nutrition recipes, so the recipe list can mark which household
+    // ones came from there. Personal query — it returns nobody else's.
+    await loadMyRecipes();
     MEMBERS = mRes.data || [];
     RECIPES = rRes.data || [];
     BUCKETS = bRes.data || [];
@@ -1133,6 +1136,11 @@
       const bits = [];
       if (u) bits.push('<a class="rlink" href="' + esc(u) +
                        '" target="_blank" rel="noopener">open link ↗</a>');
+      // Only shown when the food actually resolves for you — the link is
+      // personal, so another member would see a dead reference.
+      if (r.nutrition_food_id && MY_FOODS.some(f => f.id === r.nutrition_food_id)) {
+        bits.push('<a class="rlink" href="nutrition.html">in Nutrition ↗</a>');
+      }
       if (used) bits.push(used === 1 ? 'planned once' : 'planned ' + used + ' times');
       return '<div class="row"><span class="swatch"></span>' +
         '<span class="body"><span class="t">' + esc(r.title) + '</span>' +
@@ -2221,11 +2229,41 @@
     } catch (e) { fail(e, 'remove the meal'); }
   }
 
+  // Your own Nutrition recipes — foods rows with kind 'recipe'. Personal, so
+  // this reads with your permissions and nobody else's; fetched when the sheet
+  // opens rather than on every page load, since most sittings never need it.
+  let MY_FOODS = [];
+  async function loadMyRecipes() {
+    try {
+      const { data, error } = await sb.from('foods')
+        .select('id, name, servings, ingredients')
+        .eq('kind', 'recipe').order('name');
+      if (error) throw error;
+      MY_FOODS = data || [];
+    } catch (_) { MY_FOODS = []; }   // no Nutrition recipes is not an error
+  }
+  // foods.ingredients is [{name, qty, unit, …}]; the household recipe keeps
+  // free text, because it's read by people rather than summed.
+  function ingredientLines(food) {
+    const list = Array.isArray(food.ingredients) ? food.ingredients : [];
+    return list.map(i => [i.qty, i.unit, i.name].filter(Boolean).join(' ')).join('\n');
+  }
+
   function recipeSheet(r) {
     const isNew = !r;
     r = r || {};
     openSheet(
       '<h2>' + (isNew ? 'New recipe' : 'Edit recipe') + '</h2>' +
+      (MY_FOODS.length
+        ? '<div class="field"><label for="f-import">Start from a Nutrition recipe</label>' +
+          '<select id="f-import"><option value="">— type it in below —</option>' +
+          MY_FOODS.map(f => '<option value="' + f.id + '"' +
+            (r.nutrition_food_id === f.id ? ' selected' : '') + '>' +
+            esc(f.name) + (f.servings ? ' · ' + f.servings + ' servings' : '') +
+            '</option>').join('') + '</select>' +
+          '<p class="sub" style="margin:.35rem 0 0">Copies the name and ingredients across. ' +
+          'The macros stay in Nutrition — this side is for planning the week.</p></div>'
+        : '') +
       '<div class="field"><label for="f-title">Name</label>' +
       '<input type="text" id="f-title" value="' + esc(r.title || '') +
       '" placeholder="Chicken tacos"></div>' +
@@ -2241,6 +2279,16 @@
       '<button class="btn ghost" id="f-cancel">Cancel</button>' +
       '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
     );
+    // Importing copies rather than links, so the household row stands on its
+    // own afterwards. It doesn't overwrite anything you've already typed.
+    const imp = $('f-import');
+    if (imp) imp.addEventListener('change', () => {
+      const f = MY_FOODS.filter(x => x.id === imp.value)[0];
+      if (!f) return;
+      if (!$('f-title').value.trim()) $('f-title').value = f.name;
+      if (!$('f-ing').value.trim()) $('f-ing').value = ingredientLines(f);
+      toast('Copied from Nutrition');
+    });
     $('f-cancel').addEventListener('click', closeSheet);
     $('f-save').addEventListener('click', async () => {
       const title = $('f-title').value.trim();
@@ -2251,6 +2299,7 @@
         household_id: HH.id, title: title, source_url: url || null,
         ingredients: $('f-ing').value.trim() || null,
         notes: $('f-notes').value.trim() || null,
+        nutrition_food_id: (imp && imp.value) || null,
         created_by: ME.user_id
       };
       try {
@@ -2574,7 +2623,7 @@
     else if (TAB === 'chores') choreSheet(null);
     else if (TAB === 'meals') {
       // The + means "another one of what I'm looking at".
-      if (MEAL_VIEW === 'recipes') recipeSheet(null);
+      if (MEAL_VIEW === 'recipes') loadMyRecipes().then(() => recipeSheet(null));
       else mealSheet(null, todayYmd());
     }
     else if (TAB === 'lists') itemSheet();
@@ -2638,7 +2687,10 @@
     else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
     else if (t.dataset.addMeal) mealSheet(null, t.dataset.addMeal);
     else if (t.dataset.editMeal) { const x = MEALS.filter(y => y.id === t.dataset.editMeal)[0]; if (x) mealSheet(x); }
-    else if (t.dataset.editRecipe) { const x = RECIPES.filter(y => y.id === t.dataset.editRecipe)[0]; if (x) recipeSheet(x); }
+    else if (t.dataset.editRecipe) {
+      const x = RECIPES.filter(y => y.id === t.dataset.editRecipe)[0];
+      if (x) loadMyRecipes().then(() => recipeSheet(x));
+    }
     else if (t.dataset.whoFilter) { WHO_FILTER = t.dataset.whoFilter; renderChores(); }
     else if (t.dataset.kindFilter) {
       KIND_FILTER = t.dataset.kindFilter;
