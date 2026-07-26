@@ -106,6 +106,8 @@
     .dayhead.today { color: var(--amber); }
     .slothead { font-family: var(--f-display); font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--green); margin: 1rem 0 0.4rem 0.15rem; }
     .slothead:first-of-type { margin-top: 0.35rem; }
+    .kindhead { font-family: var(--f-display); font-size: 0.9rem; font-weight: 600; color: var(--green-deep); margin: 1.1rem 0 0.1rem 0.15rem; }
+    .kindhead:first-of-type { margin-top: 0.4rem; }
 
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
@@ -237,7 +239,7 @@
     <div id="app" style="display:none">
       <div class="tabs">
         <button class="tab active" data-tab="calendar">Calendar</button>
-        <button class="tab" data-tab="chores">Chores</button>
+        <button class="tab" data-tab="chores">To-dos</button>
         <button class="tab" data-tab="meals">Meals</button>
         <button class="tab" data-tab="lists">Lists</button>
         <button class="tab" data-tab="family">Family</button>
@@ -261,6 +263,11 @@
         <div id="cal-body"></div>
       </section>
       <section class="panel" id="panel-chores">
+        <div class="viewtoggle">
+          <button class="pick on" data-kind-filter="all">Both</button>
+          <button class="pick" data-kind-filter="chore">Chores</button>
+          <button class="pick" data-kind-filter="todo">To-dos</button>
+        </div>
         <div class="filterbar"><button class="pick" data-mine="1">Mine only</button></div>
         <div id="chore-body"></div>
       </section>
@@ -336,6 +343,7 @@
   let ACTIVE_LIST = null;
   let TAB = 'calendar';
   let MINE = false;               // "Mine only" filter, shared by both tabs
+  let KIND_FILTER = 'all';        // 'all' | 'chore' | 'todo'
   let CAL_VIEW = 'agenda';        // 'agenda' | 'month'
   let M_CURSOR = null;            // first of the displayed month
   let M_SEL = null;               // selected day in month view (ymd)
@@ -522,6 +530,18 @@
   // Same vocabulary as runs.time_of_day. Null means no particular time, which
   // is a real answer rather than a missing one — hence "Anytime" last, after
   // the parts of the day that actually have an order.
+  // A chore is routine and comes back; a to-do you do once and are done with.
+  // Same row shape, so they share a table — the distinction is what you want
+  // to look at, not what you want to store.
+  const KINDS = [
+    { key: 'chore', label: 'Chore', plural: 'Chores' },
+    { key: 'todo',  label: 'To-do', plural: 'To-dos' }
+  ];
+  function kindOf(c) {
+    const k = c.kind || 'chore';
+    return KINDS.some(x => x.key === k) ? k : 'chore';
+  }
+
   const SLOTS = [
     { key: 'morning',   label: 'Morning' },
     { key: 'afternoon', label: 'Afternoon' },
@@ -825,33 +845,47 @@
 
   function renderChores() {
     const today = todayYmd();
-    const visible = MINE ? CHORES.filter(choreIsMine) : CHORES;
+    let visible = MINE ? CHORES.filter(choreIsMine) : CHORES;
+    if (KIND_FILTER !== 'all') visible = visible.filter(c => kindOf(c) === KIND_FILTER);
     const due = choresDueOn(today).filter(c => visible.indexOf(c) !== -1);
+
+    // Time-of-day buckets nested under each kind. When the filter has already
+    // narrowed to one kind its heading would say what the toggle above
+    // already says, so it's dropped.
+    const slotSections = (rows) => {
+      let out = '';
+      SLOTS.forEach(s => {
+        const inSlot = rows.filter(c => slotOf(c) === s.key);
+        if (!inSlot.length) return;
+        out += '<p class="slothead">' + s.label + '</p>' +
+               inSlot.map(c => choreRowHtml(c, today)).join('');
+      });
+      return out;
+    };
 
     let html = '<div class="daygroup"><p class="dayhead today">Today</p>';
     if (!due.length) {
       html += '<div class="empty">' +
-        (MINE ? 'Nothing of yours due today.' : 'No chores due today.') + '</div>';
+        (MINE ? 'Nothing of yours due today.' : 'Nothing due today.') + '</div>';
+    } else if (KIND_FILTER !== 'all') {
+      html += slotSections(due);
     } else {
-      // Bucketed so the morning list can be short and finished, instead of
-      // re-reading everything due today at every hour of the day. Empty parts
-      // of the day don't get a heading.
-      SLOTS.forEach(s => {
-        const inSlot = due.filter(c => slotOf(c) === s.key);
-        if (!inSlot.length) return;
-        html += '<p class="slothead">' + s.label + '</p>' +
-                inSlot.map(c => choreRowHtml(c, today)).join('');
+      KINDS.forEach(k => {
+        const rows = due.filter(c => kindOf(c) === k.key);
+        if (!rows.length) return;
+        html += '<p class="kindhead">' + k.plural + '</p>' + slotSections(rows);
       });
     }
     html += '</div>';
 
     const others = visible.filter(c => due.indexOf(c) === -1);
     if (others.length) {
-      html += '<div class="daygroup"><p class="dayhead">Other chores</p>';
+      html += '<div class="daygroup"><p class="dayhead">Not due today</p>';
       others.forEach(c => {
         const slot = SLOTS.filter(s => s.key === slotOf(c))[0];
         const meta = [esc(ruleLabel(c.rrule) || ('From ' + c.starts_on))];
         if (slot && slot.key) meta.push(slot.label);
+        if (KIND_FILTER === 'all') meta.push(labelOf(KINDS, kindOf(c)));
         html += '<div class="row">' +
           '<span class="swatch" style="background:' + esc(choreColor(c)) + '"></span>' +
           '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
@@ -1281,10 +1315,16 @@
   function choreSheet(c) {
     const isNew = !c;
     c = c || {};
+    // A new one defaults to whatever you're currently looking at, so adding
+    // three to-dos in a row doesn't mean setting the same pill three times.
+    const kind = c.kind || (KIND_FILTER === 'all' ? 'chore' : KIND_FILTER);
+    const noun = labelOf(KINDS, kind).toLowerCase();
     openSheet(
-      '<h2>' + (isNew ? 'New chore' : 'Edit chore') + '</h2>' +
+      '<h2>' + (isNew ? 'New ' + noun : 'Edit ' + noun) + '</h2>' +
+      '<div class="field"><label>Kind</label>' + pillRow('pick-ckind', KINDS, kind) + '</div>' +
       '<div class="field"><label for="f-title">What</label>' +
-      '<input type="text" id="f-title" value="' + esc(c.title || '') + '" placeholder="Take the bins out"></div>' +
+      '<input type="text" id="f-title" value="' + esc(c.title || '') +
+      '" placeholder="' + (kind === 'todo' ? 'Call the dentist' : 'Take the bins out') + '"></div>' +
       '<div class="field"><label>Who</label>' + whoPicker(c.assignee_ids || [], 'Anyone') + '</div>' +
       splitPicker() +
       '<div class="field"><label>When in the day</label><div class="pickers" id="pick-slot">' +
@@ -1305,6 +1345,7 @@
     );
     wireRepeat();
     wireSplit();
+    wirePills('pick-ckind');
     // Radio group: a chore is in one part of the day or none.
     const slots = Array.from(document.querySelectorAll('#pick-slot .pick'));
     slots.forEach(b => b.addEventListener('click', () =>
@@ -1328,6 +1369,7 @@
       title: title,
       starts_on: $('f-start').value || todayYmd(),
       points: parseInt($('f-points').value, 10) || 0,
+      kind: readPill('pick-ckind', 'chore'),
       time_of_day: readSlot(),
       rrule: readRepeat(),
       created_by: ME.user_id
@@ -1359,7 +1401,7 @@
   }
 
   async function deleteChore(id, title) {
-    if (!confirm('Delete "' + title + '"? Its completion history goes too.')) return;
+    if (!confirm('Delete "' + title + '"? Its history goes too.')) return;
     try {
       const { error } = await sb.from('chores').delete().eq('id', id);
       if (error) throw error;
@@ -1769,6 +1811,12 @@
     else if (t.dataset.addMeal) mealSheet(null, t.dataset.addMeal);
     else if (t.dataset.editMeal) { const x = MEALS.filter(y => y.id === t.dataset.editMeal)[0]; if (x) mealSheet(x); }
     else if (t.dataset.editRecipe) { const x = RECIPES.filter(y => y.id === t.dataset.editRecipe)[0]; if (x) recipeSheet(x); }
+    else if (t.dataset.kindFilter) {
+      KIND_FILTER = t.dataset.kindFilter;
+      document.querySelectorAll('[data-kind-filter]').forEach(b =>
+        b.classList.toggle('on', b.dataset.kindFilter === KIND_FILTER));
+      renderChores();
+    }
     else if (t.dataset.mine) { MINE = !MINE; syncMine(); renderCalendar(); renderChores(); }
     else if (t.dataset.dayCell) { M_SEL = t.dataset.dayCell; renderMonth(); }
     else if (t.dataset.list) { ACTIVE_LIST = t.dataset.list; refresh(); }
