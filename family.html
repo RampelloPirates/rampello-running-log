@@ -1840,6 +1840,19 @@
   // Extras pay cash, so the completion carries cents rather than points. The
   // credit rule is the same as chores: the assignee if there's exactly one,
   // otherwise whoever tapped.
+  // Everyone a chore belongs to gets credited, not whoever reached the screen
+  // first — if feeding the dog is both of theirs, both are on the hook for it
+  // and both should be paid for it. With nobody assigned there's no such
+  // answer, so it falls to the tapper.
+  function creditFor(chore) {
+    const ids = (chore && chore.assignee_ids) || [];
+    return ids.length ? ids.slice() : (ME ? [ME.id] : []);
+  }
+
+  // Extras stay single-credit on purpose, unlike chores. They're up for
+  // grabs — you claim one, you earn it — so a $5 job listed for two kids
+  // shouldn't quietly cost $10. Chores are assigned responsibilities; extras
+  // are offers, and the two want different answers.
   async function addExtra(choreId) {
     const c = CHORES.filter(x => x.id === choreId)[0];
     if (!c) return;
@@ -1876,33 +1889,31 @@
 
   async function toggleChore(choreId) {
     const today = todayYmd();
-    const done = COMPLETIONS.find(x => x.chore_id === choreId && x.due_on === today);
+    const existing = COMPLETIONS.filter(x => x.chore_id === choreId && x.due_on === today);
     try {
-      if (done) {
-        const { error } = await sb.from('chore_completions').delete().eq('id', done.id);
+      if (existing.length) {
+        // Untick clears the whole occurrence rather than one person's share —
+        // the chore either got done or it didn't.
+        const { error } = await sb.from('chore_completions').delete()
+          .eq('chore_id', choreId).eq('due_on', today);
         if (error) throw error;
       } else {
         const chore = CHORES.filter(x => x.id === choreId)[0];
-        const assignees = (chore && chore.assignee_ids) || [];
-        // Credit the person whose chore it is, not whoever happened to tap it
-        // — a parent ticking Emma's chore from the wall should still pay Emma.
-        // With nobody or several assigned there's no such answer, so it falls
-        // to the tapper.
-        const credit = assignees.length === 1 ? assignees[0] : ME.id;
-        // Valued against whoever gets credited, since a tier is worth
-        // different amounts to different kids. Captured now, so re-pricing
-        // later can't rewrite what was already earned.
-        const worth = chore ? effPoints(chore, credit) : 0;
-        // The unique index on (chore_id, due_on) means two people tapping at
-        // once is a conflict, not two completions. Treat that as success.
-        const { error } = await sb.from('chore_completions').insert({
-          household_id: HH.id, chore_id: choreId, member_id: credit,
+        const credit = creditFor(chore);
+        // Valued per person, because a tier is worth a different number to
+        // each kid — one tick can pay 3 to one and 2 to the other. Captured
+        // now, so re-pricing later can't rewrite what was already earned.
+        const rows = credit.map(mid => ({
+          household_id: HH.id, chore_id: choreId, member_id: mid,
           // member_id is who gets paid; completed_by is who actually tapped.
           // They differ whenever a parent ticks something off the wall, and
           // that difference is exactly what you want when a total looks odd.
           completed_by: ME.id,
-          due_on: today, points_earned: worth
-        });
+          due_on: today, points_earned: chore ? effPoints(chore, mid) : 0
+        }));
+        // Uniqueness is (chore_id, due_on, member_id), so two people tapping
+        // at once is a conflict rather than a double payment. Treat as success.
+        const { error } = await sb.from('chore_completions').insert(rows);
         if (error && error.code !== '23505') throw error;
       }
       await refresh();
