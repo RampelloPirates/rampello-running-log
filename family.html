@@ -137,6 +137,14 @@
     .pabkhead .pasub { margin-left: auto; color: var(--muted); font-weight: 500; }
     .pachore { display: flex; font-size: 0.78rem; color: var(--muted); padding: 0.1rem 0; }
     .pachore span { margin-left: auto; }
+    .papills { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.45rem 0; }
+    .tpill { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--green-tint); color: var(--green-deep); border: 1px solid var(--silver); border-radius: 99px; padding: 0.18rem 0.3rem 0.18rem 0.6rem; font-size: 0.78rem; }
+    .tpill.loose { background: var(--paper); color: var(--muted); padding-right: 0.6rem; }
+    .tpill small { color: var(--muted); font-size: 0.68rem; }
+    .tpill button { border: none; background: none; color: var(--muted); font-size: 0.95rem; line-height: 1; cursor: pointer; padding: 0 0.15rem; }
+    .tpill button:hover { color: var(--danger); }
+    .paadd { font-size: 0.82rem; padding: 0.4rem 0.5rem; }
+    .pahint { font-size: 0.74rem; color: var(--muted); margin: 0.4rem 0; line-height: 1.4; }
 
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
@@ -311,7 +319,6 @@
         <div class="listpick" id="who-tabs"></div>
         <div class="filterbar" id="points-bar" style="display:none">
           <button class="pick" id="open-review">📅 Weekly review</button>
-          <button class="pick" id="open-points">⚖ Points allocation</button>
         </div>
         <div id="chore-body"></div>
       </section>
@@ -927,8 +934,11 @@
   // Allocation has to be answered per kid, because they're on different lists.
   // A household total says nothing about whether Emma's own chores can reach
   // her target — it just adds hers to her brother's.
-  function choresFor(mid) {
-    return CHORES.filter(c => !isExtra(c) && (c.assignee_ids || []).indexOf(mid) !== -1);
+  // Takes an optional list so the allocation tool can ask the same question of
+  // its working copy, where tiers are keys rather than ids.
+  function choresFor(mid, chores) {
+    return (chores || CHORES).filter(c =>
+      !isExtra(c) && (c.assignee_ids || []).indexOf(mid) !== -1);
   }
   // Unassigned work belongs to whoever gets to it. Counting it toward every
   // kid would overstate all of them, so it's reported on its own instead of
@@ -1318,7 +1328,8 @@
       '<p class="sub" style="margin:0' + (admin ? ' 0 0.75rem' : '') + '">' +
       'Everyone below shares the calendar, chores and lists. ' +
       'Health data stays private to each person.</p>' +
-      (admin ? '<button class="btn ghost" id="hh-settings">Household settings</button>' : '') +
+      (admin ? '<button class="btn ghost" id="hh-settings">Household settings</button> ' +
+               '<button class="btn ghost" id="open-points">⚖ Points allocation</button>' : '') +
       '</div>';
     MEMBERS.forEach(m => {
       // Three states, and the middle one is the useful one: an invite that's
@@ -1848,11 +1859,12 @@
   // sum of value times frequency — and that's not arithmetic anyone wants to
   // redo by hand every time a chore is added. Editing a tier here re-totals
   // the whole week live, so you tune against a number instead of guessing.
-  let PA = [];        // working copy of the buckets; nothing is written until Save
+  let PA = [];        // working copy of the tiers; nothing is written until Save
+  let PA_ASSIGN = {}; // choreId -> tier key, the working assignment
 
   // One block per kid: their chores, their target, their shortfall.
-  function paPersonHtml(m, working) {
-    const mine = choresFor(m.id);
+  function paPersonHtml(m, working, chores) {
+    const mine = choresFor(m.id, chores);
     const target = targetFor(m);
     const total = weeklyTotal(mine, working);
     const pct = Math.round(total / target * 100);
@@ -1872,70 +1884,110 @@
              : '<p class="allownote">' + (target - total) + ' short — doing everything ' +
                'would still leave them ' + Math.max(0, 100 - pct) + '% shy.</p>';
 
-    // Their week, grouped by tier.
-    BUCKETS.forEach(b => {
-      const w = working.filter(x => x.id === b.id)[0];
+    // One line per tier they're on — the detail is already visible above in
+    // the tiers themselves, so this stays a summary.
+    const lines = PA.map(b => {
+      const w = working.filter(x => x.id === b.key)[0];
       const pts = w ? w.points : b.points;
-      const on = mine.filter(c => c.bucket_id === b.id);
-      if (!on.length) return;
-      html += '<div class="pabk"><div class="pabkhead">' + esc(b.name) + ' · ' + pts + ' pts · ' +
-        on.length + ' chore' + (on.length === 1 ? '' : 's') +
-        '<span class="pasub">' + on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0) +
-        '/wk</span></div>' +
-        on.map(c => '<div class="pachore">' + esc(c.title) +
-          '<span>' + occurrencesPerWeek(c) + '×</span></div>').join('') + '</div>';
-    });
+      const on = mine.filter(c => c.bucket_id === b.key);
+      if (!on.length) return '';
+      return '<div class="pachore">' + esc(b.name || 'Untitled tier') + ' · ' + on.length +
+        '<span>' + on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0) + '/wk</span></div>';
+    }).join('');
     const loose = mine.filter(c => !c.bucket_id);
-    if (loose.length) {
-      html += '<div class="pabk"><div class="pabkhead">No tier · ' + loose.length +
-        '<span class="pasub">' +
-        loose.reduce((n, c) => n + (c.points || 0) * occurrencesPerWeek(c), 0) + '/wk</span></div>' +
-        loose.map(c => '<div class="pachore">' + esc(c.title) +
-          '<span>' + (c.points || 0) + ' × ' + occurrencesPerWeek(c) + '</span></div>').join('') +
-        '</div>';
-    }
-    return html + '</div>';
+    return html + lines +
+      (loose.length ? '<div class="pachore">No tier · ' + loose.length + '<span>' +
+        loose.reduce((n, c) => n + (c.points || 0) * occurrencesPerWeek(c), 0) +
+        '/wk</span></div>' : '') + '</div>';
   }
 
   function paRecalc() {
-    // Read the inputs rather than PA, so the totals track typing.
+    // Tiers keyed by their working key, and chores pointed at those keys, so
+    // the totals reflect what's on screen rather than what's in the database.
     const working = PA.map(b => ({
-      id: b.id,
-      points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0
+      id: b.key,
+      points: ($('pa-p-' + b.key) ? (parseInt($('pa-p-' + b.key).value, 10) || 0) : b.points)
     }));
+    const chores = CHORES.filter(c => !isExtra(c)).map(c =>
+      Object.assign({}, c, { bucket_id: PA_ASSIGN[c.id] || null }));
 
     const kids = MEMBERS.filter(m => m.role === 'kid');
     $('pa-total').innerHTML = kids.length
-      ? kids.map(m => paPersonHtml(m, working)).join('')
+      ? kids.map(m => paPersonHtml(m, working, chores)).join('')
       : '<div class="empty">Nobody has the role <em>kid</em> yet, so there is ' +
         'nothing to allocate against.</div>';
 
+    // Anything still without a tier. It's worth whatever its own points column
+    // says, which is usually zero — so it's called out rather than left to be
+    // discovered as a hole in the total.
+    const unfiled = chores.filter(c => !c.bucket_id);
+    $('pa-unfiled').innerHTML = !unfiled.length ? '' :
+      '<div class="pabk"><div class="pabkhead">No tier · ' + unfiled.length +
+      ' task' + (unfiled.length === 1 ? '' : 's') + '<span class="pasub">' +
+      weeklyTotal(unfiled, working) + '/wk</span></div>' +
+      '<div class="papills">' + unfiled.map(c =>
+        '<span class="tpill loose">' + esc(c.title) +
+        '<small>' + (c.points || 0) + ' pts</small></span>').join('') + '</div>' +
+      '<p class="pahint">These keep whatever points they were given individually. ' +
+      'Put them in a tier above to price them together.</p></div>';
+
     const loose = unassignedChores();
     $('pa-breakdown').innerHTML = !loose.length ? '' :
-      '<div class="pabk"><div class="pabkhead">Unassigned · ' + loose.length +
-      ' chore' + (loose.length === 1 ? '' : 's') + '<span class="pasub">' +
-      weeklyTotal(loose, working) + '/wk</span></div>' +
-      loose.map(c => '<div class="pachore">' + esc(c.title) +
-        '<span>' + effPoints(c, working) + ' × ' + occurrencesPerWeek(c) + '</span></div>').join('') +
-      '<p class="allownote">Counted for nobody above — whoever does one gets ' +
-      'the points, so adding them to every total would overstate all of them.</p></div>';
+      '<p class="allownote">' + loose.length + ' task' + (loose.length === 1 ? ' is' : 's are') +
+      ' assigned to nobody, so ' + (loose.length === 1 ? 'it counts' : 'they count') +
+      ' toward no one above — whoever does one gets the points.</p>';
   }
 
-  function paRows() {
-    return PA.map(b =>
+  // Read the inputs back into PA before any re-render, or whatever was typed
+  // since the last one is lost.
+  function paCapture() {
+    PA = PA.map(b => ({
+      key: b.key, id: b.id, sort_order: b.sort_order,
+      name: (($('pa-n-' + b.key) || {}).value != null
+              ? $('pa-n-' + b.key).value : b.name),
+      points: ($('pa-p-' + b.key)
+              ? (parseInt($('pa-p-' + b.key).value, 10) || 0) : b.points)
+    }));
+  }
+
+  function paBucketHtml(b) {
+    const mine = CHORES.filter(c => !isExtra(c) && PA_ASSIGN[c.id] === b.key);
+    const elsewhere = CHORES.filter(c => !isExtra(c) && PA_ASSIGN[c.id] !== b.key);
+    return '<div class="pabk">' +
       '<div class="parow">' +
       '<input type="text" id="pa-n-' + b.key + '" value="' + esc(b.name) + '" placeholder="Tier">' +
       '<input type="number" id="pa-p-' + b.key + '" min="0" value="' + (b.points || 0) + '">' +
-      '<button class="iconbtn danger" data-pa-del="' + b.key + '" aria-label="Remove">🗑</button>' +
-      '</div>').join('');
+      '<button class="iconbtn danger" data-pa-del="' + b.key + '" aria-label="Remove tier">🗑</button>' +
+      '</div>' +
+      (mine.length
+        ? '<div class="papills">' + mine.map(c =>
+            '<span class="tpill">' + esc(c.title) +
+            '<small>' + occurrencesPerWeek(c) + '×</small>' +
+            '<button data-pa-drop="' + c.id + '" aria-label="Remove">×</button></span>').join('') +
+          '</div>'
+        : '<p class="pahint">Nothing in this tier yet.</p>') +
+      '<select class="paadd" data-pa-put="' + b.key + '">' +
+      '<option value="">+ put a task in this tier…</option>' +
+      elsewhere.map(c => '<option value="' + c.id + '">' + esc(c.title) +
+        ' · ' + occurrencesPerWeek(c) + '×/wk</option>').join('') +
+      '</select></div>';
   }
 
   function paRender() {
-    $('pa-buckets').innerHTML = paRows();
+    $('pa-buckets').innerHTML = PA.map(paBucketHtml).join('');
     PA.forEach(b => {
       const p = $('pa-p-' + b.key);
       if (p) p.addEventListener('input', paRecalc);
     });
+    // Selecting a task moves it into that tier. Fires on the working copy —
+    // nothing is written until Save.
+    document.querySelectorAll('.paadd').forEach(sel =>
+      sel.addEventListener('change', () => {
+        if (!sel.value) return;
+        paCapture();
+        PA_ASSIGN[sel.value] = sel.dataset.paPut;
+        paRender();
+      }));
     paRecalc();
   }
 
@@ -1943,11 +1995,20 @@
     let seq = 0;
     PA = BUCKETS.map(b => ({ key: 'k' + (seq++), id: b.id, name: b.name, points: b.points,
                              sort_order: b.sort_order }));
+    // choreId -> tier key. Keys rather than ids, because a tier added in this
+    // sitting has no id until Save.
+    PA_ASSIGN = {};
+    CHORES.filter(c => !isExtra(c)).forEach(c => {
+      const b = PA.filter(x => x.id === c.bucket_id)[0];
+      PA_ASSIGN[c.id] = b ? b.key : null;
+    });
     openSheet(
       '<h2>Points allocation</h2>' +
-      '<label>Tiers</label>' +
+      '<p class="sub">Set what a tier is worth, then put tasks in it. The task takes ' +
+      'the tier\'s value, so re-pricing a tier re-prices everything in it.</p>' +
       '<div id="pa-buckets"></div>' +
       '<button class="btn ghost" id="pa-add" style="margin-bottom:1.25rem">+ Add a tier</button>' +
+      '<div id="pa-unfiled"></div>' +
       '<label>Each kid\'s week</label>' +
       '<div id="pa-total"></div>' +
       '<div id="pa-breakdown"></div>' +
@@ -1956,10 +2017,7 @@
     );
     paRender();
     $('pa-add').addEventListener('click', () => {
-      // Capture what's typed before re-rendering, or it's lost.
-      PA = PA.map(b => ({ key: b.key, id: b.id, sort_order: b.sort_order,
-        name: ($('pa-n-' + b.key) || {}).value || b.name,
-        points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0 }));
+      paCapture();
       PA.push({ key: 'k' + (seq++), id: null, name: '', points: 0, sort_order: PA.length });
       paRender();
     });
@@ -1968,38 +2026,47 @@
   }
 
   async function savePoints() {
+    paCapture();
     const rows = PA.map((b, i) => ({
-      id: b.id,
-      household_id: HH.id,
-      name: (($('pa-n-' + b.key) || {}).value || '').trim(),
-      points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0,
-      sort_order: i
+      key: b.key, id: b.id, household_id: HH.id,
+      name: (b.name || '').trim(), points: b.points || 0, sort_order: i
     }));
     if (rows.some(r => !r.name)) { toast('Every tier needs a name'); return; }
     try {
-      const updates = rows.filter(r => r.id);
-      const inserts = rows.filter(r => !r.id).map(r => {
-        const { id, ...rest } = r; return rest;
-      });
-      for (const u of updates) {
-        const { id, ...rest } = u;
-        const { error } = await sb.from('point_buckets').update(rest).eq('id', id);
+      const keyToId = {};
+      for (const r of rows) {
+        const body = { household_id: r.household_id, name: r.name,
+                       points: r.points, sort_order: r.sort_order };
+        if (r.id) {
+          const { error } = await sb.from('point_buckets').update(body).eq('id', r.id);
+          if (error) throw error;
+          keyToId[r.key] = r.id;
+        } else {
+          const { data, error } = await sb.from('point_buckets').insert(body)
+            .select('id').single();
+          if (error) throw error;
+          keyToId[r.key] = data.id;
+        }
+      }
+
+      // Write the assignments. Only the ones that actually moved, so a sitting
+      // where you only re-priced doesn't touch every chore row.
+      for (const c of CHORES.filter(x => !isExtra(x))) {
+        const want = PA_ASSIGN[c.id] ? (keyToId[PA_ASSIGN[c.id]] || null) : null;
+        if ((c.bucket_id || null) === want) continue;
+        const { error } = await sb.from('chores').update({ bucket_id: want }).eq('id', c.id);
         if (error) throw error;
       }
-      if (inserts.length) {
-        const { error } = await sb.from('point_buckets').insert(inserts);
-        if (error) throw error;
-      }
-      // Anything dropped from the list goes; chores on it fall back to their
-      // own points column rather than disappearing (FK is ON DELETE SET NULL).
-      const keptIds = updates.map(u => u.id);
-      const gone = BUCKETS.filter(b => keptIds.indexOf(b.id) === -1);
-      for (const g of gone) {
+
+      // Tiers dropped from the list go last, once nothing points at them.
+      // Chores that were in one have already been moved or unfiled above.
+      const keptIds = rows.filter(r => r.id).map(r => r.id);
+      for (const g of BUCKETS.filter(b => keptIds.indexOf(b.id) === -1)) {
         const { error } = await sb.from('point_buckets').delete().eq('id', g.id);
         if (error) throw error;
       }
       closeSheet(); toast('Saved'); await refresh();
-    } catch (e) { fail(e, 'save the tiers'); }
+    } catch (e) { fail(e, 'save the allocation'); }
   }
 
   // ── Weekly review — Monday morning's settle-up ───────────────────────────
@@ -2566,13 +2633,15 @@
     else if (t.id === 'open-points') pointsSheet();
     else if (t.id === 'open-review') { RV_WEEK = null; reviewSheet(0); }
     else if (t.dataset.paDel) {
-      PA = PA.filter(b => b.key !== t.dataset.paDel).map(b => ({
-        key: b.key, id: b.id, sort_order: b.sort_order,
-        name: ($('pa-n-' + b.key) || {}).value || b.name,
-        points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0
-      }));
+      paCapture();
+      // Anything in the tier falls back to unfiled rather than vanishing.
+      Object.keys(PA_ASSIGN).forEach(cid => {
+        if (PA_ASSIGN[cid] === t.dataset.paDel) PA_ASSIGN[cid] = null;
+      });
+      PA = PA.filter(b => b.key !== t.dataset.paDel);
       paRender();
     }
+    else if (t.dataset.paDrop) { paCapture(); PA_ASSIGN[t.dataset.paDrop] = null; paRender(); }
   });
 
   const menuBtn = $('menu-btn'), menu = $('menu');
