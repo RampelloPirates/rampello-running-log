@@ -140,11 +140,14 @@
     .papills { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.45rem 0; }
     .tpill { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--green-tint); color: var(--green-deep); border: 1px solid var(--silver); border-radius: 99px; padding: 0.18rem 0.3rem 0.18rem 0.6rem; font-size: 0.78rem; }
     .tpill.loose { background: var(--paper); color: var(--muted); padding-right: 0.6rem; }
+    .tpill.norepeat { background: #F7EEDD; border-color: var(--amber); }
+    .tpill.norepeat small { color: var(--amber); font-weight: 600; }
     .tpill small { color: var(--muted); font-size: 0.68rem; }
     .tpill button { border: none; background: none; color: var(--muted); font-size: 0.95rem; line-height: 1; cursor: pointer; padding: 0 0.15rem; }
     .tpill button:hover { color: var(--danger); }
     .paadd { font-size: 0.82rem; padding: 0.4rem 0.5rem; }
     .pahint { font-size: 0.74rem; color: var(--muted); margin: 0.4rem 0; line-height: 1.4; }
+    .pawarn { font-size: 0.78rem; color: #8A5418; background: #F7EEDD; border: 1px solid var(--amber); border-radius: 10px; padding: 0.55rem 0.7rem; margin: 0 0 0.8rem; line-height: 1.45; }
 
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
@@ -929,15 +932,23 @@
   // often it comes round. Daily-at-5 is 35 a week; Tuesday-at-20 is 20.
   // Counted by walking a representative week rather than parsing the rule,
   // so it uses the same matcher the calendar does.
+  // The week to measure against: a full one, entirely on or after the chore's
+  // start date. Using the current week when the chore starts midway through it
+  // undercounts — a daily chore added on Wednesday would score 5, because
+  // ruleMatches quite correctly refuses the Monday and Tuesday before it
+  // existed. That's the right answer for "what's due this week" and the wrong
+  // one for "how often does this happen", which is what allocation asks.
+  function representativeWeek(anchor) {
+    const thisWeek = startOfPayWeek(new Date());
+    if (anchor <= thisWeek) return thisWeek;
+    return startOfPayWeek(addDays(anchor, 6));   // the first full week after it starts
+  }
+
   function occurrencesPerWeek(c) {
     if (isExtra(c)) return 0;                 // not part of the routine target
     if (!c.rrule) return 1;                   // a one-off counts once
     const anchor = parseYmd(c.starts_on);
-    const thisWeek = startOfPayWeek(new Date());
-    // A chore that starts later would score zero this week, which says
-    // nothing about how often it recurs — so measure from whichever week it
-    // is actually running in.
-    const start = anchor > thisWeek ? startOfPayWeek(anchor) : thisWeek;
+    const start = representativeWeek(anchor);
     let n = 0;
     for (let i = 0; i < 7; i++) if (ruleMatches(c.rrule, addDays(start, i), anchor)) n++;
     return n;
@@ -1900,6 +1911,12 @@
   }
   function paPool() { return CHORES.filter(c => !isExtra(c) && paScope(c)); }
 
+  // A chore with no repeat rule happens once, which is almost never what was
+  // meant for something like brushing teeth — and "1×" reads as an allocation
+  // fault rather than a missing setting. Say "once, no repeat" instead.
+  function freqLabel(c) { return c.rrule ? occurrencesPerWeek(c) + '×/wk' : 'once, no repeat'; }
+  function scopedNoRepeat() { return paPool().filter(c => !c.rrule); }
+
   function paWhoTabs() {
     const kids = MEMBERS.filter(m => m.role === 'kid');
     return '<div class="listpick" id="pa-who">' +
@@ -1973,6 +1990,15 @@
 
     $('pa-whotabs').innerHTML = paWhoTabs();
 
+    // The most likely reason a week won't add up: something that should recur
+    // was never given a repeat rule, so it counts once instead of seven times.
+    const noRule = scopedNoRepeat();
+    $('pa-warn').innerHTML = !noRule.length ? '' :
+      '<p class="pawarn">' + noRule.length + ' task' + (noRule.length === 1 ? '' : 's') +
+      ' below ' + (noRule.length === 1 ? 'has' : 'have') + ' no repeat rule, so ' +
+      (noRule.length === 1 ? 'it counts' : 'they count') + ' once a week rather than ' +
+      'every day. Set the repeat on the task itself in To-dos.</p>';
+
     const m = MEMBERS.filter(x => x.id === PA_WHO)[0];
     $('pa-total').innerHTML = m
       ? paPersonHtml(m, working, chores, overrides)
@@ -2041,15 +2067,15 @@
       '</div>' +
       (mine.length
         ? '<div class="papills">' + mine.map(c =>
-            '<span class="tpill">' + esc(c.title) +
-            '<small>' + occurrencesPerWeek(c) + '×</small>' +
+            '<span class="tpill' + (c.rrule ? '' : ' norepeat') + '">' + esc(c.title) +
+            '<small>' + freqLabel(c) + '</small>' +
             '<button data-pa-drop="' + c.id + '" aria-label="Remove">×</button></span>').join('') +
           '</div>'
         : '<p class="pahint">Nothing in this tier yet.</p>') +
       '<select class="paadd" data-pa-put="' + b.key + '">' +
       '<option value="">+ put a task in this tier…</option>' +
       elsewhere.map(c => '<option value="' + c.id + '">' + esc(c.title) +
-        ' · ' + occurrencesPerWeek(c) + '×/wk</option>').join('') +
+        ' · ' + freqLabel(c) + '</option>').join('') +
       '</select></div>';
   }
 
@@ -2096,6 +2122,7 @@
       'tasks in it — the task takes the tier\'s value, so re-pricing a tier ' +
       're-prices everything in it for everyone.</p>' +
       '<div id="pa-whotabs"></div>' +
+      '<div id="pa-warn"></div>' +
       '<div id="pa-buckets"></div>' +
       '<button class="btn ghost" id="pa-add" style="margin-bottom:1.25rem">+ Add a tier</button>' +
       '<div id="pa-unfiled"></div>' +
