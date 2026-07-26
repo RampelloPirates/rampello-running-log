@@ -171,6 +171,30 @@
 
     .listpick { display: flex; gap: 0.4rem; overflow-x: auto; padding-bottom: 0.4rem; margin-bottom: 0.9rem; }
     .listpick .pick { white-space: nowrap; }
+
+    /* A planning day: what's already happening, then what you'll eat. The
+       events are context, so they're quieter than the meals. */
+    .daycard { background: var(--paper); border: 1px solid var(--silver); border-radius: 14px; padding: 0.85rem 0.95rem; margin-bottom: 0.6rem; }
+    .daycard.is-today { border-color: var(--amber); }
+    .daycard .dtitle { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .daycard .dname { font-family: var(--f-display); font-size: 0.95rem; font-weight: 600; color: var(--green-deep); }
+    .daycard.is-today .dname { color: var(--amber); }
+    .addmeal { border: 1px dashed var(--silver); background: none; color: var(--muted); border-radius: 8px; font-size: 0.78rem; font-family: var(--f-body); padding: 0.2rem 0.55rem; cursor: pointer; }
+    .addmeal:hover { border-color: var(--green); color: var(--green); border-style: solid; }
+    .ctx { font-size: 0.78rem; color: var(--muted); line-height: 1.45; margin-bottom: 0.5rem; padding-left: 0.55rem; border-left: 2px solid var(--silver); }
+    .ctx .cdot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin-right: 0.3rem; vertical-align: middle; }
+    .meal { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.4rem 0; border-top: 1px solid var(--surface-warm); }
+    .meal:first-of-type { border-top: none; }
+    .meal .mslot { flex-shrink: 0; width: 62px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding-top: 0.15rem; }
+    .meal .mbody { flex: 1; min-width: 0; }
+    .meal .mt { font-weight: 600; font-size: 0.93rem; word-break: break-word; }
+    .meal .mmeta { font-size: 0.78rem; color: var(--muted); margin-top: 0.1rem; }
+    .venue { display: inline-block; font-size: 0.68rem; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 99px; }
+    .venue.eat_in { background: var(--green-tint); color: var(--green-deep); }
+    .venue.eat_out { background: #F1E6D2; color: #8A5418; }
+    .venue.at_friends { background: #E6EEF2; color: #3E6274; }
+    .rlink { color: var(--green); text-decoration: none; font-size: 0.78rem; }
+    .rlink:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -214,6 +238,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="calendar">Calendar</button>
         <button class="tab" data-tab="chores">Chores</button>
+        <button class="tab" data-tab="meals">Meals</button>
         <button class="tab" data-tab="lists">Lists</button>
         <button class="tab" data-tab="family">Family</button>
       </div>
@@ -239,6 +264,22 @@
         <div class="filterbar"><button class="pick" data-mine="1">Mine only</button></div>
         <div id="chore-body"></div>
       </section>
+      <section class="panel" id="panel-meals">
+        <div class="viewtoggle">
+          <button class="pick on" id="v-week">Week</button>
+          <button class="pick" id="v-recipes">Recipes</button>
+        </div>
+        <div id="week-wrap">
+          <div class="monthnav">
+            <button class="navbtn" id="w-prev" aria-label="Previous week">‹</button>
+            <h3 id="w-label"></h3>
+            <button class="navbtn" id="w-next" aria-label="Next week">›</button>
+          </div>
+          <div id="week-body"></div>
+        </div>
+        <div id="recipe-body" style="display:none"></div>
+      </section>
+
       <section class="panel" id="panel-lists">
         <div class="listpick" id="list-tabs"></div>
         <div id="list-body"></div>
@@ -267,6 +308,16 @@
   // ==========================================================================
 
   const MEMBER_COLORS = ['#4f7cff','#e8734a','#3a9d7e','#b455c9','#d4a017','#d1476b','#5c8ab8','#7a9e3f'];
+  const MEAL_SLOTS = [
+    { key: 'breakfast', label: 'Breakfast' },
+    { key: 'lunch',     label: 'Lunch' },
+    { key: 'dinner',    label: 'Dinner' }
+  ];
+  const VENUES = [
+    { key: 'eat_in',     label: 'Eat in' },
+    { key: 'eat_out',    label: 'Eat out' },
+    { key: 'at_friends', label: 'At friends' }
+  ];
   const DOW = ['SU','MO','TU','WE','TH','FR','SA'];
   const DOW_LABEL = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
@@ -278,6 +329,10 @@
   let COMPLETIONS = [];
   let LISTS = [];
   let ITEMS = [];
+  let MEALS = [];
+  let RECIPES = [];
+  let MEAL_VIEW = 'week';         // 'week' | 'recipes'
+  let W_CURSOR = null;            // Sunday of the displayed week
   let ACTIVE_LIST = null;
   let TAB = 'calendar';
   let MINE = false;               // "Mine only" filter, shared by both tabs
@@ -309,6 +364,8 @@
   function parseYmd(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
   function todayYmd() { return ymd(new Date()); }
   function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate()+n); return x; }
+  // Sunday-start, matching the month grid's columns.
+  function startOfWeek(d) { const x = new Date(d); x.setHours(0,0,0,0); return addDays(x, -x.getDay()); }
 
   function fmtDayHead(dateStr) {
     const d = parseYmd(dateStr);
@@ -335,6 +392,11 @@
     const [hh,mm] = (timeStr || '00:00').split(':').map(Number);
     return new Date(y, m-1, d, hh, mm).toISOString();
   }
+
+  // Recipe links are typed by hand, so they get rendered into an href only if
+  // they're actually a web address. Without this, "javascript:..." in that
+  // field would be a stored XSS against everyone in the household.
+  function safeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : null; }
 
   function memberById(id) { return MEMBERS.find(m => m.id === id) || null; }
 
@@ -566,23 +628,38 @@
     if (needFrom) WIN_FROM = fromYmd;
     if (needTo)   WIN_TO   = toYmd;
     await loadEvents();
+    await loadMeals();
     return true;
+  }
+
+  // Meals share the events window: the meal planner shows the week's calendar
+  // as context, so the two are always wanted over the same span.
+  async function loadMeals() {
+    const { data, error } = await sb.from('meal_plan').select('*')
+      .eq('household_id', HH.id)
+      .gte('plan_date', WIN_FROM).lte('plan_date', WIN_TO)
+      .order('plan_date');
+    if (error) throw error;
+    MEALS = data || [];
   }
 
   async function loadAll() {
     const hid = HH.id;
     const from = ymd(addDays(new Date(), -1));
     if (!WIN_FROM) { WIN_FROM = from; WIN_TO = ymd(addDays(new Date(), 120)); }
-    const [mRes, cRes, kRes, lRes] = await Promise.all([
+    const [mRes, cRes, kRes, lRes, rRes] = await Promise.all([
       sb.from('household_members').select('*').eq('household_id', hid)
         .eq('active', true).order('sort_order'),
       sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
       sb.from('chore_completions').select('*').eq('household_id', hid).gte('due_on', from),
-      sb.from('lists').select('*').eq('household_id', hid).order('sort_order')
+      sb.from('lists').select('*').eq('household_id', hid).order('sort_order'),
+      sb.from('recipes').select('*').eq('household_id', hid).order('title')
     ]);
-    for (const r of [mRes, cRes, kRes, lRes]) if (r.error) throw r.error;
+    for (const r of [mRes, cRes, kRes, lRes, rRes]) if (r.error) throw r.error;
     await loadEvents();
+    await loadMeals();
     MEMBERS = mRes.data || [];
+    RECIPES = rRes.data || [];
     CHORES = cRes.data || [];
     COMPLETIONS = kRes.data || [];
     LISTS = lRes.data || [];
@@ -608,7 +685,7 @@
     $('page-sub').textContent = MEMBERS.length +
       (MEMBERS.length === 1 ? ' member' : ' members');
     syncMine();
-    renderCalendar(); renderChores(); renderLists(); renderFamily();
+    renderCalendar(); renderChores(); renderMeals(); renderLists(); renderFamily();
   }
 
   // One flag, two toggles — the calendar and chores each show their own button
@@ -786,6 +863,103 @@
       html += '</div>';
     }
     $('chore-body').innerHTML = html;
+  }
+
+  // ── Meals ────────────────────────────────────────────────────────────────
+  function mealsOn(dateStr) {
+    const order = (s) => {
+      for (let i = 0; i < MEAL_SLOTS.length; i++) if (MEAL_SLOTS[i].key === s) return i;
+      return MEAL_SLOTS.length;
+    };
+    return MEALS.filter(m => m.plan_date === dateStr)
+                .sort((a, b) => order(a.slot) - order(b.slot));
+  }
+  function labelOf(list, key) {
+    const hit = list.filter(x => x.key === key)[0];
+    return hit ? hit.label : '';
+  }
+
+  function renderMeals() {
+    const wk = MEAL_VIEW === 'week';
+    $('week-wrap').style.display = wk ? 'block' : 'none';
+    $('recipe-body').style.display = wk ? 'none' : 'block';
+    $('v-week').classList.toggle('on', wk);
+    $('v-recipes').classList.toggle('on', !wk);
+    if (wk) renderWeek(); else renderRecipes();
+  }
+
+  function renderWeek() {
+    if (!W_CURSOR) W_CURSOR = startOfWeek(new Date());
+    const start = W_CURSOR, end = addDays(start, 6);
+    $('w-label').textContent =
+      start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' – ' +
+      end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+    // Context is deliberately the whole household's calendar, not the Mine
+    // filter's view: you plan Tuesday around whoever has practice, not just
+    // around yourself.
+    const byDay = expandRange(start, end);
+    let html = '';
+    for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+      const k = ymd(d);
+      const occ = byDay[k] || [];
+      const meals = mealsOn(k);
+      html += '<div class="daycard' + (k === todayYmd() ? ' is-today' : '') + '">' +
+        '<div class="dtitle"><span class="dname">' + esc(fmtDayHead(k)) + '</span>' +
+        '<button class="addmeal" data-add-meal="' + k + '">+ meal</button></div>';
+      if (occ.length) {
+        html += '<div class="ctx">' + occ.slice(0, 4).map(o =>
+          '<span class="cdot" style="background:' + esc(eventColor(o.ev)) + '"></span>' +
+          (o.ev.all_day ? '' : shortTime(o.ev.starts_at) + ' ') + esc(o.ev.title)
+        ).join('<br>') +
+        (occ.length > 4 ? '<br>+' + (occ.length - 4) + ' more' : '') + '</div>';
+      }
+      if (!meals.length) {
+        html += '<div class="meal"><span class="mslot"></span>' +
+                '<span class="mbody"><span class="mmeta">Nothing planned</span></span></div>';
+      } else {
+        meals.forEach(m => {
+          const r = m.recipe_id ? RECIPES.filter(x => x.id === m.recipe_id)[0] : null;
+          const u = r ? safeUrl(r.source_url) : null;
+          const bits = ['<span class="venue ' + esc(m.venue) + '">' +
+                        esc(labelOf(VENUES, m.venue)) + '</span>'];
+          if (m.notes) bits.push(esc(m.notes));
+          if (u) bits.push('<a class="rlink" href="' + esc(u) +
+                           '" target="_blank" rel="noopener">recipe ↗</a>');
+          html += '<div class="meal">' +
+            '<span class="mslot">' + esc(labelOf(MEAL_SLOTS, m.slot)) + '</span>' +
+            '<span class="mbody"><span class="mt">' + esc(m.title) + '</span>' +
+            '<div class="mmeta">' + bits.join(' · ') + '</div></span>' +
+            '<span class="act"><button class="iconbtn" data-edit-meal="' + m.id +
+            '" aria-label="Edit">✎</button></span></div>';
+        });
+      }
+      html += '</div>';
+    }
+    $('week-body').innerHTML = html;
+  }
+
+  function renderRecipes() {
+    if (!RECIPES.length) {
+      $('recipe-body').innerHTML =
+        '<div class="empty">No recipes yet. Tap + to add one — a name is enough, ' +
+        'the link and ingredients are optional.</div>';
+      return;
+    }
+    $('recipe-body').innerHTML = RECIPES.map(r => {
+      const u = safeUrl(r.source_url);
+      const used = MEALS.filter(m => m.recipe_id === r.id).length;
+      const bits = [];
+      if (u) bits.push('<a class="rlink" href="' + esc(u) +
+                       '" target="_blank" rel="noopener">open link ↗</a>');
+      if (used) bits.push(used === 1 ? 'planned once' : 'planned ' + used + ' times');
+      return '<div class="row"><span class="swatch"></span>' +
+        '<span class="body"><span class="t">' + esc(r.title) + '</span>' +
+        (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '') +
+        '</span><span class="act">' +
+        '<button class="iconbtn" data-edit-recipe="' + r.id + '" aria-label="Edit">✎</button>' +
+        '</span></div>';
+    }).join('');
   }
 
   function renderLists() {
@@ -1212,6 +1386,146 @@
     } catch (e) { fail(e, 'update the chore'); }
   }
 
+  // ── Meal + recipe forms ──────────────────────────────────────────────────
+  function pillRow(id, list, current) {
+    return '<div class="pickers" id="' + id + '">' + list.map(x =>
+      '<button type="button" class="pick' + (x.key === current ? ' on' : '') +
+      '" data-pill="' + x.key + '">' + esc(x.label) + '</button>').join('') + '</div>';
+  }
+  function wirePills(id) {
+    const all = Array.from(document.querySelectorAll('#' + id + ' .pick'));
+    all.forEach(b => b.addEventListener('click', () =>
+      all.forEach(x => x.classList.toggle('on', x === b))));
+  }
+  function readPill(id, fallback) {
+    const b = document.querySelector('#' + id + ' .pick.on');
+    return b ? b.dataset.pill : fallback;
+  }
+
+  function mealSheet(m, dateStr) {
+    const isNew = !m;
+    m = m || { plan_date: dateStr || todayYmd(), slot: 'dinner', venue: 'eat_in' };
+    openSheet(
+      '<h2>' + (isNew ? 'Plan a meal' : 'Edit meal') + '</h2>' +
+      '<div class="field"><label for="f-date">Day</label>' +
+      '<input type="date" id="f-date" value="' + (m.plan_date || todayYmd()) + '"></div>' +
+      '<div class="field"><label>Meal</label>' + pillRow('pick-mslot', MEAL_SLOTS, m.slot) + '</div>' +
+      '<div class="field"><label>Where</label>' + pillRow('pick-venue', VENUES, m.venue) + '</div>' +
+      '<div class="field"><label for="f-recipe">From a recipe</label><select id="f-recipe">' +
+      '<option value="">— none, just type it below —</option>' +
+      RECIPES.map(r => '<option value="' + r.id + '"' +
+        (m.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>').join('') +
+      '</select></div>' +
+      '<div class="field"><label for="f-title">What</label>' +
+      '<input type="text" id="f-title" value="' + esc(m.title || '') +
+      '" placeholder="Chicken tacos"></div>' +
+      '<div class="field"><label for="f-notes">Notes</label>' +
+      '<textarea id="f-notes" placeholder="Double it — Sam is staying">' +
+      esc(m.notes || '') + '</textarea></div>' +
+      '<div class="btnrow">' +
+      (isNew ? '' : '<button class="btn danger" id="f-del">Delete</button>') +
+      '<button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
+    );
+    wirePills('pick-mslot'); wirePills('pick-venue');
+    // Picking a recipe fills the title, but doesn't lock it — the useful
+    // version of a plan is often "tacos (double it)".
+    $('f-recipe').addEventListener('change', () => {
+      const r = RECIPES.filter(x => x.id === $('f-recipe').value)[0];
+      if (r && !$('f-title').value.trim()) $('f-title').value = r.title;
+    });
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', () => saveMeal(m.id));
+    if (!isNew) $('f-del').addEventListener('click', () => deleteMeal(m.id, m.title));
+  }
+
+  async function saveMeal(id) {
+    const recipeId = $('f-recipe').value || null;
+    const recipe = recipeId ? RECIPES.filter(x => x.id === recipeId)[0] : null;
+    // Title is required by the column, so fall back to the recipe's name
+    // rather than rejecting a perfectly clear "Tuesday: that pasta thing".
+    const title = $('f-title').value.trim() || (recipe ? recipe.title : '');
+    if (!title) { toast('What are you eating?'); return; }
+    const row = {
+      household_id: HH.id,
+      plan_date: $('f-date').value || todayYmd(),
+      slot: readPill('pick-mslot', 'dinner'),
+      venue: readPill('pick-venue', 'eat_in'),
+      recipe_id: recipeId,
+      title: title,
+      notes: $('f-notes').value.trim() || null,
+      created_by: ME.user_id
+    };
+    try {
+      const { error } = id ? await sb.from('meal_plan').update(row).eq('id', id)
+                           : await sb.from('meal_plan').insert(row);
+      if (error) throw error;
+      closeSheet(); toast(id ? 'Updated' : 'Planned'); await refresh();
+    } catch (e) { fail(e, 'save the meal'); }
+  }
+
+  async function deleteMeal(id, title) {
+    if (!confirm('Remove "' + title + '" from the plan?')) return;
+    try {
+      const { error } = await sb.from('meal_plan').delete().eq('id', id);
+      if (error) throw error;
+      closeSheet(); toast('Removed'); await refresh();
+    } catch (e) { fail(e, 'remove the meal'); }
+  }
+
+  function recipeSheet(r) {
+    const isNew = !r;
+    r = r || {};
+    openSheet(
+      '<h2>' + (isNew ? 'New recipe' : 'Edit recipe') + '</h2>' +
+      '<div class="field"><label for="f-title">Name</label>' +
+      '<input type="text" id="f-title" value="' + esc(r.title || '') +
+      '" placeholder="Chicken tacos"></div>' +
+      '<div class="field"><label for="f-url">Link</label>' +
+      '<input type="text" id="f-url" value="' + esc(r.source_url || '') +
+      '" placeholder="https://…" autocapitalize="off"></div>' +
+      '<div class="field"><label for="f-ing">Ingredients</label>' +
+      '<textarea id="f-ing" placeholder="One per line">' + esc(r.ingredients || '') + '</textarea></div>' +
+      '<div class="field"><label for="f-notes">Notes</label>' +
+      '<textarea id="f-notes" placeholder="Optional">' + esc(r.notes || '') + '</textarea></div>' +
+      '<div class="btnrow">' +
+      (isNew ? '' : '<button class="btn danger" id="f-del">Delete</button>') +
+      '<button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
+    );
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', async () => {
+      const title = $('f-title').value.trim();
+      if (!title) { toast('Name it'); return; }
+      const url = $('f-url').value.trim();
+      if (url && !safeUrl(url)) { toast('Links need to start with http:// or https://'); return; }
+      const row = {
+        household_id: HH.id, title: title, source_url: url || null,
+        ingredients: $('f-ing').value.trim() || null,
+        notes: $('f-notes').value.trim() || null,
+        created_by: ME.user_id
+      };
+      try {
+        const { error } = r.id ? await sb.from('recipes').update(row).eq('id', r.id)
+                               : await sb.from('recipes').insert(row);
+        if (error) throw error;
+        closeSheet(); toast(r.id ? 'Updated' : 'Added'); await refresh();
+      } catch (e) { fail(e, 'save the recipe'); }
+    });
+    const del = $('f-del');
+    if (del) del.addEventListener('click', async () => {
+      const used = MEALS.filter(x => x.recipe_id === r.id).length;
+      if (!confirm('Delete "' + r.title + '"?' + (used
+        ? '\n\nIt is on the plan ' + used + ' time(s). Those meals stay — they just lose the link.'
+        : ''))) return;
+      try {
+        const { error } = await sb.from('recipes').delete().eq('id', r.id);
+        if (error) throw error;
+        closeSheet(); toast('Deleted'); await refresh();
+      } catch (e) { fail(e, 'delete the recipe'); }
+    });
+  }
+
   // ── Lists ────────────────────────────────────────────────────────────────
   function listSheet() {
     openSheet(
@@ -1394,8 +1708,26 @@
   $('fab').addEventListener('click', () => {
     if (TAB === 'calendar') eventSheet(null);
     else if (TAB === 'chores') choreSheet(null);
+    else if (TAB === 'meals') {
+      // The + means "another one of what I'm looking at".
+      if (MEAL_VIEW === 'recipes') recipeSheet(null);
+      else mealSheet(null, todayYmd());
+    }
     else if (TAB === 'lists') itemSheet();
   });
+
+  async function gotoWeek(delta) {
+    if (!W_CURSOR) W_CURSOR = startOfWeek(new Date());
+    if (delta) W_CURSOR = addDays(W_CURSOR, delta * 7);
+    try { await ensureRange(ymd(addDays(W_CURSOR, -7)), ymd(addDays(W_CURSOR, 13))); }
+    catch (e) { fail(e, 'load that week'); }
+    renderMeals();
+  }
+
+  $('v-week').addEventListener('click', () => { MEAL_VIEW = 'week'; renderMeals(); });
+  $('v-recipes').addEventListener('click', () => { MEAL_VIEW = 'recipes'; renderMeals(); });
+  $('w-prev').addEventListener('click', () => gotoWeek(-1));
+  $('w-next').addEventListener('click', () => gotoWeek(1));
 
   // Month navigation widens the loaded window before drawing, since a month
   // you page back to may sit outside whatever was fetched at startup.
@@ -1434,6 +1766,9 @@
     else if (t.dataset.editChore) { const c = CHORES.find(x => x.id === t.dataset.editChore); if (c) choreSheet(c); }
     else if (t.dataset.item) toggleItem(t.dataset.item);
     else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
+    else if (t.dataset.addMeal) mealSheet(null, t.dataset.addMeal);
+    else if (t.dataset.editMeal) { const x = MEALS.filter(y => y.id === t.dataset.editMeal)[0]; if (x) mealSheet(x); }
+    else if (t.dataset.editRecipe) { const x = RECIPES.filter(y => y.id === t.dataset.editRecipe)[0]; if (x) recipeSheet(x); }
     else if (t.dataset.mine) { MINE = !MINE; syncMine(); renderCalendar(); renderChores(); }
     else if (t.dataset.dayCell) { M_SEL = t.dataset.dayCell; renderMonth(); }
     else if (t.dataset.list) { ACTIVE_LIST = t.dataset.list; refresh(); }
