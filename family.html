@@ -57,6 +57,27 @@
     .card { background: var(--paper); border: 1px solid var(--silver); border-radius: 16px; padding: 1.1rem; margin-bottom: 0.9rem; }
     .card h2 { font-family: var(--f-display); font-size: 1.05rem; margin: 0 0 0.75rem; color: var(--green-deep); }
 
+    .viewtoggle { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
+    .viewtoggle .pick { flex: 1; text-align: center; padding: 0.5rem; }
+
+    .monthnav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+    .monthnav h3 { font-family: var(--f-display); font-size: 1.05rem; margin: 0; color: var(--green-deep); }
+    .navbtn { border: 1px solid var(--silver); background: var(--paper); border-radius: 9px; width: 36px; height: 36px; font-size: 1.2rem; line-height: 1; cursor: pointer; color: var(--green); }
+    .navbtn:hover { border-color: var(--green); background: var(--green-tint); }
+
+    .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--silver); border: 1px solid var(--silver); border-radius: 12px; overflow: hidden; }
+    .grid .dow { background: var(--surface-warm); text-align: center; font-size: 0.68rem; font-weight: 600; letter-spacing: .04em; color: var(--muted); padding: 0.4rem 0; }
+    .cell { background: var(--paper); min-height: 54px; padding: 0.3rem 0.2rem; cursor: pointer; border: none; font-family: var(--f-body); display: flex; flex-direction: column; align-items: center; gap: 0.22rem; }
+    .cell.out { background: var(--surface-warm); }
+    .cell.out .n { color: #C9C3B4; }
+    .cell .n { font-size: 0.82rem; color: var(--ink); line-height: 1.1; }
+    .cell.today .n { color: var(--amber); font-weight: 700; }
+    .cell.sel { background: var(--green-tint); box-shadow: inset 0 0 0 2px var(--green); }
+    .dots { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; max-width: 100%; }
+    .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .more { font-size: 0.6rem; color: var(--muted); line-height: 1; }
+    .seldate { font-family: var(--f-display); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 1.25rem 0 0.5rem 0.15rem; }
+
     .daygroup { margin-bottom: 1.25rem; }
     .dayhead { font-family: var(--f-display); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 0.5rem 0.15rem; }
     .dayhead.today { color: var(--amber); }
@@ -169,7 +190,22 @@
         <button class="tab" data-tab="family">Family</button>
       </div>
 
-      <section class="panel active" id="panel-calendar"><div id="cal-body"></div></section>
+      <section class="panel active" id="panel-calendar">
+        <div class="viewtoggle">
+          <button class="pick on" id="v-agenda">Agenda</button>
+          <button class="pick" id="v-month">Month</button>
+        </div>
+        <div id="month-wrap" style="display:none">
+          <div class="monthnav">
+            <button class="navbtn" id="m-prev" aria-label="Previous month">‹</button>
+            <h3 id="m-label"></h3>
+            <button class="navbtn" id="m-next" aria-label="Next month">›</button>
+          </div>
+          <div class="grid" id="m-grid"></div>
+          <div id="m-day"></div>
+        </div>
+        <div id="cal-body"></div>
+      </section>
       <section class="panel" id="panel-chores"><div id="chore-body"></div></section>
       <section class="panel" id="panel-lists">
         <div class="listpick" id="list-tabs"></div>
@@ -212,6 +248,10 @@
   let ITEMS = [];
   let ACTIVE_LIST = null;
   let TAB = 'calendar';
+  let CAL_VIEW = 'agenda';        // 'agenda' | 'month'
+  let M_CURSOR = null;            // first of the displayed month
+  let M_SEL = null;               // selected day in month view (ymd)
+  let WIN_FROM = null, WIN_TO = null;   // loaded event window, local ymd
 
   // ── Small helpers ────────────────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
@@ -313,14 +353,11 @@
     return 'Repeats';
   }
 
-  // Expand events into { dateStr -> [occurrence] } over a window.
-  function expandEvents(days) {
-    const start = new Date(); start.setHours(0,0,0,0);
+  // Expand events into { dateStr -> [occurrence] } across an inclusive range.
+  // Recurring series have no rows of their own, so every render walks them.
+  function expandRange(startDate, endDate) {
     const byDay = {};
-    for (let i = 0; i < days; i++) {
-      const d = addDays(start, i);
-      byDay[ymd(d)] = [];
-    }
+    for (let d = new Date(startDate); d <= endDate; d = addDays(d, 1)) byDay[ymd(d)] = [];
     EVENTS.forEach(ev => {
       const anchorStr = ev.all_day ? ev.start_date : ymd(new Date(ev.starts_at));
       const anchor = parseYmd(anchorStr);
@@ -389,23 +426,58 @@
     return 'ok';
   }
 
+  // Events come back as three plain queries rather than one clever PostgREST
+  // .or(): the series (always, and whole — their occurrences aren't rows),
+  // then timed and all-day one-offs overlapping the loaded window. Month
+  // navigation has to widen that window anyway, and three simple filters are
+  // far easier to be sure of than one built by string concatenation.
+  //
+  // The timestamp bounds carry a day of slack on each side because the window
+  // is expressed in local calendar days and starts_at is UTC; without it, an
+  // evening event on the last day of the window falls outside the filter.
+  async function loadEvents() {
+    const hid = HH.id;
+    const lo = ymd(addDays(parseYmd(WIN_FROM), -1)) + 'T00:00:00Z';
+    const hi = ymd(addDays(parseYmd(WIN_TO), 1)) + 'T23:59:59Z';
+    const [recur, timed, allday] = await Promise.all([
+      sb.from('events').select('*').eq('household_id', hid).not('rrule', 'is', null),
+      sb.from('events').select('*').eq('household_id', hid).is('rrule', null)
+        .gte('starts_at', lo).lte('starts_at', hi),
+      sb.from('events').select('*').eq('household_id', hid).is('rrule', null)
+        .lte('start_date', WIN_TO).gte('end_date', WIN_FROM)
+    ]);
+    for (const r of [recur, timed, allday]) if (r.error) throw r.error;
+    const seen = {};
+    EVENTS = [].concat(recur.data || [], timed.data || [], allday.data || [])
+      .filter(e => seen[e.id] ? false : (seen[e.id] = true));
+  }
+
+  // Widen the loaded window when a view asks for days outside it. Only ever
+  // grows, so paging back and forth doesn't re-fetch.
+  async function ensureRange(fromYmd, toYmd) {
+    const needFrom = !WIN_FROM || fromYmd < WIN_FROM;
+    const needTo   = !WIN_TO   || toYmd   > WIN_TO;
+    if (!needFrom && !needTo) return false;
+    if (needFrom) WIN_FROM = fromYmd;
+    if (needTo)   WIN_TO   = toYmd;
+    await loadEvents();
+    return true;
+  }
+
   async function loadAll() {
     const hid = HH.id;
     const from = ymd(addDays(new Date(), -1));
-    const [mRes, eRes, cRes, kRes, lRes] = await Promise.all([
+    if (!WIN_FROM) { WIN_FROM = from; WIN_TO = ymd(addDays(new Date(), 120)); }
+    const [mRes, cRes, kRes, lRes] = await Promise.all([
       sb.from('household_members').select('*').eq('household_id', hid)
         .eq('active', true).order('sort_order'),
-      // Non-recurring events from yesterday forward, plus every series. Series
-      // have to come back whole because their occurrences aren't rows.
-      sb.from('events').select('*').eq('household_id', hid)
-        .or('rrule.not.is.null,starts_at.gte.' + from + 'T00:00:00Z,start_date.gte.' + from),
       sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
       sb.from('chore_completions').select('*').eq('household_id', hid).gte('due_on', from),
       sb.from('lists').select('*').eq('household_id', hid).order('sort_order')
     ]);
-    for (const r of [mRes, eRes, cRes, kRes, lRes]) if (r.error) throw r.error;
+    for (const r of [mRes, cRes, kRes, lRes]) if (r.error) throw r.error;
+    await loadEvents();
     MEMBERS = mRes.data || [];
-    EVENTS = eRes.data || [];
     CHORES = cRes.data || [];
     COMPLETIONS = kRes.data || [];
     LISTS = lRes.data || [];
@@ -433,41 +505,101 @@
     renderCalendar(); renderChores(); renderLists(); renderFamily();
   }
 
+  function eventColor(ev) {
+    if (ev.color) return ev.color;
+    if (ev.attendee_ids && ev.attendee_ids.length) {
+      const m = memberById(ev.attendee_ids[0]);
+      if (m) return m.color;
+    }
+    return '#3A5A40';
+  }
+
+  // Shared by both views so an event reads identically wherever it appears.
+  // dayKey travels with it because deleting one occurrence of a series needs
+  // to know which day was tapped.
+  function eventRowHtml(o, dayKey) {
+    const ev = o.ev;
+    const when = ev.all_day
+      ? (o.cont ? 'All day (continues)' : 'All day')
+      : fmtTime(ev.starts_at) + (ev.ends_at ? ' – ' + fmtTime(ev.ends_at) : '');
+    const bits = [when];
+    if (ev.kind === 'travel') bits.push('✈ Travel');
+    if (ev.location) bits.push(esc(ev.location));
+    if (ev.rrule) bits.push(esc(ruleLabel(ev.rrule)));
+    return '<div class="row">' +
+      '<span class="swatch" style="background:' + esc(eventColor(ev)) + '"></span>' +
+      '<span class="body"><span class="t">' + esc(ev.title) + '</span>' +
+      '<div class="meta">' + bits.join(' · ') + '</div>' +
+      memberChips(ev.attendee_ids) + '</span>' +
+      '<span class="act">' +
+      '<button class="iconbtn" data-edit-event="' + ev.id + '" aria-label="Edit">✎</button>' +
+      '<button class="iconbtn danger" data-del-event="' + ev.id + '" data-day="' + dayKey + '" aria-label="Delete">🗑</button>' +
+      '</span></div>';
+  }
+
   function renderCalendar() {
-    const byDay = expandEvents(21);
-    const keys = Object.keys(byDay).sort();
-    let html = '';
-    let shown = 0;
-    keys.forEach(k => {
+    const month = CAL_VIEW === 'month';
+    $('month-wrap').style.display = month ? 'block' : 'none';
+    $('cal-body').style.display   = month ? 'none' : 'block';
+    $('v-agenda').classList.toggle('on', !month);
+    $('v-month').classList.toggle('on', month);
+    if (month) renderMonth(); else renderAgenda();
+  }
+
+  // Agenda: what's coming, densely. Days with nothing on them are skipped —
+  // this view answers "what's next", not "what does the month look like".
+  function renderAgenda() {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const byDay = expandRange(start, addDays(start, 20));
+    let html = '', shown = 0;
+    Object.keys(byDay).sort().forEach(k => {
       const occ = byDay[k];
       if (!occ.length) return;
       shown += occ.length;
       html += '<div class="daygroup"><p class="dayhead' + (k === todayYmd() ? ' today' : '') + '">' +
-              esc(fmtDayHead(k)) + '</p>';
-      occ.forEach(o => {
-        const ev = o.ev;
-        const color = ev.color || (ev.attendee_ids && ev.attendee_ids.length
-          ? (memberById(ev.attendee_ids[0]) || {}).color : null) || '#3A5A40';
-        const when = ev.all_day
-          ? (o.cont ? 'All day (continues)' : 'All day')
-          : fmtTime(ev.starts_at) + (ev.ends_at ? ' – ' + fmtTime(ev.ends_at) : '');
-        const bits = [when];
-        if (ev.location) bits.push(esc(ev.location));
-        if (ev.rrule) bits.push(esc(ruleLabel(ev.rrule)));
-        html += '<div class="row">' +
-          '<span class="swatch" style="background:' + esc(color) + '"></span>' +
-          '<span class="body"><span class="t">' + esc(ev.title) + '</span>' +
-          '<div class="meta">' + bits.join(' · ') + '</div>' +
-          memberChips(ev.attendee_ids) + '</span>' +
-          '<span class="act">' +
-          '<button class="iconbtn" data-edit-event="' + ev.id + '" aria-label="Edit">✎</button>' +
-          '<button class="iconbtn danger" data-del-event="' + ev.id + '" data-day="' + k + '" aria-label="Delete">🗑</button>' +
-          '</span></div>';
-      });
-      html += '</div>';
+              esc(fmtDayHead(k)) + '</p>' +
+              occ.map(o => eventRowHtml(o, k)).join('') + '</div>';
     });
     $('cal-body').innerHTML = shown ? html :
       '<div class="empty">Nothing on the calendar for the next three weeks.<br>Tap + to add something.</div>';
+  }
+
+  // Month: the shape of the month, then one day in detail. Empty days still
+  // occupy a cell, which is the whole point of a grid.
+  function renderMonth() {
+    const cur = M_CURSOR;
+    $('m-label').textContent = cur.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+    const first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+    const last  = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+    const gridStart = addDays(first, -first.getDay());        // back to Sunday
+    const gridEnd   = addDays(last, 6 - last.getDay());       // on to Saturday
+    const byDay = expandRange(gridStart, gridEnd);
+
+    let html = ['S','M','T','W','T','F','S']
+      .map(d => '<div class="dow">' + d + '</div>').join('');
+    for (let d = new Date(gridStart); d <= gridEnd; d = addDays(d, 1)) {
+      const k = ymd(d);
+      const occ = byDay[k] || [];
+      const cls = ['cell'];
+      if (d.getMonth() !== cur.getMonth()) cls.push('out');
+      if (k === todayYmd()) cls.push('today');
+      if (k === M_SEL) cls.push('sel');
+      const dots = occ.slice(0, 4).map(o =>
+        '<span class="dot" style="background:' + esc(eventColor(o.ev)) + '"></span>').join('');
+      html += '<button class="' + cls.join(' ') + '" data-day-cell="' + k + '">' +
+        '<span class="n">' + d.getDate() + '</span>' +
+        (dots ? '<span class="dots">' + dots + '</span>' : '') +
+        (occ.length > 4 ? '<span class="more">+' + (occ.length - 4) + '</span>' : '') +
+        '</button>';
+    }
+    $('m-grid').innerHTML = html;
+
+    const sel = M_SEL || todayYmd();
+    const selOcc = byDay[sel] || [];
+    $('m-day').innerHTML = '<p class="seldate">' + esc(fmtDayHead(sel)) + '</p>' +
+      (selOcc.length ? selOcc.map(o => eventRowHtml(o, sel)).join('')
+                     : '<div class="empty">Nothing on this day.</div>');
   }
 
   function renderChores() {
@@ -607,6 +739,10 @@
   function readWho() {
     return Array.from(document.querySelectorAll('#pick-who .pick.on')).map(b => b.dataset.who);
   }
+  function readKind() {
+    const b = document.querySelector('#pick-kind .pick.on');
+    return b ? b.dataset.kind : 'in_town';
+  }
 
   // ── Event form ───────────────────────────────────────────────────────────
   function eventSheet(ev) {
@@ -619,6 +755,7 @@
                          : (ev.ends_at ? ymd(new Date(ev.ends_at)) : sDate);
     const sTime = ev.starts_at ? new Date(ev.starts_at).toTimeString().slice(0,5) : '09:00';
     const eTime = ev.ends_at ? new Date(ev.ends_at).toTimeString().slice(0,5) : '10:00';
+    const kind = ev.kind || 'in_town';
 
     openSheet(
       '<h2>' + (isNew ? 'New event' : 'Edit event') + '</h2>' +
@@ -634,6 +771,11 @@
       '<div><label for="f-edate">Ends</label><input type="date" id="f-edate" value="' + eDate + '"></div>' +
       '<div id="etime-wrap" style="display:' + (allDay ? 'none' : 'block') + '">' +
       '<label for="f-etime">At</label><input type="time" id="f-etime" value="' + eTime + '"></div></div>' +
+      '<div class="field"><label>Kind</label><div class="pickers" id="pick-kind">' +
+      '<button type="button" class="pick' + (kind === 'in_town' ? ' on' : '') +
+      '" data-kind="in_town">In town</button>' +
+      '<button type="button" class="pick' + (kind === 'travel' ? ' on' : '') +
+      '" data-kind="travel">Travel</button></div></div>' +
       '<div class="field"><label for="f-loc">Where</label>' +
       '<input type="text" id="f-loc" value="' + esc(ev.location || '') + '" placeholder="Optional"></div>' +
       '<div class="field"><label>Who</label>' + attendeePicker(ev.attendee_ids || []) + '</div>' +
@@ -645,10 +787,25 @@
       '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
     );
     wireRepeat();
+    // Kind is a radio group, unlike the multi-select attendee pills.
+    document.querySelectorAll('#pick-kind .pick').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('#pick-kind .pick').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    }));
     const ad = $('f-allday');
     ad.addEventListener('change', () => {
       const hide = ad.checked ? 'none' : 'block';
       $('stime-wrap').style.display = hide; $('etime-wrap').style.display = hide;
+    });
+    // The end date follows the start, because most events are one day and
+    // retyping the same date is pure friction. It stops following as soon as
+    // you deliberately push it out — that's what the prevStart check is for —
+    // and it never allows an end before the start.
+    const sd = $('f-sdate'), ed = $('f-edate');
+    let prevStart = sd.value;
+    sd.addEventListener('change', () => {
+      if (!ed.value || ed.value === prevStart || ed.value < sd.value) ed.value = sd.value;
+      prevStart = sd.value;
     });
     $('f-cancel').addEventListener('click', closeSheet);
     $('f-save').addEventListener('click', () => saveEvent(ev.id));
@@ -674,6 +831,7 @@
       start_date: allDay ? sDate : null,
       end_date:   allDay ? eDate : null,
       time_zone: HH.time_zone,
+      kind: readKind(),
       rrule: readRepeat(),
       attendee_ids: readWho(),
       created_by: ME.user_id
@@ -996,6 +1154,33 @@
     else if (TAB === 'lists') itemSheet();
   });
 
+  // Month navigation widens the loaded window before drawing, since a month
+  // you page back to may sit outside whatever was fetched at startup.
+  async function gotoMonth(delta) {
+    if (delta) {
+      M_CURSOR = new Date(M_CURSOR.getFullYear(), M_CURSOR.getMonth() + delta, 1);
+      M_SEL = ymd(M_CURSOR);   // land on the 1st, so the day panel isn't stranded
+    }
+    const first = new Date(M_CURSOR.getFullYear(), M_CURSOR.getMonth(), 1);
+    const last  = new Date(M_CURSOR.getFullYear(), M_CURSOR.getMonth() + 1, 0);
+    try { await ensureRange(ymd(addDays(first, -7)), ymd(addDays(last, 7))); }
+    catch (e) { fail(e, 'load that month'); }
+    renderCalendar();
+  }
+
+  $('v-agenda').addEventListener('click', () => { CAL_VIEW = 'agenda'; renderCalendar(); });
+  $('v-month').addEventListener('click', () => {
+    CAL_VIEW = 'month';
+    if (!M_CURSOR) {
+      const n = new Date();
+      M_CURSOR = new Date(n.getFullYear(), n.getMonth(), 1);
+      M_SEL = todayYmd();
+    }
+    gotoMonth(0);
+  });
+  $('m-prev').addEventListener('click', () => gotoMonth(-1));
+  $('m-next').addEventListener('click', () => gotoMonth(1));
+
   // One delegated listener rather than rebinding after every render.
   document.addEventListener('click', (e) => {
     const t = e.target.closest('button');
@@ -1006,6 +1191,7 @@
     else if (t.dataset.editChore) { const c = CHORES.find(x => x.id === t.dataset.editChore); if (c) choreSheet(c); }
     else if (t.dataset.item) toggleItem(t.dataset.item);
     else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
+    else if (t.dataset.dayCell) { M_SEL = t.dataset.dayCell; renderMonth(); }
     else if (t.dataset.list) { ACTIVE_LIST = t.dataset.list; refresh(); }
     else if (t.dataset.newList) listSheet();
     else if (t.dataset.editMember) { const m = MEMBERS.find(x => x.id === t.dataset.editMember); if (m) memberSheet(m); }
