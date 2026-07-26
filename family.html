@@ -163,7 +163,9 @@
 
     .sheet-bg { position: fixed; inset: 0; background: rgba(30,36,28,.45); display: none; z-index: 60; }
     .sheet-bg.show { display: block; }
-    .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-radius: 18px 18px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom)); max-height: 92vh; overflow-y: auto; z-index: 61; display: none; }
+    /* overscroll-behavior stops a flick inside the sheet from chaining to the
+       page underneath once the sheet hits its own end. */
+    .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--paper); border-radius: 18px 18px 0 0; padding: 1.25rem 1.1rem calc(1.25rem + env(safe-area-inset-bottom)); max-height: 92vh; overflow-y: auto; overscroll-behavior: contain; z-index: 61; display: none; }
     .sheet.show { display: block; }
     @media (min-width: 560px) {
       .sheet { left: 50%; right: auto; bottom: auto; top: 50%; transform: translate(-50%,-50%); width: 520px; border-radius: 18px; }
@@ -278,7 +280,7 @@
           <button class="pick" data-kind-filter="chore">Chores</button>
           <button class="pick" data-kind-filter="todo">To-dos</button>
         </div>
-        <div class="filterbar"><button class="pick" data-mine="1">Mine only</button></div>
+        <div class="listpick" id="who-tabs"></div>
         <div id="chore-body"></div>
       </section>
       <section class="panel" id="panel-meals">
@@ -352,8 +354,10 @@
   let W_CURSOR = null;            // Sunday of the displayed week
   let ACTIVE_LIST = null;
   let TAB = 'calendar';
-  let MINE = false;               // "Mine only" filter, shared by both tabs
+  let MINE = false;               // "Mine only" — calendar tab only; chores
+                                  // use WHO_FILTER, which names a person
   let KIND_FILTER = 'all';        // 'all' | 'chore' | 'todo'
+  let WHO_FILTER = null;          // 'all' | member id; null until ME is known
   let CAL_VIEW = 'agenda';        // 'agenda' | 'month'
   let M_CURSOR = null;            // first of the displayed month
   let M_SEL = null;               // selected day in month view (ymd)
@@ -525,21 +529,19 @@
     return byDay;
   }
 
-  // ── "Mine" ───────────────────────────────────────────────────────────────
-  // Mine means assigned to me OR assigned to nobody. A chore no one owns is
-  // still yours to do, and a Family event is yours by definition — filtering
-  // those out would leave the toggle hiding exactly the things it should
-  // surface. It narrows to "not someone else's", which is what you actually
-  // want when you tap it.
+  // ── Filtering by person ──────────────────────────────────────────────────
+  // The empty set counts as everyone's, on both sides: a Family event is
+  // yours by definition, and a chore nobody owns is still yours to do.
+  // Excluding them would make a filter hide precisely what it should surface,
+  // so both narrow to "not someone else's".
   function eventIsMine(ev) {
     if (!ME) return true;
     const ids = ev.attendee_ids || [];
     return !ids.length || ids.indexOf(ME.id) !== -1;
   }
-  function choreIsMine(c) {
-    if (!ME) return true;
+  function choreForMember(c, mid) {
     const ids = c.assignee_ids || [];
-    return !ids.length || ids.indexOf(ME.id) !== -1;
+    return !ids.length || ids.indexOf(mid) !== -1;
   }
   function eventsForView() { return MINE ? EVENTS.filter(eventIsMine) : EVENTS; }
 
@@ -866,7 +868,9 @@
   }
 
   function renderAllowance() {
-    const kids = MEMBERS.filter(m => m.role === 'kid');
+    // Follows the who filter, so picking a kid shows just their week.
+    const kids = MEMBERS.filter(m => m.role === 'kid' &&
+      (!WHO_FILTER || WHO_FILTER === 'all' || m.id === WHO_FILTER));
     if (!kids.length) return '';
     return '<div class="card allow"><h2>This week</h2>' + kids.map(m => {
       const a = allowanceFor(m);
@@ -902,9 +906,36 @@
       '</span></div>';
   }
 
+  function renderWhoTabs() {
+    // A kid gets their own list and no chooser: they're here to see what they
+    // have to do, not to browse their siblings'. Everyone else can page
+    // through the household, which is how you check on someone's week.
+    const kidView = !!(ME && ME.role === 'kid');
+    if (kidView) WHO_FILTER = ME.id;
+    else if (!WHO_FILTER) WHO_FILTER = 'all';
+
+    const el = $('who-tabs');
+    el.style.display = kidView ? 'none' : 'flex';
+    if (kidView) { el.innerHTML = ''; return; }
+    el.innerHTML =
+      '<button class="pick' + (WHO_FILTER === 'all' ? ' on' : '') +
+      '" data-who-filter="all">Everyone</button>' +
+      MEMBERS.map(m => {
+        const on = WHO_FILTER === m.id;
+        return '<button class="pick' + (on ? ' on' : '') + '" data-who-filter="' + m.id + '"' +
+          (on ? ' style="border-color:' + esc(m.color) + ';background:' + esc(m.color) +
+                ';color:#fff"' : '') +
+          '>' + esc(m.display_name) + '</button>';
+      }).join('');
+  }
+
   function renderChores() {
     const today = todayYmd();
-    let visible = MINE ? CHORES.filter(choreIsMine) : CHORES;
+    renderWhoTabs();
+    let visible = CHORES;
+    if (WHO_FILTER && WHO_FILTER !== 'all') {
+      visible = visible.filter(c => choreForMember(c, WHO_FILTER));
+    }
     if (KIND_FILTER !== 'all') visible = visible.filter(c => kindOf(c) === KIND_FILTER);
     const due = choresDueOn(today).filter(c => visible.indexOf(c) !== -1);
 
@@ -925,7 +956,8 @@
     let html = renderAllowance() + '<div class="daygroup"><p class="dayhead today">Today</p>';
     if (!due.length) {
       html += '<div class="empty">' +
-        (MINE ? 'Nothing of yours due today.' : 'Nothing due today.') + '</div>';
+        (WHO_FILTER && WHO_FILTER !== 'all' ? 'Nothing due today for them.'
+                                            : 'Nothing due today.') + '</div>';
     } else if (KIND_FILTER !== 'all') {
       html += slotSections(due);
     } else {
@@ -1109,13 +1141,35 @@
   }
 
   // ── Sheet (modal) ────────────────────────────────────────────────────────
+  // Locking the page behind a sheet takes more than overflow:hidden on iOS,
+  // which ignores it on <body> and happily scrolls the page under the dialog.
+  // Pinning the body with position:fixed does work, but it also jumps you to
+  // the top — hence stashing the offset and restoring it on the way out.
+  let SCROLL_Y = 0;
+  function lockScroll() {
+    SCROLL_Y = window.scrollY || window.pageYOffset || 0;
+    document.body.style.position = 'fixed';
+    document.body.style.top = (-SCROLL_Y) + 'px';
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+  }
+  function unlockScroll() {
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    window.scrollTo(0, SCROLL_Y);
+  }
+
   function openSheet(html) {
     $('sheet-content').innerHTML = html;
     $('sheet').classList.add('show'); $('sheet-bg').classList.add('show');
+    lockScroll();
   }
   function closeSheet() {
     $('sheet').classList.remove('show'); $('sheet-bg').classList.remove('show');
     $('sheet-content').innerHTML = '';
+    unlockScroll();
   }
   $('sheet-bg').addEventListener('click', closeSheet);
 
@@ -1941,13 +1995,14 @@
     else if (t.dataset.addMeal) mealSheet(null, t.dataset.addMeal);
     else if (t.dataset.editMeal) { const x = MEALS.filter(y => y.id === t.dataset.editMeal)[0]; if (x) mealSheet(x); }
     else if (t.dataset.editRecipe) { const x = RECIPES.filter(y => y.id === t.dataset.editRecipe)[0]; if (x) recipeSheet(x); }
+    else if (t.dataset.whoFilter) { WHO_FILTER = t.dataset.whoFilter; renderChores(); }
     else if (t.dataset.kindFilter) {
       KIND_FILTER = t.dataset.kindFilter;
       document.querySelectorAll('[data-kind-filter]').forEach(b =>
         b.classList.toggle('on', b.dataset.kindFilter === KIND_FILTER));
       renderChores();
     }
-    else if (t.dataset.mine) { MINE = !MINE; syncMine(); renderCalendar(); renderChores(); }
+    else if (t.dataset.mine) { MINE = !MINE; syncMine(); renderCalendar(); }
     else if (t.dataset.dayCell) { M_SEL = t.dataset.dayCell; renderMonth(); }
     else if (t.dataset.list) { ACTIVE_LIST = t.dataset.list; refresh(); }
     else if (t.dataset.newList) listSheet();
