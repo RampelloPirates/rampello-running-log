@@ -276,9 +276,10 @@
       </section>
       <section class="panel" id="panel-chores">
         <div class="viewtoggle">
-          <button class="pick on" data-kind-filter="all">Both</button>
+          <button class="pick on" data-kind-filter="all">All</button>
           <button class="pick" data-kind-filter="chore">Chores</button>
           <button class="pick" data-kind-filter="todo">To-dos</button>
+          <button class="pick" data-kind-filter="extra">Extras</button>
         </div>
         <div class="listpick" id="who-tabs"></div>
         <div id="chore-body"></div>
@@ -555,8 +556,12 @@
   // to look at, not what you want to store.
   const KINDS = [
     { key: 'chore', label: 'Chore', plural: 'Chores' },
-    { key: 'todo',  label: 'To-do', plural: 'To-dos' }
+    { key: 'todo',  label: 'To-do', plural: 'To-dos' },
+    { key: 'extra', label: 'Extra', plural: 'Extras' }
   ];
+  // Extras aren't scheduled — they're on offer until they're taken down, so
+  // they sit outside the due-today logic entirely.
+  function isExtra(c) { return kindOf(c) === 'extra'; }
   function kindOf(c) {
     const k = c.kind || 'chore';
     return KINDS.some(x => x.key === k) ? k : 'chore';
@@ -937,7 +942,13 @@
       visible = visible.filter(c => choreForMember(c, WHO_FILTER));
     }
     if (KIND_FILTER !== 'all') visible = visible.filter(c => kindOf(c) === KIND_FILTER);
-    const due = choresDueOn(today).filter(c => visible.indexOf(c) !== -1);
+
+    // Extras are on offer rather than scheduled, so they bypass the due-today
+    // test and never fall into "Not due today" — an available bonus listed
+    // under a heading that says it isn't due reads as unavailable.
+    const extras = visible.filter(isExtra);
+    const dated  = visible.filter(c => !isExtra(c));
+    const due = choresDueOn(today).filter(c => dated.indexOf(c) !== -1);
 
     // Time-of-day buckets nested under each kind. When the filter has already
     // narrowed to one kind its heading would say what the toggle above
@@ -953,23 +964,34 @@
       return out;
     };
 
-    let html = renderAllowance() + '<div class="daygroup"><p class="dayhead today">Today</p>';
-    if (!due.length) {
-      html += '<div class="empty">' +
-        (WHO_FILTER && WHO_FILTER !== 'all' ? 'Nothing due today for them.'
-                                            : 'Nothing due today.') + '</div>';
-    } else if (KIND_FILTER !== 'all') {
-      html += slotSections(due);
-    } else {
-      KINDS.forEach(k => {
-        const rows = due.filter(c => kindOf(c) === k.key);
-        if (!rows.length) return;
-        html += '<p class="kindhead">' + k.plural + '</p>' + slotSections(rows);
-      });
+    let html = renderAllowance();
+    if (KIND_FILTER !== 'extra') {
+      html += '<div class="daygroup"><p class="dayhead today">Today</p>';
+      if (!due.length) {
+        html += '<div class="empty">' +
+          (WHO_FILTER && WHO_FILTER !== 'all' ? 'Nothing due today for them.'
+                                              : 'Nothing due today.') + '</div>';
+      } else if (KIND_FILTER !== 'all') {
+        html += slotSections(due);
+      } else {
+        KINDS.forEach(k => {
+          if (k.key === 'extra') return;         // has its own section below
+          const rows = due.filter(c => kindOf(c) === k.key);
+          if (!rows.length) return;
+          html += '<p class="kindhead">' + k.plural + '</p>' + slotSections(rows);
+        });
+      }
+      html += '</div>';
     }
-    html += '</div>';
 
-    const others = visible.filter(c => due.indexOf(c) === -1);
+    // Up for grabs, always visible while active. Points from these are what
+    // push a week past the target and pay above the base allowance.
+    if (extras.length && KIND_FILTER !== 'chore' && KIND_FILTER !== 'todo') {
+      html += '<div class="daygroup"><p class="dayhead">Extras — up for grabs</p>' +
+              extras.map(c => choreRowHtml(c, today)).join('') + '</div>';
+    }
+
+    const others = dated.filter(c => due.indexOf(c) === -1);
     if (others.length) {
       html += '<div class="daygroup"><p class="dayhead">Not due today</p>';
       others.forEach(c => {
