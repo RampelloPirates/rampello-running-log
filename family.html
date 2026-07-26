@@ -1314,13 +1314,18 @@
       '<div class="field" id="byday-wrap" style="display:' + (freq === 'WEEKLY' ? 'block' : 'none') + '">' +
       '<label>On these days</label><div class="pickers" id="pick-days">' +
       DOW.map((d, i) => '<button type="button" class="pick' + (byday.indexOf(d) !== -1 ? ' on' : '') +
-        '" data-dow="' + d + '">' + DOW_LABEL[i] + '</button>').join('') + '</div></div>';
+        '" data-dow="' + d + '">' + DOW_LABEL[i] + '</button>').join('') + '</div></div>' +
+      // Only meaningful once it repeats, so it appears with the frequency.
+      '<div class="field" id="until-wrap" style="display:' + (freq ? 'block' : 'none') + '">' +
+      '<label for="f-until">Ends on <span class="sub" style="font-weight:400">(leave blank to run forever)</span></label>' +
+      '<input type="date" id="f-until" value="' + (untilOf(rrule) || '') + '"></div>';
   }
   function wireRepeat() {
     const sel = $('f-freq');
     if (!sel) return;
     sel.addEventListener('change', () => {
       $('byday-wrap').style.display = sel.value === 'WEEKLY' ? 'block' : 'none';
+      $('until-wrap').style.display = sel.value ? 'block' : 'none';
     });
     document.querySelectorAll('#pick-days .pick').forEach(b =>
       b.addEventListener('click', () => b.classList.toggle('on')));
@@ -1333,8 +1338,18 @@
       const days = Array.from(document.querySelectorAll('#pick-days .pick.on')).map(b => b.dataset.dow);
       if (days.length) rule += ';BYDAY=' + days.join(',');
     }
+    // RFC 5545 wants UNTIL as YYYYMMDD; the date input hands over YYYY-MM-DD.
+    const u = $('f-until');
+    if (u && u.value) rule += ';UNTIL=' + u.value.replace(/-/g, '');
     return rule;
   }
+  // An end date before the start yields no occurrences at all, so the thing
+  // saves cleanly and then never appears — the worst kind of wrong.
+  function untilBeforeStart(rrule, startYmd) {
+    const u = untilOf(rrule);
+    return !!(u && startYmd && u < startYmd);
+  }
+
   // __family is the UI's way of saying "nobody in particular", which the
   // column stores as an empty array.
   function readWho() {
@@ -1420,6 +1435,10 @@
     const allDay = $('f-allday').checked;
     const sDate = $('f-sdate').value, eDate = $('f-edate').value || $('f-sdate').value;
     if (!sDate) { toast('Pick a date'); return; }
+    const rrule = readRepeat();
+    if (untilBeforeStart(rrule, sDate)) {
+      toast('The repeat ends before it starts'); return;
+    }
 
     // The events_time_shape constraint makes the mixed form unrepresentable —
     // one branch or the other, never both.
@@ -1435,7 +1454,7 @@
       end_date:   allDay ? eDate : null,
       time_zone: HH.time_zone,
       kind: readKind(),
-      rrule: readRepeat(),
+      rrule: rrule,
       attendee_ids: readWho(),
       created_by: ME.user_id
     };
@@ -1604,6 +1623,9 @@
     const canPrice = !!(ME && (ME.role === 'admin' || ME.role === 'adult'));
     if (isX && canPrice && !(parseFloat($('f-cents').value) >= 0)) {
       toast('What is it worth? Give a number like 5.00'); return;
+    }
+    if (!isX && untilBeforeStart(readRepeat(), $('f-start').value)) {
+      toast('The repeat ends before it starts'); return;
     }
     const base = {
       household_id: HH.id,

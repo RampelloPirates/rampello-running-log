@@ -94,19 +94,39 @@ function ruleMatches(rule, day, anchor) {
   return false;
 }
 
+// UNTIL as a plain YYYY-MM-DD, or null. RFC 5545 allows a trailing time on it;
+// only the date half is ever used here, and only the date half is written.
+function untilOf(rrule) {
+  const u = parseRule(rrule).UNTIL;
+  if (!u) return null;
+  const s = String(u).slice(0, 8);
+  if (s.length !== 8) return null;
+  return s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8);
+}
+
 function ruleLabel(rrule) {
   if (!rrule) return '';
   const r = parseRule(rrule);
   const f = (r.FREQ || '').toUpperCase();
-  if (f === 'DAILY') return 'Every day';
-  if (f === 'MONTHLY') return 'Monthly';
-  if (f === 'WEEKLY') {
-    if (!r.BYDAY) return 'Weekly';
-    const names = r.BYDAY.split(',').map(function (d) { return DOW_LABEL[DOW.indexOf(d)]; })
-      .filter(Boolean);
-    return names.length === 7 ? 'Every day' : names.join(', ');
-  }
-  return 'Repeats';
+  let base;
+  if (f === 'DAILY') base = 'Every day';
+  else if (f === 'MONTHLY') base = 'Monthly';
+  else if (f === 'WEEKLY') {
+    if (!r.BYDAY) base = 'Weekly';
+    else {
+      const names = r.BYDAY.split(',').map(function (d) { return DOW_LABEL[DOW.indexOf(d)]; })
+        .filter(Boolean);
+      base = names.length === 7 ? 'Every day' : names.join(', ');
+    }
+  } else base = 'Repeats';
+
+  const u = untilOf(rrule);
+  // Worth saying out loud: a series that stops is easy to forget you set up,
+  // and "Every day" reading the same whether or not it ends in a fortnight is
+  // how you end up wondering where a chore went.
+  if (u) base += ' until ' + parseYmd(u).toLocaleDateString(undefined,
+    { month: 'short', day: 'numeric' });
+  return base;
 }
 
 // A full week entirely on or after the start date. Using the current week when
