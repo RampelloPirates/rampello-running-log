@@ -129,6 +129,7 @@
     .patotal .panum { font-family: var(--f-display); font-size: 1.5rem; font-weight: 700; color: var(--green-deep); }
     .patotal.over .panum { color: var(--amber); }
     .patotal .papct { margin-left: auto; font-weight: 600; }
+    .paperson { margin-bottom: 1.1rem; }
     .parow { display: grid; grid-template-columns: 1fr 84px 34px; gap: 0.4rem; margin-bottom: 0.4rem; align-items: center; }
     .parow > * { min-width: 0; }
     .pabk { border: 1px solid var(--silver); border-radius: 11px; padding: 0.6rem 0.7rem; margin-bottom: 0.5rem; background: var(--surface-warm); }
@@ -918,12 +919,29 @@
     return (chores || CHORES).reduce((n, c) => n + weeklyPoints(c, buckets), 0);
   }
 
+  function targetFor(m) {
+    return (m && m.allowance_points_target) || (HH && HH.allowance_points_target) || 500;
+  }
+
+  // Allocation has to be answered per kid, because they're on different lists.
+  // A household total says nothing about whether Emma's own chores can reach
+  // her target — it just adds hers to her brother's.
+  function choresFor(mid) {
+    return CHORES.filter(c => !isExtra(c) && (c.assignee_ids || []).indexOf(mid) !== -1);
+  }
+  // Unassigned work belongs to whoever gets to it. Counting it toward every
+  // kid would overstate all of them, so it's reported on its own instead of
+  // quietly inflating the totals.
+  function unassignedChores() {
+    return CHORES.filter(c => !isExtra(c) && !(c.assignee_ids || []).length);
+  }
+
   // ── Allowance ────────────────────────────────────────────────────────────
   // Points are what the kids see. The conversion to money happens once, at
   // the week's total, so no individual chore ever carries a price — the point
   // being that "brush your teeth" must not read as fifty cents.
   function allowanceFor(m) {
-    const target = m.allowance_points_target || (HH && HH.allowance_points_target) || 500;
+    const target = targetFor(m);
     const baseCents = (m.allowance_base_cents != null ? m.allowance_base_cents
                         : (HH && HH.allowance_base_cents != null ? HH.allowance_base_cents : 1500));
     const from = ymd(startOfPayWeek(new Date()));
@@ -1788,53 +1806,75 @@
   // the whole week live, so you tune against a number instead of guessing.
   let PA = [];        // working copy of the buckets; nothing is written until Save
 
-  function paRecalc() {
-    const target = (HH.allowance_points_target || 500);
-    // Read the inputs rather than PA, so the total tracks typing.
-    const working = PA.map(b => ({
-      id: b.id,
-      points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0
-    }));
-    const total = weeklyTotal(CHORES.filter(c => !isExtra(c)), working);
+  // One block per kid: their chores, their target, their shortfall.
+  function paPersonHtml(m, working) {
+    const mine = choresFor(m.id);
+    const target = targetFor(m);
+    const total = weeklyTotal(mine, working);
     const pct = Math.round(total / target * 100);
     const over = total > target;
-    $('pa-total').innerHTML =
+    let html = '<div class="paperson">' +
       '<div class="patotal' + (over ? ' over' : '') + '">' +
-      '<span class="panum">' + total + '</span> of ' + target + ' points a week' +
+      '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>' +
+      '<span class="panum">' + total + '</span> of ' + target +
       '<span class="papct">' + pct + '%</span></div>' +
       '<div class="bar"><span style="width:' + Math.min(100, pct) + '%;background:' +
-      (over ? 'var(--amber)' : 'var(--green)') + '"></span></div>' +
-      (total === target ? '<p class="allownote">Exactly on target.</p>'
-       : over ? '<p class="allownote">' + (total - target) + ' over — doing everything ' +
-                'would pay more than the full allowance.</p>'
-              : '<p class="allownote">' + (target - total) + ' short — doing everything ' +
-                'would still fall ' + Math.max(0, 100 - pct) + '% shy of the full amount.</p>');
+      (over ? 'var(--amber)' : esc(m.color)) + '"></span></div>';
+    html += !mine.length
+      ? '<p class="allownote">Nothing assigned to them yet.</p>'
+      : total === target ? '<p class="allownote">Exactly on target.</p>'
+      : over ? '<p class="allownote">' + (total - target) + ' over — doing everything ' +
+               'would pay more than their full allowance.</p>'
+             : '<p class="allownote">' + (target - total) + ' short — doing everything ' +
+               'would still leave them ' + Math.max(0, 100 - pct) + '% shy.</p>';
 
-    // Per-tier breakdown, recomputed with whatever is currently typed.
-    const rows = BUCKETS.map(b => {
+    // Their week, grouped by tier.
+    BUCKETS.forEach(b => {
       const w = working.filter(x => x.id === b.id)[0];
       const pts = w ? w.points : b.points;
-      const on = CHORES.filter(c => !isExtra(c) && c.bucket_id === b.id);
-      const sub = on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0);
-      return { name: b.name, pts: pts, count: on.length, sub: sub, chores: on };
+      const on = mine.filter(c => c.bucket_id === b.id);
+      if (!on.length) return;
+      html += '<div class="pabk"><div class="pabkhead">' + esc(b.name) + ' · ' + pts + ' pts · ' +
+        on.length + ' chore' + (on.length === 1 ? '' : 's') +
+        '<span class="pasub">' + on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0) +
+        '/wk</span></div>' +
+        on.map(c => '<div class="pachore">' + esc(c.title) +
+          '<span>' + occurrencesPerWeek(c) + '×</span></div>').join('') + '</div>';
     });
-    const loose = CHORES.filter(c => !isExtra(c) && !c.bucket_id);
-    let html = rows.filter(r => r.count).map(r =>
-      '<div class="pabk"><div class="pabkhead">' + esc(r.name) + ' · ' + r.pts + ' pts · ' +
-      r.count + ' chore' + (r.count === 1 ? '' : 's') +
-      '<span class="pasub">' + r.sub + '/wk</span></div>' +
-      r.chores.map(c => '<div class="pachore">' + esc(c.title) +
-        '<span>' + occurrencesPerWeek(c) + '×</span></div>').join('') + '</div>').join('');
+    const loose = mine.filter(c => !c.bucket_id);
     if (loose.length) {
-      const sub = loose.reduce((n, c) => n + (c.points || 0) * occurrencesPerWeek(c), 0);
       html += '<div class="pabk"><div class="pabkhead">No tier · ' + loose.length +
-        ' chore' + (loose.length === 1 ? '' : 's') + '<span class="pasub">' + sub + '/wk</span></div>' +
+        '<span class="pasub">' +
+        loose.reduce((n, c) => n + (c.points || 0) * occurrencesPerWeek(c), 0) + '/wk</span></div>' +
         loose.map(c => '<div class="pachore">' + esc(c.title) +
           '<span>' + (c.points || 0) + ' × ' + occurrencesPerWeek(c) + '</span></div>').join('') +
         '</div>';
     }
-    $('pa-breakdown').innerHTML = html ||
-      '<div class="empty">No chores yet. Add some and they\'ll appear here.</div>';
+    return html + '</div>';
+  }
+
+  function paRecalc() {
+    // Read the inputs rather than PA, so the totals track typing.
+    const working = PA.map(b => ({
+      id: b.id,
+      points: parseInt(($('pa-p-' + b.key) || {}).value, 10) || 0
+    }));
+
+    const kids = MEMBERS.filter(m => m.role === 'kid');
+    $('pa-total').innerHTML = kids.length
+      ? kids.map(m => paPersonHtml(m, working)).join('')
+      : '<div class="empty">Nobody has the role <em>kid</em> yet, so there is ' +
+        'nothing to allocate against.</div>';
+
+    const loose = unassignedChores();
+    $('pa-breakdown').innerHTML = !loose.length ? '' :
+      '<div class="pabk"><div class="pabkhead">Unassigned · ' + loose.length +
+      ' chore' + (loose.length === 1 ? '' : 's') + '<span class="pasub">' +
+      weeklyTotal(loose, working) + '/wk</span></div>' +
+      loose.map(c => '<div class="pachore">' + esc(c.title) +
+        '<span>' + effPoints(c, working) + ' × ' + occurrencesPerWeek(c) + '</span></div>').join('') +
+      '<p class="allownote">Counted for nobody above — whoever does one gets ' +
+      'the points, so adding them to every total would overstate all of them.</p></div>';
   }
 
   function paRows() {
@@ -1861,11 +1901,11 @@
                              sort_order: b.sort_order }));
     openSheet(
       '<h2>Points allocation</h2>' +
-      '<div id="pa-total"></div>' +
-      '<label style="margin-top:1rem">Tiers</label>' +
+      '<label>Tiers</label>' +
       '<div id="pa-buckets"></div>' +
-      '<button class="btn ghost" id="pa-add" style="margin-bottom:1rem">+ Add a tier</button>' +
-      '<label>Where the week goes</label>' +
+      '<button class="btn ghost" id="pa-add" style="margin-bottom:1.25rem">+ Add a tier</button>' +
+      '<label>Each kid\'s week</label>' +
+      '<div id="pa-total"></div>' +
       '<div id="pa-breakdown"></div>' +
       '<div class="btnrow"><button class="btn ghost" id="f-cancel">Cancel</button>' +
       '<button class="btn" id="f-save">Save</button></div>'
