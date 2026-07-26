@@ -390,6 +390,7 @@
   let MEALS = [];
   let RECIPES = [];
   let BUCKETS = [];
+  let BUCKET_POINTS = [];   // per-kid overrides: {bucket_id, member_id, points}
   let MEAL_VIEW = 'week';         // 'week' | 'recipes'
   let W_CURSOR = null;            // Sunday of the displayed week
   let ACTIVE_LIST = null;
@@ -731,7 +732,7 @@
     const hid = HH.id;
     const from = ymd(addDays(new Date(), -1));
     if (!WIN_FROM) { WIN_FROM = from; WIN_TO = ymd(addDays(new Date(), 120)); }
-    const [mRes, cRes, kRes, lRes, rRes, bRes] = await Promise.all([
+    const [mRes, cRes, kRes, lRes, rRes, bRes, vRes] = await Promise.all([
       sb.from('household_members').select('*').eq('household_id', hid)
         .eq('active', true).order('sort_order'),
       sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
@@ -741,14 +742,16 @@
         .gte('due_on', minYmd(from, ymd(startOfPayWeek(new Date())))),
       sb.from('lists').select('*').eq('household_id', hid).order('sort_order'),
       sb.from('recipes').select('*').eq('household_id', hid).order('title'),
-      sb.from('point_buckets').select('*').eq('household_id', hid).order('sort_order')
+      sb.from('point_buckets').select('*').eq('household_id', hid).order('sort_order'),
+      sb.from('bucket_points').select('*').eq('household_id', hid)
     ]);
-    for (const r of [mRes, cRes, kRes, lRes, rRes, bRes]) if (r.error) throw r.error;
+    for (const r of [mRes, cRes, kRes, lRes, rRes, bRes, vRes]) if (r.error) throw r.error;
     await loadEvents();
     await loadMeals();
     MEMBERS = mRes.data || [];
     RECIPES = rRes.data || [];
     BUCKETS = bRes.data || [];
+    BUCKET_POINTS = vRes.data || [];
     CHORES = cRes.data || [];
     COMPLETIONS = kRes.data || [];
     LISTS = lRes.data || [];
@@ -899,10 +902,27 @@
   function bucketOf(c) {
     return c.bucket_id ? (BUCKETS.filter(b => b.id === c.bucket_id)[0] || null) : null;
   }
-  function effPoints(c, buckets) {
-    const list = buckets || BUCKETS;
-    const b = c.bucket_id ? list.filter(x => x.id === c.bucket_id)[0] : null;
-    return b ? (b.points || 0) : (c.points || 0);
+
+  // A tier is worth a different number to each kid, because the arithmetic
+  // that gets one of them to their target isn't the arithmetic that gets the
+  // other there. The tier's own points is the default for anyone with no
+  // number of their own.
+  function tierPoints(bucketId, mid, buckets, overrides) {
+    const ov = (overrides || BUCKET_POINTS)
+      .filter(x => x.bucket_id === bucketId && x.member_id === mid)[0];
+    if (ov) return ov.points || 0;
+    const b = (buckets || BUCKETS).filter(x => x.id === bucketId)[0];
+    return b ? (b.points || 0) : 0;
+  }
+  // Points are always earned BY someone, so a value only means anything
+  // relative to a member. An unfiled chore keeps its own column — and so does
+  // one pointing at a tier that no longer exists, which happens between a tier
+  // being deleted and the FK nulling the column. Reading that as zero would
+  // make the chore silently worthless rather than visibly unfiled.
+  function effPoints(c, mid, buckets, overrides) {
+    if (!c.bucket_id) return c.points || 0;
+    const known = (buckets || BUCKETS).some(x => x.id === c.bucket_id);
+    return known ? tierPoints(c.bucket_id, mid, buckets, overrides) : (c.points || 0);
   }
 
   // The number that actually matters: a chore is worth its value times how
@@ -922,9 +942,11 @@
     for (let i = 0; i < 7; i++) if (ruleMatches(c.rrule, addDays(start, i), anchor)) n++;
     return n;
   }
-  function weeklyPoints(c, buckets) { return effPoints(c, buckets) * occurrencesPerWeek(c); }
-  function weeklyTotal(chores, buckets) {
-    return (chores || CHORES).reduce((n, c) => n + weeklyPoints(c, buckets), 0);
+  function weeklyPoints(c, mid, buckets, overrides) {
+    return effPoints(c, mid, buckets, overrides) * occurrencesPerWeek(c);
+  }
+  function weeklyTotal(chores, mid, buckets, overrides) {
+    return (chores || CHORES).reduce((n, c) => n + weeklyPoints(c, mid, buckets, overrides), 0);
   }
 
   function targetFor(m) {
@@ -1077,7 +1099,11 @@
                        : 'border-color:' + col;
     const bits = [];
     if (c.rrule) bits.push(esc(ruleLabel(c.rrule)));
-    const pts = effPoints(c);
+    // Shown against whoever's list you're looking at, because the same chore
+    // is worth different numbers to different kids.
+    const forWhom = (WHO_FILTER && WHO_FILTER !== 'all') ? WHO_FILTER
+                  : ((c.assignee_ids || [])[0] || (ME && ME.id));
+    const pts = effPoints(c, forWhom);
     if (pts) bits.push(pts + ' pts');
     return '<div class="row' + (done ? ' done' : '') + '">' +
       '<button class="check' + (done ? ' on' : '') + '" style="' + style +
@@ -1836,9 +1862,10 @@
         // With nobody or several assigned there's no such answer, so it falls
         // to the tapper.
         const credit = assignees.length === 1 ? assignees[0] : ME.id;
-        // Captured now, so re-pricing the tier later can't rewrite what was
-        // earned this week — which is the point of buckets being editable.
-        const worth = chore ? effPoints(chore) : 0;
+        // Valued against whoever gets credited, since a tier is worth
+        // different amounts to different kids. Captured now, so re-pricing
+        // later can't rewrite what was already earned.
+        const worth = chore ? effPoints(chore, credit) : 0;
         // The unique index on (chore_id, due_on) means two people tapping at
         // once is a conflict, not two completions. Treat that as success.
         const { error } = await sb.from('chore_completions').insert({
@@ -1887,10 +1914,10 @@
   }
 
   // One block per kid: their chores, their target, their shortfall.
-  function paPersonHtml(m, working, chores) {
+  function paPersonHtml(m, working, chores, overrides) {
     const mine = choresFor(m.id, chores);
     const target = targetFor(m);
-    const total = weeklyTotal(mine, working);
+    const total = weeklyTotal(mine, m.id, working, overrides);
     const pct = Math.round(total / target * 100);
     const over = total > target;
     let html = '<div class="paperson">' +
@@ -1911,12 +1938,12 @@
     // One line per tier they're on — the detail is already visible above in
     // the tiers themselves, so this stays a summary.
     const lines = PA.map(b => {
-      const w = working.filter(x => x.id === b.key)[0];
-      const pts = w ? w.points : b.points;
       const on = mine.filter(c => c.bucket_id === b.key);
       if (!on.length) return '';
+      const pts = tierPoints(b.key, m.id, working, overrides);
       return '<div class="pachore">' + esc(b.name || 'Untitled tier') + ' · ' + on.length +
-        '<span>' + on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0) + '/wk</span></div>';
+        ' @ ' + pts + '<span>' + on.reduce((n, c) => n + pts * occurrencesPerWeek(c), 0) +
+        '/wk</span></div>';
     }).join('');
     const loose = mine.filter(c => !c.bucket_id);
     return html + lines +
@@ -1926,12 +1953,19 @@
   }
 
   function paRecalc() {
-    // Tiers keyed by their working key, and chores pointed at those keys, so
-    // the totals reflect what's on screen rather than what's in the database.
-    const working = PA.map(b => ({
-      id: b.key,
-      points: ($('pa-p-' + b.key) ? (parseInt($('pa-p-' + b.key).value, 10) || 0) : b.points)
-    }));
+    // Tiers keyed by their working key, chores pointed at those keys, and one
+    // override row per kid per tier — so every total on screen is computed
+    // from what's typed rather than from the database.
+    const live = (b) => ($('pa-p-' + b.key)
+      ? (parseInt($('pa-p-' + b.key).value, 10) || 0) : paValue(b));
+    const working = PA.map(b => ({ id: b.key, points: b.base || 0 }));
+    const overrides = [];
+    PA.forEach(b => {
+      const vals = Object.assign({}, b.vals);
+      if (PA_WHO !== '__none') vals[PA_WHO] = live(b);
+      Object.keys(vals).forEach(mid =>
+        overrides.push({ bucket_id: b.key, member_id: mid, points: vals[mid] }));
+    });
     const chores = CHORES.filter(c => !isExtra(c)).map(c =>
       Object.assign({}, c, { bucket_id: PA_ASSIGN[c.id] || null }));
     const scoped = PA_WHO === '__none' ? unassignedChores(chores)
@@ -1941,9 +1975,9 @@
 
     const m = MEMBERS.filter(x => x.id === PA_WHO)[0];
     $('pa-total').innerHTML = m
-      ? paPersonHtml(m, working, chores)
+      ? paPersonHtml(m, working, chores, overrides)
       : '<div class="pabk"><div class="pabkhead">Assigned to nobody' +
-        '<span class="pasub">' + weeklyTotal(scoped, working) + '/wk</span></div>' +
+        '<span class="pasub">' + weeklyTotal(scoped, null, working, overrides) + '/wk</span></div>' +
         '<p class="pahint">These count toward no one\'s target — whoever gets to one ' +
         'earns it. Assign them to someone from the task itself if they should count.</p></div>';
 
@@ -1953,7 +1987,7 @@
     $('pa-unfiled').innerHTML = !unfiled.length ? '' :
       '<div class="pabk"><div class="pabkhead">No tier · ' + unfiled.length +
       ' task' + (unfiled.length === 1 ? '' : 's') + '<span class="pasub">' +
-      weeklyTotal(unfiled, working) + '/wk</span></div>' +
+      weeklyTotal(unfiled, PA_WHO, working, overrides) + '/wk</span></div>' +
       '<div class="papills">' + unfiled.map(c =>
         '<span class="tpill loose">' + esc(c.title) +
         '<small>' + (c.points || 0) + ' pts</small></span>').join('') + '</div>' +
@@ -1966,7 +2000,7 @@
     $('pa-breakdown').innerHTML = !others.length ? '' :
       '<label>Meanwhile</label>' + others.map(o => {
         const s = settle(o, []);   // targets only; points come from the plan
-        const total = weeklyTotal(choresFor(o.id, chores), working);
+        const total = weeklyTotal(choresFor(o.id, chores), o.id, working, overrides);
         const pct = Math.round(total / s.target * 100);
         return '<div class="pachore">' + esc(o.display_name) +
           '<span>' + total + ' / ' + s.target + ' · ' + pct + '%</span></div>';
@@ -1975,14 +2009,24 @@
 
   // Read the inputs back into PA before any re-render, or whatever was typed
   // since the last one is lost.
+  // The number on screen is the SELECTED kid's value for that tier, so
+  // capturing writes it back to that kid's slot — not to the tier's default.
   function paCapture() {
-    PA = PA.map(b => ({
-      key: b.key, id: b.id, sort_order: b.sort_order,
-      name: (($('pa-n-' + b.key) || {}).value != null
-              ? $('pa-n-' + b.key).value : b.name),
-      points: ($('pa-p-' + b.key)
-              ? (parseInt($('pa-p-' + b.key).value, 10) || 0) : b.points)
-    }));
+    PA = PA.map(b => {
+      const nm = $('pa-n-' + b.key), pt = $('pa-p-' + b.key);
+      const vals = Object.assign({}, b.vals);
+      if (pt) {
+        const v = parseInt(pt.value, 10) || 0;
+        if (PA_WHO === '__none') b = Object.assign({}, b, { base: v });
+        else vals[PA_WHO] = v;
+      }
+      return { key: b.key, id: b.id, sort_order: b.sort_order,
+               name: nm ? nm.value : b.name, base: b.base, vals: vals };
+    });
+  }
+  function paValue(b) {
+    if (PA_WHO === '__none') return b.base || 0;
+    return b.vals[PA_WHO] != null ? b.vals[PA_WHO] : (b.base || 0);
   }
 
   function paBucketHtml(b) {
@@ -1992,7 +2036,7 @@
     return '<div class="pabk">' +
       '<div class="parow">' +
       '<input type="text" id="pa-n-' + b.key + '" value="' + esc(b.name) + '" placeholder="Tier">' +
-      '<input type="number" id="pa-p-' + b.key + '" min="0" value="' + (b.points || 0) + '">' +
+      '<input type="number" id="pa-p-' + b.key + '" min="0" value="' + paValue(b) + '">' +
       '<button class="iconbtn danger" data-pa-del="' + b.key + '" aria-label="Remove tier">🗑</button>' +
       '</div>' +
       (mine.length
@@ -2029,8 +2073,13 @@
 
   function pointsSheet() {
     let seq = 0;
-    PA = BUCKETS.map(b => ({ key: 'k' + (seq++), id: b.id, name: b.name, points: b.points,
-                             sort_order: b.sort_order }));
+    PA = BUCKETS.map(b => {
+      const vals = {};
+      BUCKET_POINTS.filter(x => x.bucket_id === b.id)
+        .forEach(x => { vals[x.member_id] = x.points; });
+      return { key: 'k' + (seq++), id: b.id, name: b.name, base: b.points,
+               vals: vals, sort_order: b.sort_order };
+    });
     // choreId -> tier key. Keys rather than ids, because a tier added in this
     // sitting has no id until Save.
     PA_ASSIGN = {};
@@ -2059,7 +2108,8 @@
     paRender();
     $('pa-add').addEventListener('click', () => {
       paCapture();
-      PA.push({ key: 'k' + (seq++), id: null, name: '', points: 0, sort_order: PA.length });
+      PA.push({ key: 'k' + (seq++), id: null, name: '', base: 0, vals: {},
+                sort_order: PA.length });
       paRender();
     });
     $('f-cancel').addEventListener('click', closeSheet);
@@ -2069,8 +2119,8 @@
   async function savePoints() {
     paCapture();
     const rows = PA.map((b, i) => ({
-      key: b.key, id: b.id, household_id: HH.id,
-      name: (b.name || '').trim(), points: b.points || 0, sort_order: i
+      key: b.key, id: b.id, household_id: HH.id, vals: b.vals,
+      name: (b.name || '').trim(), points: b.base || 0, sort_order: i
     }));
     if (rows.some(r => !r.name)) { toast('Every tier needs a name'); return; }
     try {
@@ -2087,6 +2137,23 @@
             .select('id').single();
           if (error) throw error;
           keyToId[r.key] = data.id;
+        }
+      }
+
+      // Per-kid tier values. Written as a delete-then-insert per tier because
+      // the set can shrink — a kid put back onto the default has no row, and
+      // an upsert alone would leave the old one standing.
+      for (const r of rows) {
+        const bid = keyToId[r.key];
+        const wanted = Object.keys(r.vals || {})
+          .filter(mid => MEMBERS.some(m => m.id === mid))
+          .map(mid => ({ household_id: HH.id, bucket_id: bid,
+                         member_id: mid, points: r.vals[mid] || 0 }));
+        const { error: dErr } = await sb.from('bucket_points').delete().eq('bucket_id', bid);
+        if (dErr) throw dErr;
+        if (wanted.length) {
+          const { error } = await sb.from('bucket_points').insert(wanted);
+          if (error) throw error;
         }
       }
 
