@@ -357,6 +357,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="auth.js"></script>
+  <script src="calendar.js"></script>
   <script>
   // ==========================================================================
   // Family — household calendar, chores and lists.
@@ -368,19 +369,15 @@
   // so there is no query on this page that could reach them even by accident.
   // ==========================================================================
 
+  // Dates, recurrence and the shared vocabularies now live in calendar.js, so
+  // the wall display and this page can't drift apart on the fiddliest logic in
+  // the app: ymd/parseYmd/addDays, startOfWeek and startOfPayWeek, parseRule /
+  // ruleMatches / ruleLabel, expandRange, occurrencesPerWeek, choresDueOn,
+  // KINDS/SLOTS/MEAL_SLOTS/VENUES and escHtml.
+  const esc = escHtml;
+  const pad = pad2;
+
   const MEMBER_COLORS = ['#4f7cff','#e8734a','#3a9d7e','#b455c9','#d4a017','#d1476b','#5c8ab8','#7a9e3f'];
-  const MEAL_SLOTS = [
-    { key: 'breakfast', label: 'Breakfast' },
-    { key: 'lunch',     label: 'Lunch' },
-    { key: 'dinner',    label: 'Dinner' }
-  ];
-  const VENUES = [
-    { key: 'eat_in',     label: 'Eat in' },
-    { key: 'eat_out',    label: 'Eat out' },
-    { key: 'at_friends', label: 'At friends' }
-  ];
-  const DOW = ['SU','MO','TU','WE','TH','FR','SA'];
-  const DOW_LABEL = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   let HH = null;          // households row
   let ME = null;          // my household_members row
@@ -409,8 +406,6 @@
 
   // ── Small helpers ────────────────────────────────────────────────────────
   const $ = (id) => document.getElementById(id);
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   function toast(msg) {
     const t = $('toast');
@@ -422,44 +417,6 @@
     toast((e && e.message) ? e.message : ('Could not ' + what));
   }
 
-  // Dates are handled as local calendar days. The household lives in one
-  // timezone, which is the assumption baked into households.time_zone; a
-  // date input means that day where the family is, not UTC.
-  const pad = (n) => String(n).padStart(2, '0');
-  function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
-  function parseYmd(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
-  function todayYmd() { return ymd(new Date()); }
-  function minYmd(a, b) { return a < b ? a : b; }
-  function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate()+n); return x; }
-  // Sunday-start, matching the month grid's columns.
-  function startOfWeek(d) { const x = new Date(d); x.setHours(0,0,0,0); return addDays(x, -x.getDay()); }
-  // Allowance weeks start MONDAY, deliberately not the same as the calendar
-  // week above: the pay week is Monday-to-Sunday so a Sunday evening push
-  // still counts toward the week it belongs to.
-  function startOfPayWeek(d) {
-    const x = new Date(d); x.setHours(0, 0, 0, 0);
-    return addDays(x, -((x.getDay() + 6) % 7));   // Mon→0 … Sun→6
-  }
-
-  function fmtDayHead(dateStr) {
-    const d = parseYmd(dateStr);
-    const t = todayYmd();
-    if (dateStr === t) return 'Today';
-    if (dateStr === ymd(addDays(new Date(), 1))) return 'Tomorrow';
-    return d.toLocaleDateString(undefined, { weekday:'long', month:'short', day:'numeric' });
-  }
-  function fmtTime(iso) {
-    return new Date(iso).toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
-  }
-  // "5p" / "5:30p" — a month cell has no room for "5:00 PM", and the minutes
-  // only matter when they aren't zero.
-  function shortTime(iso) {
-    const d = new Date(iso);
-    let h = d.getHours();
-    const m = d.getMinutes(), ap = h < 12 ? 'a' : 'p';
-    h = h % 12 || 12;
-    return h + (m ? ':' + pad(m) : '') + ap;
-  }
   // Build a timestamptz from a local date + time input pair.
   function localIso(dateStr, timeStr) {
     const [y,m,d] = dateStr.split('-').map(Number);
@@ -495,84 +452,6 @@
   // rules from the wild — nested BYSETPOS, BYMONTHDAY lists, EXDATE runs — and
   // this should be swapped for rrule.js rather than extended. Parsing what you
   // generated yourself is a different problem from parsing what Apple sends.
-  function parseRule(rrule) {
-    const out = {};
-    (rrule || '').split(';').forEach(p => {
-      const [k, v] = p.split('=');
-      if (k) out[k.toUpperCase()] = v;
-    });
-    return out;
-  }
-  function ruleMatches(rule, day, anchor) {
-    const r = parseRule(rule);
-    if (r.UNTIL) {
-      const u = r.UNTIL.slice(0,8);
-      const until = new Date(+u.slice(0,4), +u.slice(4,6)-1, +u.slice(6,8));
-      if (day > until) return false;
-    }
-    if (day < anchor) return false;
-    const freq = (r.FREQ || '').toUpperCase();
-    if (freq === 'DAILY') return true;
-    if (freq === 'WEEKLY') {
-      const days = r.BYDAY ? r.BYDAY.split(',') : [DOW[anchor.getDay()]];
-      return days.indexOf(DOW[day.getDay()]) !== -1;
-    }
-    if (freq === 'MONTHLY') return day.getDate() === anchor.getDate();
-    return false;
-  }
-  function ruleLabel(rrule) {
-    if (!rrule) return '';
-    const r = parseRule(rrule);
-    const f = (r.FREQ || '').toUpperCase();
-    if (f === 'DAILY') return 'Every day';
-    if (f === 'MONTHLY') return 'Monthly';
-    if (f === 'WEEKLY') {
-      if (!r.BYDAY) return 'Weekly';
-      const names = r.BYDAY.split(',').map(d => DOW_LABEL[DOW.indexOf(d)]).filter(Boolean);
-      return names.length === 7 ? 'Every day' : names.join(', ');
-    }
-    return 'Repeats';
-  }
-
-  // Expand events into { dateStr -> [occurrence] } across an inclusive range.
-  // Recurring series have no rows of their own, so every render walks them.
-  function expandRange(startDate, endDate, list) {
-    const byDay = {};
-    for (let d = new Date(startDate); d <= endDate; d = addDays(d, 1)) byDay[ymd(d)] = [];
-    (list || EVENTS).forEach(ev => {
-      const anchorStr = ev.all_day ? ev.start_date : ymd(new Date(ev.starts_at));
-      const anchor = parseYmd(anchorStr);
-      const ex = (ev.exdates || []).map(x => ymd(new Date(x)));
-      if (!ev.rrule) {
-        if (byDay[anchorStr]) byDay[anchorStr].push({ ev, dateStr: anchorStr });
-        // Multi-day all-day events fill the days between.
-        if (ev.all_day && ev.end_date && ev.end_date !== ev.start_date) {
-          let d = addDays(parseYmd(ev.start_date), 1);
-          const end = parseYmd(ev.end_date);
-          while (d <= end) {
-            const k = ymd(d);
-            if (byDay[k]) byDay[k].push({ ev, dateStr: k, cont: true });
-            d = addDays(d, 1);
-          }
-        }
-        return;
-      }
-      Object.keys(byDay).forEach(k => {
-        if (ex.indexOf(k) !== -1) return;
-        if (ruleMatches(ev.rrule, parseYmd(k), anchor)) byDay[k].push({ ev, dateStr: k });
-      });
-    });
-    Object.keys(byDay).forEach(k => {
-      byDay[k].sort((a, b) => {
-        if (a.ev.all_day !== b.ev.all_day) return a.ev.all_day ? -1 : 1;
-        if (a.ev.all_day) return 0;
-        return new Date(a.ev.starts_at).getHours() * 60 + new Date(a.ev.starts_at).getMinutes()
-             - (new Date(b.ev.starts_at).getHours() * 60 + new Date(b.ev.starts_at).getMinutes());
-      });
-    });
-    return byDay;
-  }
-
   // ── Filtering by person ──────────────────────────────────────────────────
   // The empty set counts as everyone's, on both sides: a Family event is
   // yours by definition, and a chore nobody owns is still yours to do.
@@ -591,36 +470,6 @@
 
   // Chores borrow the member's colour so a glance at the list tells you whose
   // is whose, the same way the calendar already does.
-  // Same vocabulary as runs.time_of_day. Null means no particular time, which
-  // is a real answer rather than a missing one — hence "Anytime" last, after
-  // the parts of the day that actually have an order.
-  // A chore is routine and comes back; a to-do you do once and are done with.
-  // Same row shape, so they share a table — the distinction is what you want
-  // to look at, not what you want to store.
-  const KINDS = [
-    { key: 'chore', label: 'Chore', plural: 'Chores' },
-    { key: 'todo',  label: 'To-do', plural: 'To-dos' },
-    { key: 'extra', label: 'Extra', plural: 'Extras' }
-  ];
-  // Extras aren't scheduled — they're on offer until they're taken down, so
-  // they sit outside the due-today logic entirely.
-  function isExtra(c) { return kindOf(c) === 'extra'; }
-  function kindOf(c) {
-    const k = c.kind || 'chore';
-    return KINDS.some(x => x.key === k) ? k : 'chore';
-  }
-
-  const SLOTS = [
-    { key: 'morning',   label: 'Morning' },
-    { key: 'afternoon', label: 'Afternoon' },
-    { key: 'evening',   label: 'Evening' },
-    { key: null,        label: 'Anytime' }
-  ];
-  function slotOf(c) {
-    const k = c.time_of_day || null;
-    return SLOTS.some(s => s.key === k) ? k : null;
-  }
-
   function choreColor(c) {
     const ids = c.assignee_ids || [];
     const m = ids.length ? memberById(ids[0]) : null;
@@ -628,15 +477,6 @@
   }
   function choreWho(c) { return whoChips(c.assignee_ids, 'Anyone'); }
 
-  function choresDueOn(dateStr) {
-    const day = parseYmd(dateStr);
-    return CHORES.filter(c => {
-      if (!c.active) return false;
-      const anchor = parseYmd(c.starts_on);
-      if (!c.rrule) return c.starts_on === dateStr;
-      return ruleMatches(c.rrule, day, anchor);
-    });
-  }
 
   // ── Load ─────────────────────────────────────────────────────────────────
   const MEMBER_COLS = 'id, household_id, user_id, display_name, email, color, role, sort_order, active';
@@ -930,29 +770,8 @@
 
   // The number that actually matters: a chore is worth its value times how
   // often it comes round. Daily-at-5 is 35 a week; Tuesday-at-20 is 20.
-  // Counted by walking a representative week rather than parsing the rule,
-  // so it uses the same matcher the calendar does.
-  // The week to measure against: a full one, entirely on or after the chore's
-  // start date. Using the current week when the chore starts midway through it
-  // undercounts — a daily chore added on Wednesday would score 5, because
-  // ruleMatches quite correctly refuses the Monday and Tuesday before it
-  // existed. That's the right answer for "what's due this week" and the wrong
-  // one for "how often does this happen", which is what allocation asks.
-  function representativeWeek(anchor) {
-    const thisWeek = startOfPayWeek(new Date());
-    if (anchor <= thisWeek) return thisWeek;
-    return startOfPayWeek(addDays(anchor, 6));   // the first full week after it starts
-  }
-
-  function occurrencesPerWeek(c) {
-    if (isExtra(c)) return 0;                 // not part of the routine target
-    if (!c.rrule) return 1;                   // a one-off counts once
-    const anchor = parseYmd(c.starts_on);
-    const start = representativeWeek(anchor);
-    let n = 0;
-    for (let i = 0; i < 7; i++) if (ruleMatches(c.rrule, addDays(start, i), anchor)) n++;
-    return n;
-  }
+  // occurrencesPerWeek lives in calendar.js, since the wall needs the same
+  // answer and the counting is subtle enough to be worth having once.
   function weeklyPoints(c, mid, buckets, overrides) {
     return effPoints(c, mid, buckets, overrides) * occurrencesPerWeek(c);
   }
@@ -1167,7 +986,7 @@
     // under a heading that says it isn't due reads as unavailable.
     const extras = visible.filter(isExtra);
     const dated  = visible.filter(c => !isExtra(c));
-    const due = choresDueOn(today).filter(c => dated.indexOf(c) !== -1);
+    const due = choresDueOn(CHORES, today).filter(c => dated.indexOf(c) !== -1);
 
     // Time-of-day buckets nested under each kind. When the filter has already
     // narrowed to one kind its heading would say what the toggle above
@@ -1240,10 +1059,6 @@
     return MEALS.filter(m => m.plan_date === dateStr)
                 .sort((a, b) => order(a.slot) - order(b.slot));
   }
-  function labelOf(list, key) {
-    const hit = list.filter(x => x.key === key)[0];
-    return hit ? hit.label : '';
-  }
 
   function renderMeals() {
     const wk = MEAL_VIEW === 'week';
@@ -1264,7 +1079,7 @@
     // Context is deliberately the whole household's calendar, not the Mine
     // filter's view: you plan Tuesday around whoever has practice, not just
     // around yourself.
-    const byDay = expandRange(start, end);
+    const byDay = expandRange(start, end, EVENTS);
     let html = '';
     for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
       const k = ymd(d);
@@ -1367,7 +1182,8 @@
       'Everyone below shares the calendar, chores and lists. ' +
       'Health data stays private to each person.</p>' +
       (admin ? '<button class="btn ghost" id="hh-settings">Household settings</button> ' +
-               '<button class="btn ghost" id="open-points">⚖ Points allocation</button>' : '') +
+               '<button class="btn ghost" id="open-points">⚖ Points allocation</button> ' +
+               '<button class="btn ghost" id="add-display">🖥 Add a display</button>' : '') +
       '</div>';
     MEMBERS.forEach(m => {
       // Three states, and the middle one is the useful one: an invite that's
@@ -2674,6 +2490,43 @@
     });
   }
 
+  // A wall screen signs in as a device, never as a person — the whole reason
+  // display_tokens exists. The key is returned once and stored only as a hash,
+  // so this is the single moment it can be copied.
+  async function displaySheet() {
+    openSheet('<h2>Add a display</h2><p class="sub">Creating a key…</p>');
+    let tok;
+    try {
+      const { data, error } = await sb.rpc('create_display_token',
+        { p_household: HH.id, p_label: 'Wall display' });
+      if (error) throw error;
+      tok = data;
+    } catch (e) { closeSheet(); fail(e, 'create a display key'); return; }
+
+    const url = location.origin + '/wall.html?key=' + encodeURIComponent(tok);
+    openSheet(
+      '<h2>Add a display</h2>' +
+      '<p class="sub">Open this on the screen you want to use. It shows the household ' +
+      'calendar and today\'s chores — it has no sign-in and can\'t reach anyone\'s ' +
+      'personal pages.</p>' +
+      '<div class="field"><label>Open this link on the display</label>' +
+      '<input type="text" id="d-url" value="' + esc(url) + '" readonly></div>' +
+      '<div class="field"><label>Or paste this key into wall.html</label>' +
+      '<input type="text" id="d-key" value="' + esc(tok) + '" readonly></div>' +
+      '<p class="sub" style="margin:0 0 .5rem"><strong>Copy it now.</strong> Only a hash ' +
+      'is stored, so it can\'t be shown again — if you lose it, make another.</p>' +
+      '<div class="btnrow"><button class="btn ghost" id="d-copy">Copy link</button>' +
+      '<button class="btn" id="f-cancel">Done</button></div>'
+    );
+    $('d-url').addEventListener('focus', (e) => e.target.select());
+    $('d-key').addEventListener('focus', (e) => e.target.select());
+    $('d-copy').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(url); toast('Link copied'); }
+      catch (_) { $('d-url').select(); toast('Select and copy the link'); }
+    });
+    $('f-cancel').addEventListener('click', () => { closeSheet(); refresh(); });
+  }
+
   // ── Setup ────────────────────────────────────────────────────────────────
   async function createHousehold(uid, email) {
     const name = $('hh-name').value.trim();
@@ -2796,6 +2649,7 @@
     else if (t.id === 'add-member') memberSheet(null);
     else if (t.id === 'hh-settings') householdSheet();
     else if (t.id === 'open-points') pointsSheet();
+    else if (t.id === 'add-display') displaySheet();
     else if (t.id === 'open-review') { RV_WEEK = null; reviewSheet(0); }
     else if (t.dataset.paDel) {
       paCapture();

@@ -1,0 +1,16 @@
+{
+  "name": "Family wall",
+  "short_name": "Wall",
+  "description": "The household calendar and today's chores, on a screen.",
+  "start_url": "/wall.html",
+  "_scope": "Narrow on purpose, unlike Crate and Family. The wall never signs in — it holds a display key and never visits index.html — so there is no navigation that needs to stay inside the app. Keeping the scope tight means a stray tap on a link cannot wander the display off into the rest of the site.",
+  "scope": "/wall.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#F4F1E9",
+  "theme_color": "#2C4530",
+  "icons": [
+    { "src": "/family-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/family-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

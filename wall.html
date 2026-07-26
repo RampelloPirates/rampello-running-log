@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Family wall</title>
+  <meta name="theme-color" content="#2C4530">
+  <!-- Installs on Android and iOS alike; there is nothing native here. Android
+       gives real fullscreen, iOS standalone drops Safari's chrome but keeps the
+       status bar. Same page either way. -->
+  <link rel="icon" type="image/svg+xml" href="family-icon.svg">
+  <link rel="apple-touch-icon" href="family-touch-icon.png">
+  <link rel="manifest" href="wall-manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Wall">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #3A5A40; --green-deep: #2C4530; --amber: #BE722A;
+      --ink: #1E241C; --bone: #F4F1E9; --paper: #FFFFFF; --surface-warm: #FBF9F3;
+      --muted: #71776B; --silver: #E2DCCF; --green-tint: #EBF0E8; --danger: #A8443A;
+      --f-display: 'Space Grotesk', system-ui, sans-serif;
+      --f-body: 'Inter', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--f-body); background: var(--bone); color: var(--ink);
+      overflow: hidden;                      /* a wall doesn't scroll */
+      -webkit-user-select: none; user-select: none;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+
+    #shell { display: flex; flex-direction: column; height: 100%; }
+
+    header { background: var(--green-deep); color: var(--paper); border-bottom: 4px solid var(--amber);
+             padding: 0.7rem 1.1rem; display: flex; align-items: baseline; gap: 1rem; flex-shrink: 0; }
+    header .hh { font-family: var(--f-display); font-weight: 700; font-size: 1.25rem; }
+    header .hh .dot { color: var(--amber); }
+    header .today { font-size: 1.05rem; opacity: .92; }
+    header .clock { margin-left: auto; font-family: var(--f-display); font-weight: 700; font-size: 1.6rem; }
+    header .stale { font-size: .8rem; color: #F0C9A0; }
+
+    /* Landscape: calendar beside chores. Portrait: calendar above them. The
+       split flips on aspect ratio rather than width, because a wall screen can
+       be large in both directions and it's the shape that decides. */
+    #body { flex: 1; display: grid; min-height: 0;
+            grid-template-columns: 1fr; grid-template-rows: 1fr 40%; }
+    @media (min-aspect-ratio: 1/1) {
+      #body { grid-template-columns: 1fr 22rem; grid-template-rows: 1fr; }
+    }
+
+    #cal { min-height: 0; overflow: hidden; padding: 0.7rem; }
+    #days { display: grid; gap: 0.5rem; height: 100%;
+            grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+    .day { background: var(--paper); border: 1px solid var(--silver); border-radius: 14px;
+           padding: 0.55rem 0.6rem; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .day.today { border-color: var(--amber); border-width: 2px; }
+    .day h2 { font-family: var(--f-display); font-size: 0.82rem; font-weight: 700; margin: 0 0 0.4rem;
+              text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .day.today h2 { color: var(--amber); }
+    .ev { display: flex; gap: 0.4rem; margin-bottom: 0.35rem; line-height: 1.25; }
+    .ev .bar { width: 3px; border-radius: 2px; flex-shrink: 0; }
+    .ev .txt { min-width: 0; }
+    .ev .t { font-size: 0.92rem; font-weight: 600; }
+    .ev .w { font-size: 0.76rem; color: var(--muted); }
+    .day .none { font-size: 0.8rem; color: var(--silver); }
+    .day .meal { margin-top: auto; padding-top: 0.4rem; border-top: 1px dashed var(--silver);
+                 font-size: 0.78rem; color: var(--muted); }
+
+    aside { background: var(--surface-warm); border-left: 1px solid var(--silver);
+            padding: 0.7rem 0.8rem; overflow-y: auto; min-height: 0; }
+    @media (max-aspect-ratio: 1/1) { aside { border-left: none; border-top: 1px solid var(--silver); } }
+    aside h2 { font-family: var(--f-display); font-size: 1rem; margin: 0 0 0.5rem; color: var(--green-deep); }
+    .slot { font-family: var(--f-display); font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .07em; color: var(--green); margin: 0.7rem 0 0.3rem; }
+    .slot:first-of-type { margin-top: 0.2rem; }
+    .chore { display: flex; align-items: center; gap: 0.55rem; background: var(--paper);
+             border: 1px solid var(--silver); border-radius: 11px; padding: 0.5rem 0.6rem;
+             margin-bottom: 0.35rem; cursor: pointer; }
+    .chore.done { opacity: .55; }
+    .chore.done .ct { text-decoration: line-through; }
+    .chore .box { width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--silver);
+                  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+                  color: transparent; font-size: 0.9rem; font-weight: 700; }
+    .chore.done .box { color: #fff; }
+    .chore .cb { min-width: 0; flex: 1; }
+    .chore .ct { font-size: 0.95rem; font-weight: 600; }
+    .chore .who { display: flex; gap: 0.2rem; margin-top: 0.15rem; flex-wrap: wrap; }
+    .chip { font-size: 0.68rem; padding: 0.05rem 0.4rem; border-radius: 99px; color: #fff; font-weight: 600; }
+    .chip.any { background: var(--green-deep); }
+    .empty { color: var(--muted); font-size: 0.85rem; padding: 1rem 0; }
+
+    /* Setup, and the only screen that scrolls */
+    #setup { display: none; height: 100%; overflow-y: auto; padding: 2rem 1.2rem; }
+    #setup .card { max-width: 32rem; margin: 0 auto; background: var(--paper);
+                   border: 1px solid var(--silver); border-radius: 16px; padding: 1.4rem; }
+    #setup h1 { font-family: var(--f-display); font-size: 1.4rem; margin: 0 0 0.5rem; color: var(--green-deep); }
+    #setup p { color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+    #setup input { width: 100%; font-family: var(--f-body); font-size: 1rem; padding: 0.7rem;
+                   border: 1px solid var(--silver); border-radius: 10px; margin: 0.6rem 0; }
+    #setup button { font-family: var(--f-body); font-size: 0.95rem; font-weight: 600; padding: 0.7rem 1.2rem;
+                    border-radius: 10px; border: 1px solid var(--green); background: var(--green);
+                    color: #fff; cursor: pointer; }
+    #err { color: var(--danger); font-size: 0.88rem; min-height: 1.2em; }
+
+    #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 1.5rem;
+             background: var(--ink); color: #fff; font-size: 0.9rem; padding: 0.6rem 1rem;
+             border-radius: 10px; display: none; z-index: 20; }
+    #toast.show { display: block; }
+  </style>
+</head>
+<body>
+  <div id="setup">
+    <div class="card">
+      <h1>Set up this display</h1>
+      <p>Paste the display key from the Family app — <strong>Family → Add a display</strong>.
+         It's shown once when you create it. This screen then shows the household calendar
+         and today's chores, and nothing else: it has no sign-in and can't reach anyone's
+         personal pages.</p>
+      <input type="text" id="tok" placeholder="Display key" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div id="err"></div>
+      <button id="go">Connect</button>
+    </div>
+  </div>
+
+  <div id="shell" style="display:none">
+    <header>
+      <span class="hh" id="hh">Family<span class="dot">.</span></span>
+      <span class="today" id="dateline"></span>
+      <span class="stale" id="stale"></span>
+      <span class="clock" id="clock"></span>
+    </header>
+    <div id="body">
+      <section id="cal"><div id="days"></div></section>
+      <aside>
+        <h2>Today</h2>
+        <div id="chores"></div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script src="calendar.js"></script>
+  <script>
+  // ==========================================================================
+  // The wall display.
+  //
+  // It authenticates as a DEVICE, not a person: a token, traded through
+  // wall_snapshot for exactly one household's calendar and chores. That's the
+  // whole reason it isn't just family.html on a bigger screen — a tablet left
+  // signed in as a person hands anyone walking past that person's health
+  // history, and no amount of hiding buttons changes what a fetch call can
+  // reach.
+  //
+  // It also has to survive being ignored for weeks: no scrolling, no session
+  // to expire, and a network blip must not blank the wall.
+  // ==========================================================================
+
+  const KEY = 'tally_wall_token';
+  const REFRESH_MS = 60000;
+  const DAYS_SHOWN = 5;
+
+  let TOKEN = null;
+  let DATA = null;          // last good snapshot — kept so a failed poll
+  let LAST_OK = 0;          // leaves the wall showing yesterday's truth
+  let BUSY = false;
+
+  const $ = (id) => document.getElementById(id);
+
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  function tickClock() {
+    const now = new Date();
+    $('clock').textContent = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    $('dateline').textContent = now.toLocaleDateString(undefined,
+      { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
+  function memberById(id) {
+    return (DATA.members || []).filter(m => m.id === id)[0] || null;
+  }
+  function eventColor(ev) {
+    if (ev.color) return ev.color;
+    const first = (ev.attendee_ids || [])[0];
+    const m = first ? memberById(first) : null;
+    return m ? m.color : '#3A5A40';
+  }
+
+  // ── Calendar ──────────────────────────────────────────────────────────────
+  // A run of days rather than a month grid: at three metres a month is a wall
+  // of numbers, and what anyone actually wants from the kitchen is today and
+  // what's coming.
+  function renderCalendar() {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = addDays(start, DAYS_SHOWN - 1);
+    const byDay = expandRange(start, end, DATA.events || []);
+    const today = todayYmd();
+    let html = '';
+    for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+      const k = ymd(d);
+      const occ = byDay[k] || [];
+      const meals = (DATA.meals || []).filter(m => m.plan_date === k);
+      html += '<div class="day' + (k === today ? ' today' : '') + '">' +
+        '<h2>' + escHtml(fmtDayHead(k)) + '</h2>' +
+        (occ.length ? occ.map(o => {
+          const ev = o.ev;
+          const when = ev.all_day ? (o.cont ? 'all day (cont.)' : 'all day')
+                                  : shortTime(ev.starts_at);
+          const bits = [when];
+          if (ev.kind === 'travel') bits.push('✈');
+          if (ev.location) bits.push(escHtml(ev.location));
+          return '<div class="ev"><span class="bar" style="background:' +
+            escHtml(eventColor(ev)) + '"></span><span class="txt">' +
+            '<span class="t">' + escHtml(ev.title) + '</span>' +
+            '<div class="w">' + bits.join(' · ') + '</div></span></div>';
+        }).join('') : '<div class="none">—</div>') +
+        (meals.length ? '<div class="meal">' + meals.map(m =>
+          escHtml(labelOf(MEAL_SLOTS, m.slot)) + ': ' + escHtml(m.title) +
+          (m.venue && m.venue !== 'eat_in' ? ' (' + escHtml(labelOf(VENUES, m.venue)) + ')' : '')
+        ).join('<br>') + '</div>' : '') +
+        '</div>';
+    }
+    $('days').innerHTML = html;
+  }
+
+  // ── Chores ────────────────────────────────────────────────────────────────
+  function renderChores() {
+    const today = todayYmd();
+    const due = choresDueOn(DATA.chores || [], today);
+    if (!due.length) {
+      $('chores').innerHTML = '<div class="empty">Nothing due today.</div>';
+      return;
+    }
+    let html = '';
+    SLOTS.forEach(s => {
+      const inSlot = due.filter(c => slotOf(c) === s.key);
+      if (!inSlot.length) return;
+      html += '<p class="slot">' + s.label + '</p>' + inSlot.map(c => {
+        const done = (DATA.completions || [])
+          .some(x => x.chore_id === c.id && x.due_on === today);
+        const ids = c.assignee_ids || [];
+        const named = ids.map(memberById).filter(Boolean);
+        const col = named.length ? named[0].color : '#3A5A40';
+        return '<div class="chore' + (done ? ' done' : '') + '" data-chore="' + c.id + '">' +
+          '<span class="box" style="' +
+          (done ? 'background:' + escHtml(col) + ';border-color:' + escHtml(col)
+                : 'border-color:' + escHtml(col)) + '">✓</span>' +
+          '<span class="cb"><span class="ct">' + escHtml(c.title) + '</span>' +
+          '<span class="who">' + (named.length
+            ? named.map(m => '<span class="chip" style="background:' + escHtml(m.color) + '">' +
+                escHtml(m.display_name) + '</span>').join('')
+            : '<span class="chip any">Anyone</span>') + '</span></span></div>';
+      }).join('');
+    });
+    $('chores').innerHTML = html;
+  }
+
+  function render() {
+    if (!DATA) return;
+    $('hh').innerHTML = escHtml(DATA.household ? DATA.household.name : 'Family') +
+      '<span class="dot">.</span>';
+    renderCalendar();
+    renderChores();
+    // Only says anything when the data has actually gone stale, so a working
+    // wall stays quiet.
+    const mins = Math.round((Date.now() - LAST_OK) / 60000);
+    $('stale').textContent = mins >= 5 ? ('offline ' + mins + 'm') : '';
+  }
+
+  // ── Data ──────────────────────────────────────────────────────────────────
+  async function poll() {
+    if (BUSY) return;
+    BUSY = true;
+    try {
+      const { data, error } = await sb.rpc('wall_snapshot', { p_token: TOKEN });
+      if (error) throw error;
+      if (!data) {                        // token no longer recognised
+        localStorage.removeItem(KEY);
+        location.reload();
+        return;
+      }
+      DATA = data; LAST_OK = Date.now();
+    } catch (e) {
+      console.error('poll failed', e);    // keep showing the last good render
+    } finally {
+      BUSY = false;
+      render();
+    }
+  }
+
+  async function tapChore(id) {
+    try {
+      const { data, error } = await sb.rpc('wall_complete', { p_token: TOKEN, p_chore: id });
+      if (error) throw error;
+      if (data && data.ok === false && data.reason === 'unassigned') {
+        toast('Nobody is on that one — assign it in the app first');
+        return;
+      }
+      await poll();
+    } catch (e) {
+      console.error(e);
+      toast('Could not save that — trying again shortly');
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest('[data-chore]');
+    if (row) tapChore(row.dataset.chore);
+  });
+
+  // ── Staying awake and staying on ──────────────────────────────────────────
+  // Best-effort: Wake Lock is Android Chrome and iOS 16.4+, and a screen that
+  // sleeps anyway is a settings problem rather than something to work around.
+  let lock = null;
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator) lock = await navigator.wakeLock.request('screen');
+    } catch (_) { /* denied or unsupported; nothing to do */ }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { keepAwake(); poll(); }
+  });
+
+  // ── Start ─────────────────────────────────────────────────────────────────
+  function connect(tok) {
+    TOKEN = tok;
+    localStorage.setItem(KEY, tok);
+    $('setup').style.display = 'none';
+    $('shell').style.display = 'flex';
+    tickClock(); setInterval(tickClock, 20000);
+    poll(); setInterval(poll, REFRESH_MS);
+    keepAwake();
+  }
+
+  $('go').addEventListener('click', async () => {
+    const tok = $('tok').value.trim();
+    if (!tok) { $('err').textContent = 'Paste the key first.'; return; }
+    $('err').textContent = 'Checking…';
+    try {
+      const { data, error } = await sb.rpc('wall_snapshot', { p_token: tok });
+      if (error) throw error;
+      if (!data) { $('err').textContent = 'That key isn\'t recognised.'; return; }
+      DATA = data; LAST_OK = Date.now();
+      connect(tok);
+    } catch (e) {
+      console.error(e);
+      $('err').textContent = 'Could not reach the server. Check the wifi and try again.';
+    }
+  });
+  $('tok').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('go').click(); });
+
+  (function start() {
+    // ?key=… lets a token be handed over by QR or a typed URL, which beats
+    // thumbing 64 hex characters into a wall-mounted tablet.
+    const fromUrl = new URLSearchParams(location.search).get('key');
+    const saved = fromUrl || localStorage.getItem(KEY);
+    if (saved) {
+      if (fromUrl) history.replaceState({}, '', location.pathname);
+      connect(saved);
+    } else {
+      $('setup').style.display = 'block';
+    }
+  })();
+  </script>
+</body>
+</html>
