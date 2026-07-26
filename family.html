@@ -310,6 +310,7 @@
         </div>
         <div class="listpick" id="who-tabs"></div>
         <div class="filterbar" id="points-bar" style="display:none">
+          <button class="pick" id="open-review">📅 Weekly review</button>
           <button class="pick" id="open-points">⚖ Points allocation</button>
         </div>
         <div id="chore-body"></div>
@@ -657,13 +658,13 @@
     if (!mem) {
       // Possible half-finished setup: household created, membership insert failed.
       const { data: owned } = await sb.from('households')
-        .select('id, name, time_zone, allowance_base_cents, allowance_points_target').eq('created_by', uid).maybeSingle();
+        .select('id, name, time_zone, allowance_base_cents, allowance_points_target, perfect_bonus_pct, perfect_bonus_cents').eq('created_by', uid).maybeSingle();
       if (owned) { HH = owned; return 'needs-member'; }
       return 'none';
     }
     ME = mem;
     const { data: hh, error: e2 } = await sb.from('households')
-      .select('id, name, time_zone, allowance_base_cents, allowance_points_target').eq('id', mem.household_id).single();
+      .select('id, name, time_zone, allowance_base_cents, allowance_points_target, perfect_bonus_pct, perfect_bonus_cents').eq('id', mem.household_id).single();
     if (e2) throw e2;
     HH = hh;
     return 'ok';
@@ -940,20 +941,52 @@
   // Points are what the kids see. The conversion to money happens once, at
   // the week's total, so no individual chore ever carries a price — the point
   // being that "brush your teeth" must not read as fifty cents.
-  function allowanceFor(m) {
+  function baseCentsFor(m) {
+    return (m && m.allowance_base_cents != null) ? m.allowance_base_cents
+         : ((HH && HH.allowance_base_cents != null) ? HH.allowance_base_cents : 1500);
+  }
+  // Stored as a percentage so it tracks each kid's own target: 98% is 490 of
+  // 500 and 294 of 300, and raising a target can't leave the bonus stranded
+  // out of reach.
+  function bonusPctFor(m) {
+    return (m && m.perfect_bonus_pct != null) ? m.perfect_bonus_pct
+         : ((HH && HH.perfect_bonus_pct != null) ? HH.perfect_bonus_pct : 98);
+  }
+  function bonusCentsFor(m) {
+    return (m && m.perfect_bonus_cents != null) ? m.perfect_bonus_cents
+         : ((HH && HH.perfect_bonus_cents != null) ? HH.perfect_bonus_cents : 500);
+  }
+  function bonusThresholdFor(m) {
+    return Math.ceil(targetFor(m) * bonusPctFor(m) / 100);
+  }
+
+  // Settle-up for one member over one pay week. Takes the completions rather
+  // than reading the global, so the same function answers "this week" on the
+  // chores tab and "the week you're about to pay" in the review.
+  function settle(m, rows) {
     const target = targetFor(m);
-    const baseCents = (m.allowance_base_cents != null ? m.allowance_base_cents
-                        : (HH && HH.allowance_base_cents != null ? HH.allowance_base_cents : 1500));
-    const from = ymd(startOfPayWeek(new Date()));
-    const mine = COMPLETIONS.filter(x => x.member_id === m.id && x.due_on >= from);
-    const points = mine.reduce((n, x) => n + (x.points_earned || 0), 0);
+    const points = rows.reduce((n, x) => n + (x.points_earned || 0), 0);
     // Extras are added on top rather than divided out of the base, which is
     // what keeps a $5 extra from revealing anything about the points rate.
-    const extra = mine.reduce((n, x) => n + (x.cents_earned || 0), 0);
-    const earned = Math.round(points / target * baseCents);
-    return { points: points, target: target,
-             cents: earned + extra, base: earned, extra: extra,
+    const extra = rows.reduce((n, x) => n + (x.cents_earned || 0), 0);
+    const earned = Math.round(points / target * baseCentsFor(m));
+    const threshold = bonusThresholdFor(m);
+    const bonus = points >= threshold ? bonusCentsFor(m) : 0;
+    return { points: points, target: target, threshold: threshold,
+             base: earned, extra: extra, bonus: bonus,
+             cents: earned + extra + bonus,
              pct: Math.min(100, Math.round(points / target * 100)) };
+  }
+
+  function completionsForWeek(mid, weekStart) {
+    const from = ymd(weekStart), to = ymd(addDays(weekStart, 6));
+    return COMPLETIONS.filter(x =>
+      x.member_id === mid && x.due_on >= from && x.due_on <= to);
+  }
+
+  function allowanceFor(m) {
+    const week = startOfPayWeek(new Date());
+    return settle(m, completionsForWeek(m.id, week));
   }
 
   // Non-repeatable extras are booked against the Monday of the pay week, so
@@ -983,12 +1016,17 @@
         '<span class="allowpts">' + a.points + ' / ' + a.target + ' pts</span>' +
         '<span class="allowcash">' + money(a.cents) + '</span></div>' +
         '<div class="bar"><span style="width:' + a.pct + '%;background:' + esc(m.color) + '"></span></div>' +
-        (a.extra ? '<div class="allowsplit">' + money(a.base) + ' from chores · ' +
-                   money(a.extra) + ' from extras</div>' : '') +
+        (a.extra || a.bonus ? '<div class="allowsplit">' + money(a.base) + ' from chores' +
+                   (a.extra ? ' · ' + money(a.extra) + ' from extras' : '') +
+                   (a.bonus ? ' · ' + money(a.bonus) + ' perfect week 🎉' : '') + '</div>' : '') +
+        // The nudge only makes sense while it's still reachable.
+        (!a.bonus && a.points < a.threshold && a.points > 0
+          ? '<div class="allowsplit">' + (a.threshold - a.points) +
+            ' more points for the ' + money(bonusCentsFor(m)) + ' bonus</div>' : '') +
         '</div>';
     }).join('') +
-    '<p class="allownote">Resets Monday morning. Extra chores push past ' +
-    'the target and pay above the base.</p></div>';
+    '<p class="allownote">Resets Monday morning. Extras pay on top, and ' +
+    'a near-perfect week earns a bonus.</p></div>';
   }
 
   // Extras read as an offer: what it pays, and how many times you've taken it
@@ -1066,8 +1104,10 @@
   function renderChores() {
     const today = todayYmd();
     renderWhoTabs();
-    // Setup, not daily use — and it shows the target, which is half the rate.
-    $('points-bar').style.display = (ME && ME.role === 'admin') ? 'flex' : 'none';
+    // Both show money and both are parents' business, so they follow the
+    // adult test rather than admin — an adult who isn't admin still pays out.
+    $('points-bar').style.display =
+      (ME && (ME.role === 'admin' || ME.role === 'adult')) ? 'flex' : 'none';
     let visible = CHORES;
     if (WHO_FILTER && WHO_FILTER !== 'all') {
       visible = visible.filter(c => choreForMember(c, WHO_FILTER));
@@ -1743,7 +1783,7 @@
     try {
       const { error } = await sb.from('chore_completions').insert({
         household_id: HH.id, chore_id: choreId, member_id: credit,
-        due_on: extraDueOn(c), points_earned: 0,
+        due_on: extraDueOn(c), points_earned: 0, completed_by: ME.id,
         cents_earned: c.extra_cents || 0, repeatable: !!c.repeatable
       });
       // A non-repeatable extra already taken this week hits the partial unique
@@ -1791,6 +1831,10 @@
         // once is a conflict, not two completions. Treat that as success.
         const { error } = await sb.from('chore_completions').insert({
           household_id: HH.id, chore_id: choreId, member_id: credit,
+          // member_id is who gets paid; completed_by is who actually tapped.
+          // They differ whenever a parent ticks something off the wall, and
+          // that difference is exactly what you want when a total looks odd.
+          completed_by: ME.id,
           due_on: today, points_earned: worth
         });
         if (error && error.code !== '23505') throw error;
@@ -1956,6 +2000,90 @@
       }
       closeSheet(); toast('Saved'); await refresh();
     } catch (e) { fail(e, 'save the tiers'); }
+  }
+
+  // ── Weekly review — Monday morning's settle-up ───────────────────────────
+  // Loads its own completions rather than using the page's window, because the
+  // week you're paying is by definition not the week the app is showing.
+  let RV_WEEK = null;
+  let RV_ROWS = [];
+
+  async function reviewSheet(delta) {
+    if (!RV_WEEK) RV_WEEK = addDays(startOfPayWeek(new Date()), -7);   // last week
+    if (delta) RV_WEEK = addDays(RV_WEEK, delta * 7);
+    const from = ymd(RV_WEEK), to = ymd(addDays(RV_WEEK, 6));
+    try {
+      const { data, error } = await sb.from('chore_completions').select('*')
+        .eq('household_id', HH.id).gte('due_on', from).lte('due_on', to)
+        .order('completed_at');
+      if (error) throw error;
+      RV_ROWS = data || [];
+    } catch (e) { fail(e, 'load that week'); return; }
+    renderReview();
+  }
+
+  function renderReview() {
+    const from = ymd(RV_WEEK), to = ymd(addDays(RV_WEEK, 6));
+    const thisWeek = ymd(startOfPayWeek(new Date()));
+    const label = RV_WEEK.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+                  ' – ' + addDays(RV_WEEK, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const kids = MEMBERS.filter(m => m.role === 'kid');
+
+    let html = '<h2>Weekly review</h2>' +
+      '<div class="monthnav"><button class="navbtn" id="rv-prev" aria-label="Earlier">‹</button>' +
+      '<h3>' + esc(label) + (from === thisWeek ? ' (this week)' : '') + '</h3>' +
+      '<button class="navbtn" id="rv-next" aria-label="Later">›</button></div>';
+
+    let payable = 0;
+    html += kids.map(m => {
+      const rows = RV_ROWS.filter(x => x.member_id === m.id);
+      const s = settle(m, rows);
+      payable += s.cents;
+      return '<div class="paperson">' +
+        '<div class="patotal">' +
+        '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>' +
+        '<span class="panum">' + money(s.cents) + '</span>' +
+        '<span class="papct">' + s.points + '/' + s.target + '</span></div>' +
+        '<div class="bar"><span style="width:' + s.pct + '%;background:' + esc(m.color) + '"></span></div>' +
+        '<div class="allowsplit">' + money(s.base) + ' from chores' +
+        (s.extra ? ' · ' + money(s.extra) + ' from extras' : '') +
+        (s.bonus ? ' · ' + money(s.bonus) + ' perfect week 🎉'
+                 : ' · no bonus (needed ' + s.threshold + ')') + '</div>' +
+        '</div>';
+    }).join('') || '<div class="empty">No kids in the household yet.</div>';
+
+    if (kids.length) {
+      html += '<div class="card allow" style="margin-top:.5rem"><h2>Total to pay · ' +
+        money(payable) + '</h2></div>';
+    }
+
+    // The audit trail. Who ticked what, and when — which is the question you
+    // have when a number looks wrong, and the reason completed_by exists.
+    html += '<label style="margin-top:1rem">Every tick this week</label>';
+    if (!RV_ROWS.length) {
+      html += '<div class="empty">Nothing was marked done this week.</div>';
+    } else {
+      html += RV_ROWS.slice().reverse().map(x => {
+        const c = CHORES.filter(y => y.id === x.chore_id)[0];
+        const paid = memberById(x.member_id);
+        const by = x.completed_by ? memberById(x.completed_by) : null;
+        const when = new Date(x.completed_at);
+        const worth = x.cents_earned ? money(x.cents_earned) : (x.points_earned || 0) + ' pts';
+        return '<div class="pachore" style="padding:.25rem 0">' +
+          esc(c ? c.title : 'a deleted chore') + ' · ' + worth +
+          '<span>' + (paid ? esc(paid.display_name) : '—') +
+          (by && by.id !== x.member_id ? ' (by ' + esc(by.display_name) + ')' : '') +
+          ' · ' + when.toLocaleDateString(undefined, { weekday: 'short' }) + ' ' +
+          when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) +
+          '</span></div>';
+      }).join('');
+    }
+
+    html += '<div class="btnrow"><button class="btn" id="f-cancel">Done</button></div>';
+    openSheet(html);
+    $('rv-prev').addEventListener('click', () => reviewSheet(-1));
+    $('rv-next').addEventListener('click', () => reviewSheet(1));
+    $('f-cancel').addEventListener('click', () => { RV_WEEK = null; closeSheet(); });
   }
 
   // ── Meal + recipe forms ──────────────────────────────────────────────────
@@ -2267,6 +2395,18 @@
       '<input type="text" id="f-base" value="' +
       ((HH.allowance_base_cents == null ? 1500 : HH.allowance_base_cents) / 100).toFixed(2) +
       '"></div></div>' +
+      '<div class="field grid2">' +
+      '<div><label for="f-bpct">Perfect week at (%)</label>' +
+      '<input type="number" id="f-bpct" min="1" max="100" value="' +
+      (HH.perfect_bonus_pct == null ? 98 : HH.perfect_bonus_pct) + '"></div>' +
+      '<div><label for="f-bcash">Bonus ($)</label>' +
+      '<input type="text" id="f-bcash" value="' +
+      ((HH.perfect_bonus_cents == null ? 500 : HH.perfect_bonus_cents) / 100).toFixed(2) +
+      '"></div></div>' +
+      '<p class="sub" style="margin:0 0 .5rem">A percentage rather than a points figure, ' +
+      'so it follows each kid\'s own target — 98% is ' +
+      Math.ceil((HH.allowance_points_target || 500) * (HH.perfect_bonus_pct == null ? 98 : HH.perfect_bonus_pct) / 100) +
+      ' points at the household target, and stays reachable if you change it.</p>' +
       '<p class="sub" style="margin:0 0 .5rem">Hit the target and you earn the full amount; ' +
       'half the points earns half of it. Going past the target pays above it, which is what ' +
       'makes add-on chores worth doing. Individual kids can be set differently from their own card.</p>' +
@@ -2281,15 +2421,22 @@
       if (!target || target < 1) { toast('The target has to be at least 1 point'); return; }
       const dollars = parseFloat($('f-base').value);
       if (!(dollars >= 0)) { toast('Give the allowance as a number, like 15.00'); return; }
+      const bpct = parseInt($('f-bpct').value, 10);
+      if (!(bpct >= 1 && bpct <= 100)) { toast('The bonus threshold is a percentage, 1–100'); return; }
+      const bcash = parseFloat($('f-bcash').value);
+      if (!(bcash >= 0)) { toast('Give the bonus as a number, like 5.00'); return; }
       try {
         const { error } = await sb.from('households').update({
           name: name,
           allowance_points_target: target,
-          allowance_base_cents: Math.round(dollars * 100)
+          allowance_base_cents: Math.round(dollars * 100),
+          perfect_bonus_pct: bpct,
+          perfect_bonus_cents: Math.round(bcash * 100)
         }).eq('id', HH.id);
         if (error) throw error;
         HH.name = name; HH.allowance_points_target = target;
         HH.allowance_base_cents = Math.round(dollars * 100);
+        HH.perfect_bonus_pct = bpct; HH.perfect_bonus_cents = Math.round(bcash * 100);
         closeSheet(); toast('Saved'); render();
       } catch (e) { fail(e, 'save the settings'); }
     });
@@ -2306,7 +2453,7 @@
       let hid = HH ? HH.id : null;
       if (!hid) {
         const { data, error } = await sb.from('households')
-          .insert({ name: name, created_by: uid }).select('id, name, time_zone, allowance_base_cents, allowance_points_target').single();
+          .insert({ name: name, created_by: uid }).select('id, name, time_zone, allowance_base_cents, allowance_points_target, perfect_bonus_pct, perfect_bonus_cents').single();
         if (error) throw error;
         HH = data; hid = data.id;
       }
@@ -2417,6 +2564,7 @@
     else if (t.id === 'add-member') memberSheet(null);
     else if (t.id === 'hh-settings') householdSheet();
     else if (t.id === 'open-points') pointsSheet();
+    else if (t.id === 'open-review') { RV_WEEK = null; reviewSheet(0); }
     else if (t.dataset.paDel) {
       PA = PA.filter(b => b.key !== t.dataset.paDel).map(b => ({
         key: b.key, id: b.id, sort_order: b.sort_order,
