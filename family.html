@@ -2167,10 +2167,20 @@
       '<input type="date" id="f-date" value="' + (m.plan_date || todayYmd()) + '"></div>' +
       '<div class="field"><label>Meal</label>' + pillRow('pick-mslot', MEAL_SLOTS, m.slot) + '</div>' +
       '<div class="field"><label>Where</label>' + pillRow('pick-venue', VENUES, m.venue) + '</div>' +
+      // Both sources in one list. Picking a Nutrition one copies it into the
+      // household recipes on save, so it's there for everyone next time.
       '<div class="field"><label for="f-recipe">From a recipe</label><select id="f-recipe">' +
       '<option value="">— none, just type it below —</option>' +
-      RECIPES.map(r => '<option value="' + r.id + '"' +
-        (m.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>').join('') +
+      (RECIPES.length ? '<optgroup label="Household recipes">' +
+        RECIPES.map(r => '<option value="' + r.id + '"' +
+          (m.recipe_id === r.id ? ' selected' : '') + '>' + esc(r.title) + '</option>').join('') +
+        '</optgroup>' : '') +
+      (MY_FOODS.filter(f => !RECIPES.some(r => r.nutrition_food_id === f.id)).length
+        ? '<optgroup label="From Nutrition">' +
+          MY_FOODS.filter(f => !RECIPES.some(r => r.nutrition_food_id === f.id))
+            .map(f => '<option value="food:' + f.id + '">' + esc(f.name) +
+              (f.servings ? ' · ' + f.servings + ' servings' : '') + '</option>').join('') +
+          '</optgroup>' : '') +
       '</select></div>' +
       '<div class="field"><label for="f-title">What</label>' +
       '<input type="text" id="f-title" value="' + esc(m.title || '') +
@@ -2187,8 +2197,12 @@
     // Picking a recipe fills the title, but doesn't lock it — the useful
     // version of a plan is often "tacos (double it)".
     $('f-recipe').addEventListener('change', () => {
-      const r = RECIPES.filter(x => x.id === $('f-recipe').value)[0];
-      if (r && !$('f-title').value.trim()) $('f-title').value = r.title;
+      const v = $('f-recipe').value;
+      const src = v.indexOf('food:') === 0
+        ? MY_FOODS.filter(x => x.id === v.slice(5))[0]
+        : RECIPES.filter(x => x.id === v)[0];
+      const name = src ? (src.title || src.name) : '';
+      if (name && !$('f-title').value.trim()) $('f-title').value = name;
     });
     $('f-cancel').addEventListener('click', closeSheet);
     $('f-save').addEventListener('click', () => saveMeal(m.id));
@@ -2196,11 +2210,21 @@
   }
 
   async function saveMeal(id) {
-    const recipeId = $('f-recipe').value || null;
+    let recipeId = $('f-recipe').value || null;
+    let pickedName = '';
+    try {
+      // A Nutrition pick becomes a household recipe first, so the meal points
+      // at something everyone can read.
+      if (recipeId && recipeId.indexOf('food:') === 0) {
+        const foodId = recipeId.slice(5);
+        pickedName = (MY_FOODS.filter(f => f.id === foodId)[0] || {}).name || '';
+        recipeId = await ensureRecipeFromFood(foodId);
+      }
+    } catch (e) { fail(e, 'bring that recipe across'); return; }
     const recipe = recipeId ? RECIPES.filter(x => x.id === recipeId)[0] : null;
     // Title is required by the column, so fall back to the recipe's name
     // rather than rejecting a perfectly clear "Tuesday: that pasta thing".
-    const title = $('f-title').value.trim() || (recipe ? recipe.title : '');
+    const title = $('f-title').value.trim() || (recipe ? recipe.title : pickedName);
     if (!title) { toast('What are you eating?'); return; }
     const row = {
       household_id: HH.id,
@@ -2234,13 +2258,47 @@
   // opens rather than on every page load, since most sittings never need it.
   let MY_FOODS = [];
   async function loadMyRecipes() {
-    try {
-      const { data, error } = await sb.from('foods')
-        .select('id, name, servings, ingredients')
-        .eq('kind', 'recipe').order('name');
-      if (error) throw error;
-      MY_FOODS = data || [];
-    } catch (_) { MY_FOODS = []; }   // no Nutrition recipes is not an error
+    const { data, error } = await sb.from('foods')
+      .select('id, name, servings, ingredients')
+      .eq('kind', 'recipe').order('name');
+    // Deliberately not swallowed: an empty list and a failed query look
+    // identical on screen, and the first time this was wrong it looked like
+    // the feature simply wasn't there.
+    if (error) { console.error('nutrition recipes', error); MY_FOODS = []; return; }
+    MY_FOODS = data || [];
+  }
+
+  // Bringing a Nutrition recipe onto the meal plan copies it into the
+  // household table once, then reuses that copy. Copying rather than joining
+  // is the boundary: foods is personal, so a live join would resolve for one
+  // member and read blank to everyone else.
+  async function ensureRecipeFromFood(foodId) {
+    const already = RECIPES.filter(r => r.nutrition_food_id === foodId)[0];
+    if (already) return already.id;
+    const f = MY_FOODS.filter(x => x.id === foodId)[0];
+    if (!f) return null;
+    const { data, error } = await sb.from('recipes').insert({
+      household_id: HH.id, title: f.name,
+      ingredients: ingredientLines(f) || null,
+      nutrition_food_id: f.id, created_by: ME.user_id
+    }).select('id').single();
+    if (error) throw error;
+    return data.id;
+  }
+
+  // And the other way: a recipe invented on the meal plan becomes one of your
+  // Nutrition recipes. Name and ingredients only — the macros belong to the
+  // module that computes them, and inventing numbers here would be worse than
+  // leaving them to be filled in there.
+  async function pushRecipeToNutrition(title, ingredientsText) {
+    const items = String(ingredientsText || '').split('\n')
+      .map(s => s.trim()).filter(Boolean).map(name => ({ name: name }));
+    const { data, error } = await sb.from('foods').insert({
+      user_id: ME.user_id, name: title, kind: 'recipe',
+      ingredients: items.length ? items : null
+    }).select('id').single();
+    if (error) throw error;
+    return data.id;
   }
   // foods.ingredients is [{name, qty, unit, …}]; the household recipe keeps
   // free text, because it's read by people rather than summed.
@@ -2274,6 +2332,12 @@
       '<textarea id="f-ing" placeholder="One per line">' + esc(r.ingredients || '') + '</textarea></div>' +
       '<div class="field"><label for="f-notes">Notes</label>' +
       '<textarea id="f-notes" placeholder="Optional">' + esc(r.notes || '') + '</textarea></div>' +
+      (r.nutrition_food_id
+        ? '<p class="sub" style="margin:0 0 .8rem">Already in your Nutrition recipes.</p>'
+        : '<div class="field inline"><input type="checkbox" id="f-push">' +
+          '<label for="f-push">Also save to my Nutrition recipes</label></div>' +
+          '<p class="sub" style="margin:0 0 .8rem">Copies the name and ingredients. ' +
+          'Add the macros over in Nutrition — this side doesn\'t invent them.</p>') +
       '<div class="btnrow">' +
       (isNew ? '' : '<button class="btn danger" id="f-del">Delete</button>') +
       '<button class="btn ghost" id="f-cancel">Cancel</button>' +
@@ -2295,18 +2359,26 @@
       if (!title) { toast('Name it'); return; }
       const url = $('f-url').value.trim();
       if (url && !safeUrl(url)) { toast('Links need to start with http:// or https://'); return; }
+      const ing = $('f-ing').value.trim();
       const row = {
         household_id: HH.id, title: title, source_url: url || null,
-        ingredients: $('f-ing').value.trim() || null,
+        ingredients: ing || null,
         notes: $('f-notes').value.trim() || null,
-        nutrition_food_id: (imp && imp.value) || null,
+        nutrition_food_id: (imp && imp.value) || r.nutrition_food_id || null,
         created_by: ME.user_id
       };
       try {
+        const push = $('f-push');
+        if (push && push.checked) {
+          row.nutrition_food_id = await pushRecipeToNutrition(title, ing);
+        }
         const { error } = r.id ? await sb.from('recipes').update(row).eq('id', r.id)
                                : await sb.from('recipes').insert(row);
         if (error) throw error;
-        closeSheet(); toast(r.id ? 'Updated' : 'Added'); await refresh();
+        closeSheet();
+        toast(push && push.checked ? 'Saved, and added to Nutrition'
+                                   : (r.id ? 'Updated' : 'Added'));
+        await refresh();
       } catch (e) { fail(e, 'save the recipe'); }
     });
     const del = $('f-del');
