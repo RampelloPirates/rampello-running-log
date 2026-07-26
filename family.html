@@ -1686,6 +1686,10 @@
     // three to-dos in a row doesn't mean setting the same pill three times.
     const kind = c.kind || (KIND_FILTER === 'all' ? 'chore' : KIND_FILTER);
     const noun = labelOf(KINDS, kind).toLowerCase();
+    // Adding work is a good habit and isn't gated. Saying what it pays is a
+    // different act — a kid who sets their own rate awards their own
+    // allowance. Enforced by a trigger too; this just doesn't offer it.
+    const canPrice = !!(ME && (ME.role === 'admin' || ME.role === 'adult'));
     openSheet(
       '<h2>' + (isNew ? 'New ' + noun : 'Edit ' + noun) + '</h2>' +
       '<div class="field"><label>Kind</label>' + pillRow('pick-ckind', KINDS, kind) + '</div>' +
@@ -1702,23 +1706,29 @@
         '<button type="button" class="pick' + (slotOf(c) === s.key ? ' on' : '') +
         '" data-slot="' + (s.key || '') + '">' + s.label + '</button>').join('') +
       '</div></div>' +
-      '<div class="field"><label for="f-bucket">Worth</label><select id="f-bucket">' +
-      BUCKETS.map(b => '<option value="' + b.id + '"' +
-        (c.bucket_id === b.id ? ' selected' : '') + '>' +
-        esc(b.name) + ' — ' + (b.points || 0) + ' pts</option>').join('') +
-      '<option value=""' + (c.bucket_id ? '' : ' selected') + '>Custom…</option>' +
-      '</select></div>' +
+      (canPrice
+        ? '<div class="field"><label for="f-bucket">Worth</label><select id="f-bucket">' +
+          BUCKETS.map(b => '<option value="' + b.id + '"' +
+            (c.bucket_id === b.id ? ' selected' : '') + '>' +
+            esc(b.name) + ' — ' + (b.points || 0) + ' pts</option>').join('') +
+          '<option value=""' + (c.bucket_id ? '' : ' selected') + '>Custom…</option>' +
+          '</select></div>'
+        : '') +
       '<div class="field grid2">' +
       '<div><label for="f-start">Starting</label>' +
       '<input type="date" id="f-start" value="' + (c.starts_on || todayYmd()) + '"></div>' +
-      '<div id="pts-wrap"' + (c.bucket_id ? ' style="display:none"' : '') + '>' +
-      '<label for="f-points">Points</label>' +
-      '<input type="number" id="f-points" min="0" value="' + (c.points || 0) + '"></div></div>' +
+      (canPrice
+        ? '<div id="pts-wrap"' + (c.bucket_id ? ' style="display:none"' : '') + '>' +
+          '<label for="f-points">Points</label>' +
+          '<input type="number" id="f-points" min="0" value="' + (c.points || 0) + '"></div>'
+        : '<div></div>') + '</div>' +
       repeatPicker(c.rrule) + '</div>' +
       '<div id="extra-wrap"' + (kind === 'extra' ? '' : ' style="display:none"') + '>' +
-      '<div class="field"><label for="f-cents">Worth ($)</label>' +
-      '<input type="text" id="f-cents" value="' +
-      (c.extra_cents ? (c.extra_cents / 100).toFixed(2) : '') + '" placeholder="5.00"></div>' +
+      (canPrice
+        ? '<div class="field"><label for="f-cents">Worth ($)</label>' +
+          '<input type="text" id="f-cents" value="' +
+          (c.extra_cents ? (c.extra_cents / 100).toFixed(2) : '') + '" placeholder="5.00"></div>'
+        : '<p class="pahint">Suggest it and a grown-up will say what it\'s worth.</p>') +
       '<div class="field"><label>How often</label><div class="pickers" id="pick-rep">' +
       '<button type="button" class="pick' + (c.repeatable ? '' : ' on') +
       '" data-pill="once">Once a week</button>' +
@@ -1767,7 +1777,8 @@
     const who = readWho();
     const kind = readPill('pick-ckind', 'chore');
     const isX = kind === 'extra';
-    if (isX && !(parseFloat($('f-cents').value) >= 0)) {
+    const canPrice = !!(ME && (ME.role === 'admin' || ME.role === 'adult'));
+    if (isX && canPrice && !(parseFloat($('f-cents').value) >= 0)) {
       toast('What is it worth? Give a number like 5.00'); return;
     }
     const base = {
@@ -1779,13 +1790,18 @@
       // recurrence, no part of the day. Those columns are cleared rather than
       // left holding whatever the form last showed.
       starts_on: isX ? todayYmd() : ($('f-start').value || todayYmd()),
-      bucket_id:   isX ? null : (($('f-bucket') || {}).value || null),
-      points:      isX ? 0 : (parseInt($('f-points').value, 10) || 0),
       time_of_day: isX ? null : readSlot(),
       rrule:       isX ? null : readRepeat(),
-      extra_cents: isX ? Math.round(parseFloat($('f-cents').value) * 100) : 0,
       repeatable:  isX ? (readPill('pick-rep', 'once') === 'many') : false
     };
+    // The pay fields are only sent when the person is allowed to set them.
+    // The trigger would ignore them anyway; not sending keeps an edit by a
+    // kid from looking like an attempt.
+    if (canPrice) {
+      base.bucket_id   = isX ? null : (($('f-bucket') || {}).value || null);
+      base.points      = isX ? 0 : (parseInt($('f-points').value, 10) || 0);
+      base.extra_cents = isX ? Math.round(parseFloat($('f-cents').value) * 100) : 0;
+    }
     // "Each" means separate jobs, so it becomes separate rows. That's what
     // keeps chore_completions keyed on (chore_id, due_on) — one completion per
     // occurrence stays true — and lets any one of them be reassigned, edited
@@ -1909,7 +1925,10 @@
     return PA_WHO === '__none' ? isUnassigned(c)
                                : (c.assignee_ids || []).indexOf(PA_WHO) !== -1;
   }
-  function paPool() { return CHORES.filter(c => !isExtra(c) && paScope(c)); }
+  // Chores only. To-dos are one-offs and extras are cash — neither is part of
+  // the routine week that has to add up to the target, and listing them here
+  // would mean tuning a total against work that isn't in it.
+  function paPool() { return CHORES.filter(c => kindOf(c) === 'chore' && paScope(c)); }
 
   // A chore with no repeat rule happens once, which is almost never what was
   // meant for something like brushing teeth — and "1×" reads as an allocation
@@ -1983,7 +2002,7 @@
       Object.keys(vals).forEach(mid =>
         overrides.push({ bucket_id: b.key, member_id: mid, points: vals[mid] }));
     });
-    const chores = CHORES.filter(c => !isExtra(c)).map(c =>
+    const chores = CHORES.filter(c => kindOf(c) === 'chore').map(c =>
       Object.assign({}, c, { bucket_id: PA_ASSIGN[c.id] || null }));
     const scoped = PA_WHO === '__none' ? unassignedChores(chores)
                                        : choresFor(PA_WHO, chores);
@@ -2109,7 +2128,7 @@
     // choreId -> tier key. Keys rather than ids, because a tier added in this
     // sitting has no id until Save.
     PA_ASSIGN = {};
-    CHORES.filter(c => !isExtra(c)).forEach(c => {
+    CHORES.filter(c => kindOf(c) === 'chore').forEach(c => {
       const b = PA.filter(x => x.id === c.bucket_id)[0];
       PA_ASSIGN[c.id] = b ? b.key : null;
     });
@@ -2186,7 +2205,7 @@
 
       // Write the assignments. Only the ones that actually moved, so a sitting
       // where you only re-priced doesn't touch every chore row.
-      for (const c of CHORES.filter(x => !isExtra(x))) {
+      for (const c of CHORES.filter(x => kindOf(x) === 'chore')) {
         const want = PA_ASSIGN[c.id] ? (keyToId[PA_ASSIGN[c.id]] || null) : null;
         if ((c.bucket_id || null) === want) continue;
         const { error } = await sb.from('chores').update({ bucket_id: want }).eq('id', c.id);
