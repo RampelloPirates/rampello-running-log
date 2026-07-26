@@ -2509,10 +2509,15 @@
       '<p class="sub">Open this on the screen you want to use. It shows the household ' +
       'calendar and today\'s chores — it has no sign-in and can\'t reach anyone\'s ' +
       'personal pages.</p>' +
-      '<div class="field"><label>Open this link on the display</label>' +
-      '<input type="text" id="d-url" value="' + esc(url) + '" readonly></div>' +
-      '<div class="field"><label>Or paste this key into wall.html</label>' +
-      '<input type="text" id="d-key" value="' + esc(tok) + '" readonly></div>' +
+      '<div class="field"><label>Easiest: open this link on the display</label>' +
+      '<input type="text" id="d-url" value="' + esc(url) + '" readonly>' +
+      '<p class="sub" style="margin:.35rem 0 0">The key is already in the link, so ' +
+      'the screen connects itself. Mail or AirDrop it to the tablet.</p></div>' +
+      '<div class="field"><label>Setting it up by hand instead</label>' +
+      '<input type="text" id="d-key" value="' + esc(tok) + '" readonly>' +
+      '<p class="sub" style="margin:.35rem 0 0">Go to <strong>' +
+      esc(location.host) + '/wall.html</strong> on the display and paste this ' +
+      'into the box it asks for.</p></div>' +
       '<p class="sub" style="margin:0 0 .5rem"><strong>Copy it now.</strong> Only a hash ' +
       'is stored, so it can\'t be shown again — if you lose it, make another.</p>' +
       '<div class="btnrow"><button class="btn ghost" id="d-copy">Copy link</button>' +
