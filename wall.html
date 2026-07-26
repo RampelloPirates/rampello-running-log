@@ -53,9 +53,35 @@
       #body { grid-template-columns: 1fr 22rem; grid-template-rows: 1fr; }
     }
 
-    #cal { min-height: 0; overflow: hidden; padding: 0.7rem; }
-    #days { display: grid; gap: 0.5rem; height: 100%;
+    #cal { min-height: 0; overflow: hidden; padding: 0.7rem; display: flex; flex-direction: column; }
+    #calbar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-shrink: 0; }
+    #calbar .label { font-family: var(--f-display); font-weight: 700; font-size: 1.05rem;
+                     color: var(--green-deep); margin-right: auto; }
+    .nav { border: 1px solid var(--silver); background: var(--paper); border-radius: 9px;
+           min-width: 38px; height: 38px; font-size: 1.1rem; line-height: 1; cursor: pointer;
+           color: var(--green); font-family: var(--f-body); padding: 0 0.6rem; }
+    .nav.on { background: var(--green); border-color: var(--green); color: #fff; font-weight: 600; }
+    #days { display: grid; gap: 0.5rem; flex: 1; min-height: 0;
             grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
+
+    /* Month: a real grid, so the shape of the month is visible from across the
+       room even when the individual titles aren't. */
+    #month { flex: 1; min-height: 0; display: grid; grid-template-rows: auto 1fr; gap: 2px; }
+    #mhead, #mgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    #mgrid { min-height: 0; }
+    #mhead div { text-align: center; font-size: 0.7rem; font-weight: 700; letter-spacing: .06em;
+                 color: var(--muted); padding: 0.2rem 0; }
+    .mc { background: var(--paper); border: 1px solid var(--silver); border-radius: 8px;
+          padding: 0.25rem 0.3rem; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    .mc.out { background: var(--surface-warm); }
+    .mc.out .n { color: #C9C3B4; }
+    .mc.today { border-color: var(--amber); border-width: 2px; }
+    .mc .n { font-size: 0.78rem; font-weight: 600; line-height: 1.1; margin-bottom: 0.12rem; }
+    .mc.today .n { color: var(--amber); }
+    .mp { font-size: 0.66rem; line-height: 1.25; padding: 0 0.22rem; border-radius: 3px;
+          color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          margin-bottom: 1px; }
+    .mc .more { font-size: 0.6rem; color: var(--muted); }
     .day { background: var(--paper); border: 1px solid var(--silver); border-radius: 14px;
            padding: 0.55rem 0.6rem; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
     .day.today { border-color: var(--amber); border-width: 2px; }
@@ -93,6 +119,28 @@
     .chip { font-size: 0.68rem; padding: 0.05rem 0.4rem; border-radius: 99px; color: #fff; font-weight: 600; }
     .chip.any { background: var(--green-deep); }
     .empty { color: var(--muted); font-size: 0.85rem; padding: 1rem 0; }
+
+    aside hr { border: none; border-top: 1px solid var(--silver); margin: 1.1rem 0 0.7rem; }
+    .listtabs { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .listtab { border: 1px solid var(--silver); background: var(--paper); border-radius: 99px;
+               padding: 0.25rem 0.6rem; font-size: 0.76rem; font-family: var(--f-body);
+               color: var(--muted); cursor: pointer; }
+    .listtab.on { border-color: var(--green); background: var(--green-tint);
+                  color: var(--green-deep); font-weight: 600; }
+    .item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem;
+            background: var(--paper); border: 1px solid var(--silver); border-radius: 10px;
+            margin-bottom: 0.3rem; cursor: pointer; font-size: 0.9rem; }
+    .item .tick { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--silver);
+                  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+                  font-size: 0.75rem; font-weight: 700; color: transparent; }
+    .item.on { opacity: .5; }
+    .item.on .tick { background: var(--green); border-color: var(--green); color: #fff; }
+    .item.on .body { text-decoration: line-through; }
+    #additem { display: flex; gap: 0.35rem; margin-top: 0.5rem; }
+    #additem input { flex: 1; min-width: 0; font-family: var(--f-body); font-size: 0.9rem;
+                     padding: 0.5rem 0.6rem; border: 1px solid var(--silver); border-radius: 10px; }
+    #additem button { border: 1px solid var(--green); background: var(--green); color: #fff;
+                      border-radius: 10px; padding: 0 0.9rem; font-size: 1.1rem; cursor: pointer; }
 
     /* Setup, and the only screen that scrolls */
     #setup { display: none; height: 100%; overflow-y: auto; padding: 2rem 1.2rem; }
@@ -135,10 +183,32 @@
       <span class="clock" id="clock"></span>
     </header>
     <div id="body">
-      <section id="cal"><div id="days"></div></section>
+      <section id="cal">
+        <div id="calbar">
+          <span class="label" id="callabel"></span>
+          <button class="nav" id="v-days">Days</button>
+          <button class="nav" id="v-month">Month</button>
+          <button class="nav" id="c-prev" aria-label="Back">‹</button>
+          <button class="nav" id="c-today">Today</button>
+          <button class="nav" id="c-next" aria-label="Forward">›</button>
+        </div>
+        <div id="days"></div>
+        <div id="month" style="display:none">
+          <div id="mhead"></div>
+          <div id="mgrid"></div>
+        </div>
+      </section>
       <aside>
         <h2>Today</h2>
         <div id="chores"></div>
+        <hr>
+        <h2 id="listname">Lists</h2>
+        <div class="listtabs" id="listtabs"></div>
+        <div id="items"></div>
+        <div id="additem">
+          <input type="text" id="newitem" placeholder="Add to the list…" autocomplete="off">
+          <button id="additem-go" aria-label="Add">+</button>
+        </div>
       </aside>
     </div>
   </div>
@@ -167,10 +237,17 @@
   const REFRESH_MS = 60000;
   const DAYS_SHOWN = 5;
 
+  const IDLE_RESET_MS = 120000;
+
   let TOKEN = null;
   let DATA = null;          // last good snapshot — kept so a failed poll
   let LAST_OK = 0;          // leaves the wall showing yesterday's truth
   let BUSY = false;
+  let VIEW = 'days';        // 'days' | 'month'
+  let DAY_OFF = 0;          // days from today, in DAYS_SHOWN steps
+  let MCUR = null;          // first of the displayed month
+  let LIST_ID = null;
+  let IDLE_AT = 0;          // when to snap back to today
 
   const $ = (id) => document.getElementById(id);
 
@@ -202,8 +279,20 @@
   // of numbers, and what anyone actually wants from the kitchen is today and
   // what's coming.
   function renderCalendar() {
-    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const month = VIEW === 'month';
+    $('days').style.display = month ? 'none' : 'grid';
+    $('month').style.display = month ? 'grid' : 'none';
+    $('v-days').classList.toggle('on', !month);
+    $('v-month').classList.toggle('on', month);
+    if (month) renderMonth(); else renderDays();
+  }
+
+  function renderDays() {
+    const start = addDays(new Date(), DAY_OFF); start.setHours(0, 0, 0, 0);
     const end = addDays(start, DAYS_SHOWN - 1);
+    $('callabel').textContent = DAY_OFF === 0 ? 'Next few days'
+      : start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' – ' +
+        end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const byDay = expandRange(start, end, DATA.events || []);
     const today = todayYmd();
     let html = '';
@@ -232,6 +321,40 @@
         '</div>';
     }
     $('days').innerHTML = html;
+  }
+
+  function renderMonth() {
+    if (!MCUR) { const n = new Date(); MCUR = new Date(n.getFullYear(), n.getMonth(), 1); }
+    $('callabel').textContent =
+      MCUR.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    $('mhead').innerHTML = ['S','M','T','W','T','F','S']
+      .map(d => '<div>' + d + '</div>').join('');
+
+    const first = new Date(MCUR.getFullYear(), MCUR.getMonth(), 1);
+    const last  = new Date(MCUR.getFullYear(), MCUR.getMonth() + 1, 0);
+    const gridStart = addDays(first, -first.getDay());
+    const gridEnd   = addDays(last, 6 - last.getDay());
+    const byDay = expandRange(gridStart, gridEnd, DATA.events || []);
+    const today = todayYmd();
+    const rows = Math.round((gridEnd - gridStart) / 86400000 + 1) / 7;
+    $('mgrid').style.gridTemplateRows = 'repeat(' + rows + ', 1fr)';
+
+    let html = '';
+    for (let d = new Date(gridStart); d <= gridEnd; d = addDays(d, 1)) {
+      const k = ymd(d);
+      const occ = byDay[k] || [];
+      const cls = ['mc'];
+      if (d.getMonth() !== MCUR.getMonth()) cls.push('out');
+      if (k === today) cls.push('today');
+      html += '<div class="' + cls.join(' ') + '"><span class="n">' + d.getDate() + '</span>' +
+        occ.slice(0, 3).map(o =>
+          '<span class="mp" style="background:' + escHtml(eventColor(o.ev)) + '">' +
+          escHtml((o.ev.all_day ? '' : shortTime(o.ev.starts_at) + ' ') + o.ev.title) +
+          '</span>').join('') +
+        (occ.length > 3 ? '<span class="more">+' + (occ.length - 3) + '</span>' : '') +
+        '</div>';
+    }
+    $('mgrid').innerHTML = html;
   }
 
   // ── Chores ────────────────────────────────────────────────────────────────
@@ -266,12 +389,48 @@
     $('chores').innerHTML = html;
   }
 
+  // ── Lists ─────────────────────────────────────────────────────────────────
+  // The one thing the wall can create. A list item needs no author, which is
+  // exactly why it fits a device that has no identity — a chore would want an
+  // assignee and a price, and an event an author.
+  function renderLists() {
+    const lists = DATA.lists || [];
+    if (!lists.length) {
+      $('listname').textContent = 'Lists';
+      $('listtabs').innerHTML = '';
+      $('items').innerHTML = '<div class="empty">No lists yet — make one in the app.</div>';
+      $('additem').style.display = 'none';
+      return;
+    }
+    $('additem').style.display = 'flex';
+    // Default to the grocery list if there is one; it's what a kitchen screen
+    // is for.
+    if (!LIST_ID || !lists.some(l => l.id === LIST_ID)) {
+      const grocery = lists.filter(l => l.kind === 'grocery')[0];
+      LIST_ID = (grocery || lists[0]).id;
+    }
+    const cur = lists.filter(l => l.id === LIST_ID)[0];
+    $('listname').textContent = cur ? cur.name : 'List';
+    $('listtabs').innerHTML = lists.length > 1
+      ? lists.map(l => '<button class="listtab' + (l.id === LIST_ID ? ' on' : '') +
+          '" data-list="' + l.id + '">' + escHtml(l.name) + '</button>').join('')
+      : '';
+
+    const items = (DATA.list_items || []).filter(i => i.list_id === LIST_ID);
+    $('items').innerHTML = items.length
+      ? items.map(i => '<div class="item' + (i.checked ? ' on' : '') +
+          '" data-item="' + i.id + '"><span class="tick">✓</span>' +
+          '<span class="body">' + escHtml(i.body) + '</span></div>').join('')
+      : '<div class="empty">Nothing on it.</div>';
+  }
+
   function render() {
     if (!DATA) return;
     $('hh').innerHTML = escHtml(DATA.household ? DATA.household.name : 'Family') +
       '<span class="dot">.</span>';
     renderCalendar();
     renderChores();
+    renderLists();
     // Only says anything when the data has actually gone stale, so a working
     // wall stays quiet.
     const mins = Math.round((Date.now() - LAST_OK) / 60000);
@@ -314,10 +473,68 @@
     }
   }
 
+  async function tapItem(id) {
+    try {
+      const { error } = await sb.rpc('wall_list_toggle', { p_token: TOKEN, p_item: id });
+      if (error) throw error;
+      await poll();
+    } catch (e) { console.error(e); toast('Could not save that'); }
+  }
+
+  async function addItem() {
+    const box = $('newitem');
+    const body = box.value.trim();
+    if (!body || !LIST_ID) return;
+    box.value = '';
+    try {
+      const { error } = await sb.rpc('wall_list_add',
+        { p_token: TOKEN, p_list: LIST_ID, p_body: body });
+      if (error) throw error;
+      await poll();
+    } catch (e) { console.error(e); toast('Could not add that'); box.value = body; }
+  }
+
+  // Any touch postpones the snap-back. Browsing to March and walking away
+  // should not leave the wall showing March until somebody notices.
+  function nudgeIdle() { IDLE_AT = Date.now() + IDLE_RESET_MS; }
+  function backToToday() {
+    VIEW = 'days'; DAY_OFF = 0; MCUR = null; IDLE_AT = 0;
+    renderCalendar();
+  }
+  setInterval(() => {
+    if (IDLE_AT && Date.now() > IDLE_AT) backToToday();
+  }, 10000);
+
   document.addEventListener('click', (e) => {
-    const row = e.target.closest('[data-chore]');
-    if (row) tapChore(row.dataset.chore);
+    const t = e.target;
+    const chore = t.closest('[data-chore]');
+    if (chore) { tapChore(chore.dataset.chore); return; }
+    const item = t.closest('[data-item]');
+    if (item) { tapItem(item.dataset.item); return; }
+    const tab = t.closest('[data-list]');
+    if (tab) { LIST_ID = tab.dataset.list; renderLists(); return; }
+
+    const b = t.closest('button');
+    if (!b) return;
+    if (b.id === 'additem-go') { addItem(); return; }
+    // Everything below moves the calendar off today, so it arms the timer.
+    if (b.id === 'v-days')  { VIEW = 'days';  nudgeIdle(); renderCalendar(); }
+    else if (b.id === 'v-month') { VIEW = 'month'; nudgeIdle(); renderCalendar(); }
+    else if (b.id === 'c-today') { backToToday(); }
+    else if (b.id === 'c-prev' || b.id === 'c-next') {
+      const dir = b.id === 'c-next' ? 1 : -1;
+      if (VIEW === 'month') {
+        if (!MCUR) { const n = new Date(); MCUR = new Date(n.getFullYear(), n.getMonth(), 1); }
+        MCUR = new Date(MCUR.getFullYear(), MCUR.getMonth() + dir, 1);
+      } else {
+        DAY_OFF += dir * DAYS_SHOWN;
+      }
+      nudgeIdle();
+      renderCalendar();
+    }
   });
+
+  $('newitem').addEventListener('keydown', (e) => { if (e.key === 'Enter') addItem(); });
 
   // ── Staying awake and staying on ──────────────────────────────────────────
   // Best-effort: Wake Lock is Android Chrome and iOS 16.4+, and a screen that
