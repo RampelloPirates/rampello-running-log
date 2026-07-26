@@ -109,6 +109,16 @@
     .kindhead { font-family: var(--f-display); font-size: 0.9rem; font-weight: 600; color: var(--green-deep); margin: 1.1rem 0 0.1rem 0.15rem; }
     .kindhead:first-of-type { margin-top: 0.4rem; }
 
+    .allow { padding: 1rem 1.05rem 0.9rem; }
+    .allowrow { margin-bottom: 0.75rem; }
+    .allowrow:last-of-type { margin-bottom: 0.35rem; }
+    .allowtop { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+    .allowpts { font-size: 0.8rem; color: var(--muted); }
+    .allowcash { margin-left: auto; font-family: var(--f-display); font-weight: 700; font-size: 1.05rem; color: var(--green-deep); }
+    .bar { height: 8px; border-radius: 99px; background: var(--surface-warm); border: 1px solid var(--silver); overflow: hidden; }
+    .bar span { display: block; height: 100%; border-radius: 99px; }
+    .allownote { font-size: 0.76rem; color: var(--muted); margin: 0.5rem 0 0; line-height: 1.4; }
+
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
     .row .body { min-width: 0; flex: 1; }
@@ -371,9 +381,17 @@
   function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
   function parseYmd(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
   function todayYmd() { return ymd(new Date()); }
+  function minYmd(a, b) { return a < b ? a : b; }
   function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate()+n); return x; }
   // Sunday-start, matching the month grid's columns.
   function startOfWeek(d) { const x = new Date(d); x.setHours(0,0,0,0); return addDays(x, -x.getDay()); }
+  // Allowance weeks start MONDAY, deliberately not the same as the calendar
+  // week above: the pay week is Monday-to-Sunday so a Sunday evening push
+  // still counts toward the week it belongs to.
+  function startOfPayWeek(d) {
+    const x = new Date(d); x.setHours(0, 0, 0, 0);
+    return addDays(x, -((x.getDay() + 6) % 7));   // Mon→0 … Sun→6
+  }
 
   function fmtDayHead(dateStr) {
     const d = parseYmd(dateStr);
@@ -601,13 +619,13 @@
     if (!mem) {
       // Possible half-finished setup: household created, membership insert failed.
       const { data: owned } = await sb.from('households')
-        .select('id, name, time_zone').eq('created_by', uid).maybeSingle();
+        .select('id, name, time_zone, allowance_base_cents, allowance_points_target').eq('created_by', uid).maybeSingle();
       if (owned) { HH = owned; return 'needs-member'; }
       return 'none';
     }
     ME = mem;
     const { data: hh, error: e2 } = await sb.from('households')
-      .select('id, name, time_zone').eq('id', mem.household_id).single();
+      .select('id, name, time_zone, allowance_base_cents, allowance_points_target').eq('id', mem.household_id).single();
     if (e2) throw e2;
     HH = hh;
     return 'ok';
@@ -671,7 +689,10 @@
       sb.from('household_members').select('*').eq('household_id', hid)
         .eq('active', true).order('sort_order'),
       sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
-      sb.from('chore_completions').select('*').eq('household_id', hid).gte('due_on', from),
+      // Far enough back to cover the pay week, which may start before
+      // yesterday — the allowance total needs every tick since Monday.
+      sb.from('chore_completions').select('*').eq('household_id', hid)
+        .gte('due_on', minYmd(from, ymd(startOfPayWeek(new Date())))),
       sb.from('lists').select('*').eq('household_id', hid).order('sort_order'),
       sb.from('recipes').select('*').eq('household_id', hid).order('title')
     ]);
@@ -823,6 +844,44 @@
                      : '<div class="empty">Nothing on this day.</div>');
   }
 
+  // ── Allowance ────────────────────────────────────────────────────────────
+  // Points are what the kids see. The conversion to money happens once, at
+  // the week's total, so no individual chore ever carries a price — the point
+  // being that "brush your teeth" must not read as fifty cents.
+  function allowanceFor(m) {
+    const target = m.allowance_points_target || (HH && HH.allowance_points_target) || 500;
+    const baseCents = (m.allowance_base_cents != null ? m.allowance_base_cents
+                        : (HH && HH.allowance_base_cents != null ? HH.allowance_base_cents : 1500));
+    const from = ymd(startOfPayWeek(new Date()));
+    const points = COMPLETIONS
+      .filter(x => x.member_id === m.id && x.due_on >= from)
+      .reduce((n, x) => n + (x.points_earned || 0), 0);
+    // Deliberately not capped: add-on chores are supposed to pay above base.
+    const cents = Math.round(points / target * baseCents);
+    return { points: points, target: target, cents: cents,
+             pct: Math.min(100, Math.round(points / target * 100)) };
+  }
+  function money(cents) {
+    return '$' + (cents / 100).toFixed(2);
+  }
+
+  function renderAllowance() {
+    const kids = MEMBERS.filter(m => m.role === 'kid');
+    if (!kids.length) return '';
+    return '<div class="card allow"><h2>This week</h2>' + kids.map(m => {
+      const a = allowanceFor(m);
+      return '<div class="allowrow">' +
+        '<div class="allowtop">' +
+        '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>' +
+        '<span class="allowpts">' + a.points + ' / ' + a.target + ' pts</span>' +
+        '<span class="allowcash">' + money(a.cents) + '</span></div>' +
+        '<div class="bar"><span style="width:' + a.pct + '%;background:' + esc(m.color) + '"></span></div>' +
+        '</div>';
+    }).join('') +
+    '<p class="allownote">Resets Monday morning. Extra chores push past ' +
+    'the target and pay above the base.</p></div>';
+  }
+
   function choreRowHtml(c, today) {
     const done = COMPLETIONS.find(x => x.chore_id === c.id && x.due_on === today);
     const col = choreColor(c);
@@ -863,7 +922,7 @@
       return out;
     };
 
-    let html = '<div class="daygroup"><p class="dayhead today">Today</p>';
+    let html = renderAllowance() + '<div class="daygroup"><p class="dayhead today">Today</p>';
     if (!due.length) {
       html += '<div class="empty">' +
         (MINE ? 'Nothing of yours due today.' : 'Nothing due today.') + '</div>';
@@ -1024,8 +1083,13 @@
 
   function renderFamily() {
     let html = '<div class="card"><h2>' + esc(HH.name) + '</h2>' +
-      '<p class="sub" style="margin:0">Everyone below shares the calendar, chores and lists. ' +
-      'Health data stays private to each person.</p></div>';
+      '<p class="sub" style="margin:0 0 0.75rem">Everyone below shares the calendar, chores and lists. ' +
+      'Health data stays private to each person.</p>' +
+      '<p class="sub" style="margin:0 0 0.75rem">Allowance: <strong>' +
+      money(HH.allowance_base_cents == null ? 1500 : HH.allowance_base_cents) +
+      '</strong> for <strong>' + (HH.allowance_points_target || 500) +
+      ' points</strong> a week.</p>' +
+      '<button class="btn ghost" id="hh-settings">Household settings</button></div>';
     MEMBERS.forEach(m => {
       // Three states, and the middle one is the useful one: an invite that's
       // been sent but not yet walked through.
@@ -1417,10 +1481,21 @@
         const { error } = await sb.from('chore_completions').delete().eq('id', done.id);
         if (error) throw error;
       } else {
+        const chore = CHORES.filter(x => x.id === choreId)[0];
+        const assignees = (chore && chore.assignee_ids) || [];
+        // Credit the person whose chore it is, not whoever happened to tap it
+        // — a parent ticking Emma's chore from the wall should still pay Emma.
+        // With nobody or several assigned there's no such answer, so it falls
+        // to the tapper.
+        const credit = assignees.length === 1 ? assignees[0] : ME.id;
+        // Captured now, so re-pricing or deleting the chore later can't
+        // rewrite what was earned this week.
+        const worth = (chore && chore.points) || 0;
         // The unique index on (chore_id, due_on) means two people tapping at
         // once is a conflict, not two completions. Treat that as success.
         const { error } = await sb.from('chore_completions').insert({
-          household_id: HH.id, chore_id: choreId, member_id: ME.id, due_on: today
+          household_id: HH.id, chore_id: choreId, member_id: credit,
+          due_on: today, points_earned: worth
         });
         if (error && error.code !== '23505') throw error;
       }
@@ -1666,6 +1741,16 @@
       MEMBER_COLORS.map(c => '<button type="button" class="sw' + (m.color === c ? ' on' : '') +
         '" data-color="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>').join('') +
       '</div></div>' +
+      '<div class="field grid2">' +
+      '<div><label for="f-mtarget">Points target</label>' +
+      '<input type="number" id="f-mtarget" min="1" placeholder="household" value="' +
+      (m.allowance_points_target != null ? m.allowance_points_target : '') + '"></div>' +
+      '<div><label for="f-mbase">Allowance ($)</label>' +
+      '<input type="text" id="f-mbase" placeholder="household" value="' +
+      (m.allowance_base_cents != null ? (m.allowance_base_cents / 100).toFixed(2) : '') +
+      '"></div></div>' +
+      '<p class="sub" style="margin:0 0 .5rem">Leave both blank to use the household\'s deal. ' +
+      'Allowance only shows for people whose role is <em>kid</em>.</p>' +
       '<p class="sub" style="margin:0 0 .5rem">Leave the email blank and they\'re just a name on the ' +
       'calendar. Fill it in and the seat attaches itself the first time they sign in at this address ' +
       '— nothing to link by hand.</p>' +
@@ -1689,6 +1774,10 @@
         // the unique index is on lower(email) too.
         email: $('f-email').value.trim().toLowerCase() || null,
         color: sel ? sel.dataset.color : MEMBER_COLORS[0],
+        // Blank means "use the household's deal", which is null, not zero.
+        allowance_points_target: parseInt($('f-mtarget').value, 10) || null,
+        allowance_base_cents: $('f-mbase').value.trim()
+          ? Math.round(parseFloat($('f-mbase').value) * 100) : null,
         sort_order: m.sort_order != null ? m.sort_order : MEMBERS.length
       };
       try {
@@ -1710,6 +1799,47 @@
     });
   }
 
+  function householdSheet() {
+    openSheet(
+      '<h2>Household settings</h2>' +
+      '<div class="field"><label for="f-hname">Name</label>' +
+      '<input type="text" id="f-hname" value="' + esc(HH.name) + '"></div>' +
+      '<div class="field grid2">' +
+      '<div><label for="f-target">Weekly points target</label>' +
+      '<input type="number" id="f-target" min="1" value="' +
+      (HH.allowance_points_target || 500) + '"></div>' +
+      '<div><label for="f-base">Full allowance ($)</label>' +
+      '<input type="text" id="f-base" value="' +
+      ((HH.allowance_base_cents == null ? 1500 : HH.allowance_base_cents) / 100).toFixed(2) +
+      '"></div></div>' +
+      '<p class="sub" style="margin:0 0 .5rem">Hit the target and you earn the full amount; ' +
+      'half the points earns half of it. Going past the target pays above it, which is what ' +
+      'makes add-on chores worth doing. Individual kids can be set differently from their own card.</p>' +
+      '<div class="btnrow"><button class="btn ghost" id="f-cancel">Cancel</button>' +
+      '<button class="btn" id="f-save">Save</button></div>'
+    );
+    $('f-cancel').addEventListener('click', closeSheet);
+    $('f-save').addEventListener('click', async () => {
+      const name = $('f-hname').value.trim();
+      if (!name) { toast('Name it'); return; }
+      const target = parseInt($('f-target').value, 10);
+      if (!target || target < 1) { toast('The target has to be at least 1 point'); return; }
+      const dollars = parseFloat($('f-base').value);
+      if (!(dollars >= 0)) { toast('Give the allowance as a number, like 15.00'); return; }
+      try {
+        const { error } = await sb.from('households').update({
+          name: name,
+          allowance_points_target: target,
+          allowance_base_cents: Math.round(dollars * 100)
+        }).eq('id', HH.id);
+        if (error) throw error;
+        HH.name = name; HH.allowance_points_target = target;
+        HH.allowance_base_cents = Math.round(dollars * 100);
+        closeSheet(); toast('Saved'); render();
+      } catch (e) { fail(e, 'save the settings'); }
+    });
+  }
+
   // ── Setup ────────────────────────────────────────────────────────────────
   async function createHousehold(uid, email) {
     const name = $('hh-name').value.trim();
@@ -1721,7 +1851,7 @@
       let hid = HH ? HH.id : null;
       if (!hid) {
         const { data, error } = await sb.from('households')
-          .insert({ name: name, created_by: uid }).select('id, name, time_zone').single();
+          .insert({ name: name, created_by: uid }).select('id, name, time_zone, allowance_base_cents, allowance_points_target').single();
         if (error) throw error;
         HH = data; hid = data.id;
       }
@@ -1823,6 +1953,7 @@
     else if (t.dataset.newList) listSheet();
     else if (t.dataset.editMember) { const m = MEMBERS.find(x => x.id === t.dataset.editMember); if (m) memberSheet(m); }
     else if (t.id === 'add-member') memberSheet(null);
+    else if (t.id === 'hh-settings') householdSheet();
   });
 
   const menuBtn = $('menu-btn'), menu = $('menu');
