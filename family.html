@@ -59,6 +59,7 @@
 
     .viewtoggle { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
     .viewtoggle .pick { flex: 1; text-align: center; padding: 0.5rem; }
+    .filterbar { display: flex; justify-content: flex-end; margin-bottom: 0.9rem; }
 
     .monthnav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
     .monthnav h3 { font-family: var(--f-display); font-size: 1.05rem; margin: 0; color: var(--green-deep); }
@@ -220,6 +221,7 @@
           <button class="pick on" id="v-agenda">Agenda</button>
           <button class="pick" id="v-month">Month</button>
         </div>
+        <div class="filterbar"><button class="pick" data-mine="1">Mine only</button></div>
         <div id="month-wrap" style="display:none">
           <div class="monthnav">
             <button class="navbtn" id="m-prev" aria-label="Previous month">‹</button>
@@ -231,7 +233,10 @@
         </div>
         <div id="cal-body"></div>
       </section>
-      <section class="panel" id="panel-chores"><div id="chore-body"></div></section>
+      <section class="panel" id="panel-chores">
+        <div class="filterbar"><button class="pick" data-mine="1">Mine only</button></div>
+        <div id="chore-body"></div>
+      </section>
       <section class="panel" id="panel-lists">
         <div class="listpick" id="list-tabs"></div>
         <div id="list-body"></div>
@@ -273,6 +278,7 @@
   let ITEMS = [];
   let ACTIVE_LIST = null;
   let TAB = 'calendar';
+  let MINE = false;               // "Mine only" filter, shared by both tabs
   let CAL_VIEW = 'agenda';        // 'agenda' | 'month'
   let M_CURSOR = null;            // first of the displayed month
   let M_SEL = null;               // selected day in month view (ymd)
@@ -330,16 +336,16 @@
 
   function memberById(id) { return MEMBERS.find(m => m.id === id) || null; }
 
-  // No attendees means the whole household, so every event says who it's for
-  // rather than some saying nothing. That convention is why "Family" needs no
-  // column of its own — it's the empty set, named.
-  function memberChips(ids) {
+  // The empty set always means "everyone it could mean" — Family on an event,
+  // Anyone on a chore. Naming it is why neither needs a column of its own.
+  function whoChips(ids, emptyLabel) {
     const named = (ids || []).map(memberById).filter(Boolean);
-    if (!named.length) return '<div class="who"><span class="chip fam">Family</span></div>';
+    if (!named.length) return '<div class="who"><span class="chip fam">' + emptyLabel + '</span></div>';
     return '<div class="who">' + named.map(m =>
       '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>'
     ).join('') + '</div>';
   }
+  function memberChips(ids) { return whoChips(ids, 'Family'); }
 
   // ── Recurrence ───────────────────────────────────────────────────────────
   // Deliberately a small hand-rolled expander, NOT a general RRULE engine. It
@@ -392,10 +398,10 @@
 
   // Expand events into { dateStr -> [occurrence] } across an inclusive range.
   // Recurring series have no rows of their own, so every render walks them.
-  function expandRange(startDate, endDate) {
+  function expandRange(startDate, endDate, list) {
     const byDay = {};
     for (let d = new Date(startDate); d <= endDate; d = addDays(d, 1)) byDay[ymd(d)] = [];
-    EVENTS.forEach(ev => {
+    (list || EVENTS).forEach(ev => {
       const anchorStr = ev.all_day ? ev.start_date : ymd(new Date(ev.starts_at));
       const anchor = parseYmd(anchorStr);
       const ex = (ev.exdates || []).map(x => ymd(new Date(x)));
@@ -428,6 +434,33 @@
     });
     return byDay;
   }
+
+  // ── "Mine" ───────────────────────────────────────────────────────────────
+  // Mine means assigned to me OR assigned to nobody. A chore no one owns is
+  // still yours to do, and a Family event is yours by definition — filtering
+  // those out would leave the toggle hiding exactly the things it should
+  // surface. It narrows to "not someone else's", which is what you actually
+  // want when you tap it.
+  function eventIsMine(ev) {
+    if (!ME) return true;
+    const ids = ev.attendee_ids || [];
+    return !ids.length || ids.indexOf(ME.id) !== -1;
+  }
+  function choreIsMine(c) {
+    if (!ME) return true;
+    const ids = c.assignee_ids || [];
+    return !ids.length || ids.indexOf(ME.id) !== -1;
+  }
+  function eventsForView() { return MINE ? EVENTS.filter(eventIsMine) : EVENTS; }
+
+  // Chores borrow the member's colour so a glance at the list tells you whose
+  // is whose, the same way the calendar already does.
+  function choreColor(c) {
+    const ids = c.assignee_ids || [];
+    const m = ids.length ? memberById(ids[0]) : null;
+    return m ? m.color : '#3A5A40';
+  }
+  function choreWho(c) { return whoChips(c.assignee_ids, 'Anyone'); }
 
   function choresDueOn(dateStr) {
     const day = parseYmd(dateStr);
@@ -558,7 +591,14 @@
     $('page-title').textContent = HH.name;
     $('page-sub').textContent = MEMBERS.length +
       (MEMBERS.length === 1 ? ' member' : ' members');
+    syncMine();
     renderCalendar(); renderChores(); renderLists(); renderFamily();
+  }
+
+  // One flag, two toggles — the calendar and chores each show their own button
+  // but they mean the same thing, so both have to reflect it.
+  function syncMine() {
+    document.querySelectorAll('[data-mine]').forEach(b => b.classList.toggle('on', MINE));
   }
 
   function eventColor(ev) {
@@ -606,7 +646,7 @@
   // this view answers "what's next", not "what does the month look like".
   function renderAgenda() {
     const start = new Date(); start.setHours(0, 0, 0, 0);
-    const byDay = expandRange(start, addDays(start, 20));
+    const byDay = expandRange(start, addDays(start, 20), eventsForView());
     let html = '', shown = 0;
     Object.keys(byDay).sort().forEach(k => {
       const occ = byDay[k];
@@ -630,7 +670,7 @@
     const last  = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
     const gridStart = addDays(first, -first.getDay());        // back to Sunday
     const gridEnd   = addDays(last, 6 - last.getDay());       // on to Saturday
-    const byDay = expandRange(gridStart, gridEnd);
+    const byDay = expandRange(gridStart, gridEnd, eventsForView());
 
     let html = ['S','M','T','W','T','F','S']
       .map(d => '<div class="dow">' + d + '</div>').join('');
@@ -672,37 +712,45 @@
 
   function renderChores() {
     const today = todayYmd();
-    const due = choresDueOn(today);
+    const visible = MINE ? CHORES.filter(choreIsMine) : CHORES;
+    const due = choresDueOn(today).filter(c => visible.indexOf(c) !== -1);
+
     let html = '<div class="daygroup"><p class="dayhead today">Today</p>';
     if (!due.length) {
-      html += '<div class="empty">No chores due today.</div>';
+      html += '<div class="empty">' +
+        (MINE ? 'Nothing of yours due today.' : 'No chores due today.') + '</div>';
     } else {
       due.forEach(c => {
         const done = COMPLETIONS.find(x => x.chore_id === c.id && x.due_on === today);
-        const m = c.assigned_to ? memberById(c.assigned_to) : null;
+        const col = choreColor(c);
+        // The checkbox carries the colour rather than adding a third element
+        // ahead of the title — filled when done, outlined when not.
+        const style = done ? 'background:' + col + ';border-color:' + col
+                           : 'border-color:' + col;
         const bits = [];
-        if (m) bits.push(esc(m.display_name));
         if (c.rrule) bits.push(esc(ruleLabel(c.rrule)));
         if (c.points) bits.push(c.points + ' pts');
         html += '<div class="row' + (done ? ' done' : '') + '">' +
-          '<button class="check' + (done ? ' on' : '') + '" data-chore="' + c.id + '" aria-label="Toggle">✓</button>' +
+          '<button class="check' + (done ? ' on' : '') + '" style="' + style +
+          '" data-chore="' + c.id + '" aria-label="Toggle">✓</button>' +
           '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
           (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '') +
-          '</span><span class="act">' +
+          choreWho(c) + '</span><span class="act">' +
           '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
           '</span></div>';
       });
     }
     html += '</div>';
 
-    const others = CHORES.filter(c => due.indexOf(c) === -1);
+    const others = visible.filter(c => due.indexOf(c) === -1);
     if (others.length) {
       html += '<div class="daygroup"><p class="dayhead">Other chores</p>';
       others.forEach(c => {
-        html += '<div class="row"><span class="swatch"></span><span class="body">' +
-          '<span class="t">' + esc(c.title) + '</span>' +
+        html += '<div class="row">' +
+          '<span class="swatch" style="background:' + esc(choreColor(c)) + '"></span>' +
+          '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
           '<div class="meta">' + esc(ruleLabel(c.rrule) || ('From ' + c.starts_on)) + '</div>' +
-          '</span><span class="act">' +
+          choreWho(c) + '</span><span class="act">' +
           '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
           '</span></div>';
       });
@@ -773,29 +821,51 @@
   // "Family" and the individual members are mutually exclusive: an event is
   // either the household's or particular people's. Family is the empty
   // selection, so it's also what you get by turning everyone back off.
-  function attendeePicker(selected) {
-    const fam = !selected || !selected.length;
+  function whoPicker(selected, emptyLabel) {
+    const none = !selected || !selected.length;
     return '<div class="pickers" id="pick-who">' +
-      '<button type="button" class="pick fam' + (fam ? ' on' : '') +
-      '" data-who="__family">Family</button>' +
+      '<button type="button" class="pick fam' + (none ? ' on' : '') +
+      '" data-who="__family">' + emptyLabel + '</button>' +
       MEMBERS.map(m =>
         '<button type="button" class="pick' + ((selected || []).indexOf(m.id) !== -1 ? ' on' : '') +
         '" data-who="' + m.id + '">' + esc(m.display_name) + '</button>').join('') + '</div>';
   }
+  function attendeePicker(selected) { return whoPicker(selected, 'Family'); }
 
-  function wireWho() {
+  function wireWho(onChange) {
     const all = Array.from(document.querySelectorAll('#pick-who .pick'));
     const famBtn = all.filter(b => b.dataset.who === '__family')[0];
     if (!famBtn) return;
     all.forEach(b => b.addEventListener('click', () => {
       if (b === famBtn) {
         all.forEach(x => x.classList.toggle('on', x === famBtn));
-        return;
+      } else {
+        b.classList.toggle('on');
+        const anyone = all.some(x => x !== famBtn && x.classList.contains('on'));
+        famBtn.classList.toggle('on', !anyone);
       }
-      b.classList.toggle('on');
-      const anyone = all.some(x => x !== famBtn && x.classList.contains('on'));
-      famBtn.classList.toggle('on', !anyone);
+      if (onChange) onChange(readWho());
     }));
+  }
+
+  // Only meaningful with two or more people on it, so it stays hidden until
+  // then rather than asking a question that has one possible answer.
+  function splitPicker() {
+    return '<div class="field" id="split-wrap" style="display:none">' +
+      '<label>Two or more people</label><div class="pickers" id="pick-split">' +
+      '<button type="button" class="pick on" data-split="together">Together — one job</button>' +
+      '<button type="button" class="pick" data-split="each">Each — separate jobs</button>' +
+      '</div></div>';
+  }
+  function wireSplit() {
+    const all = Array.from(document.querySelectorAll('#pick-split .pick'));
+    all.forEach(b => b.addEventListener('click', () => {
+      all.forEach(x => x.classList.toggle('on', x === b));
+    }));
+  }
+  function readSplit() {
+    const b = document.querySelector('#pick-split .pick.on');
+    return b ? b.dataset.split : 'together';
   }
   function repeatPicker(rrule) {
     const r = parseRule(rrule);
@@ -1006,10 +1076,8 @@
       '<h2>' + (isNew ? 'New chore' : 'Edit chore') + '</h2>' +
       '<div class="field"><label for="f-title">What</label>' +
       '<input type="text" id="f-title" value="' + esc(c.title || '') + '" placeholder="Take the bins out"></div>' +
-      '<div class="field"><label for="f-who1">Who</label><select id="f-who1">' +
-      '<option value="">Anyone</option>' + MEMBERS.map(m =>
-        '<option value="' + m.id + '"' + (c.assigned_to === m.id ? ' selected' : '') + '>' +
-        esc(m.display_name) + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label>Who</label>' + whoPicker(c.assignee_ids || [], 'Anyone') + '</div>' +
+      splitPicker() +
       '<div class="field grid2">' +
       '<div><label for="f-start">Starting</label>' +
       '<input type="date" id="f-start" value="' + (c.starts_on || todayYmd()) + '"></div>' +
@@ -1022,6 +1090,12 @@
       '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
     );
     wireRepeat();
+    wireSplit();
+    const showSplit = (ids) => {
+      $('split-wrap').style.display = ids.length > 1 ? 'block' : 'none';
+    };
+    wireWho(showSplit);
+    showSplit(c.assignee_ids || []);
     $('f-cancel').addEventListener('click', closeSheet);
     $('f-save').addEventListener('click', () => saveChore(c.id));
     if (!isNew) $('f-del').addEventListener('click', () => deleteChore(c.id, c.title));
@@ -1030,21 +1104,38 @@
   async function saveChore(id) {
     const title = $('f-title').value.trim();
     if (!title) { toast('Give it a name'); return; }
-    const row = {
+    const who = readWho();
+    const base = {
       household_id: HH.id,
       title: title,
-      assigned_to: $('f-who1').value || null,
       starts_on: $('f-start').value || todayYmd(),
       points: parseInt($('f-points').value, 10) || 0,
       rrule: readRepeat(),
       created_by: ME.user_id
     };
+    // "Each" means separate jobs, so it becomes separate rows. That's what
+    // keeps chore_completions keyed on (chore_id, due_on) — one completion per
+    // occurrence stays true — and lets any one of them be reassigned, edited
+    // or dropped without disturbing the others.
+    const split = who.length > 1 && readSplit() === 'each';
     try {
-      const q = id ? sb.from('chores').update(row).eq('id', id)
-                   : sb.from('chores').insert(row);
-      const { error } = await q;
-      if (error) throw error;
-      closeSheet(); toast(id ? 'Updated' : 'Added'); await refresh();
+      if (split) {
+        const mine = Object.assign({}, base, { assignee_ids: [who[0]] });
+        const rest = who.slice(1).map(w => Object.assign({}, base, { assignee_ids: [w] }));
+        const { error } = id ? await sb.from('chores').update(mine).eq('id', id)
+                             : await sb.from('chores').insert([mine]);
+        if (error) throw error;
+        const { error: e2 } = await sb.from('chores').insert(rest);
+        if (e2) throw e2;
+      } else {
+        const row = Object.assign({}, base, { assignee_ids: who });
+        const { error } = id ? await sb.from('chores').update(row).eq('id', id)
+                             : await sb.from('chores').insert(row);
+        if (error) throw error;
+      }
+      closeSheet();
+      toast(split ? who.length + ' separate chores' : (id ? 'Updated' : 'Added'));
+      await refresh();
     } catch (e) { fail(e, 'save the chore'); }
   }
 
@@ -1298,6 +1389,7 @@
     else if (t.dataset.editChore) { const c = CHORES.find(x => x.id === t.dataset.editChore); if (c) choreSheet(c); }
     else if (t.dataset.item) toggleItem(t.dataset.item);
     else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
+    else if (t.dataset.mine) { MINE = !MINE; syncMine(); renderCalendar(); renderChores(); }
     else if (t.dataset.dayCell) { M_SEL = t.dataset.dayCell; renderMonth(); }
     else if (t.dataset.list) { ACTIVE_LIST = t.dataset.list; refresh(); }
     else if (t.dataset.newList) listSheet();
