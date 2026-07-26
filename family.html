@@ -191,7 +191,8 @@
     <div id="setup" style="display:none">
       <div class="card">
         <h2>Set up your household</h2>
-        <p class="sub" style="margin-bottom:1rem">One shared calendar, chore list, and set of lists for everyone at home. Your own health data stays private — it isn't part of this.</p>
+        <p class="sub" style="margin-bottom:0.75rem">One shared calendar, chore list, and set of lists for everyone at home. Your own health data stays private — it isn't part of this.</p>
+        <p class="sub" style="margin-bottom:1rem"><strong>Already part of a household?</strong> Don't create one here — that would make a second, empty one. Ask whoever set it up to add your email address, then reload this page.</p>
         <div class="field">
           <label for="hh-name">Household name</label>
           <input type="text" id="hh-name" placeholder="e.g. Smith" autocomplete="off">
@@ -439,14 +440,33 @@
   }
 
   // ── Load ─────────────────────────────────────────────────────────────────
+  const MEMBER_COLS = 'id, household_id, user_id, display_name, email, color, role, sort_order, active';
+
   async function loadHousehold(uid) {
-    const { data: mem, error } = await sb
+    let { data: mem, error } = await sb
       .from('household_members')
-      .select('id, household_id, user_id, display_name, color, role, sort_order, active')
+      .select(MEMBER_COLS)
       .eq('user_id', uid)
       .eq('active', true)
       .maybeSingle();
     if (error) throw error;
+
+    // Not seated yet — but someone may have added us by email. The claim is
+    // idempotent and returns the existing membership when there is one, so
+    // it's safe to ask on every cold load.
+    //
+    // The rpc error is deliberately ignored rather than thrown: if 36 hasn't
+    // been run yet the function simply isn't there, and the right behaviour is
+    // to fall through to the setup card, not to break the page.
+    if (!mem) {
+      const { data: claimedId } = await sb.rpc('claim_household_membership');
+      if (claimedId) {
+        const r = await sb.from('household_members').select(MEMBER_COLS)
+          .eq('id', claimedId).maybeSingle();
+        mem = r.data;
+      }
+    }
+
     if (!mem) {
       // Possible half-finished setup: household created, membership insert failed.
       const { data: owned } = await sb.from('households')
@@ -722,10 +742,15 @@
       '<p class="sub" style="margin:0">Everyone below shares the calendar, chores and lists. ' +
       'Health data stays private to each person.</p></div>';
     MEMBERS.forEach(m => {
+      // Three states, and the middle one is the useful one: an invite that's
+      // been sent but not yet walked through.
+      const status = m.user_id ? 'has a login'
+                   : m.email  ? 'invited · ' + esc(m.email)
+                              : 'name only';
       html += '<div class="row">' +
         '<span class="swatch" style="background:' + esc(m.color) + '"></span>' +
         '<span class="body"><span class="t">' + esc(m.display_name) + '</span>' +
-        '<div class="meta">' + esc(m.role) + (m.user_id ? ' · has a login' : ' · no login yet') + '</div>' +
+        '<div class="meta">' + esc(m.role) + ' · ' + status + '</div>' +
         '</span><span class="act">' +
         '<button class="iconbtn" data-edit-member="' + m.id + '" aria-label="Edit">✎</button>' +
         '</span></div>';
@@ -1139,6 +1164,9 @@
       '<h2>' + (isNew ? 'Add someone' : 'Edit ' + esc(m.display_name)) + '</h2>' +
       '<div class="field"><label for="f-name">Name</label>' +
       '<input type="text" id="f-name" value="' + esc(m.display_name || '') + '" placeholder="Emma"></div>' +
+      '<div class="field"><label for="f-email">Email (optional)</label>' +
+      '<input type="text" id="f-email" value="' + esc(m.email || '') +
+      '" placeholder="emma@example.com" autocomplete="off" autocapitalize="off"></div>' +
       '<div class="field"><label for="f-role">Role</label><select id="f-role">' +
       ['admin','adult','kid'].map(r => '<option value="' + r + '"' + (m.role === r ? ' selected' : '') +
         '>' + r + '</option>').join('') + '</select></div>' +
@@ -1146,8 +1174,9 @@
       MEMBER_COLORS.map(c => '<button type="button" class="sw' + (m.color === c ? ' on' : '') +
         '" data-color="' + c + '" style="background:' + c + '" aria-label="' + c + '"></button>').join('') +
       '</div></div>' +
-      '<p class="sub" style="margin:0 0 .5rem">They get their own login by signing in with their email — ' +
-      'link it once they have, from here.</p>' +
+      '<p class="sub" style="margin:0 0 .5rem">Leave the email blank and they\'re just a name on the ' +
+      'calendar. Fill it in and the seat attaches itself the first time they sign in at this address ' +
+      '— nothing to link by hand.</p>' +
       '<div class="btnrow">' +
       (isNew || m.user_id ? '' : '<button class="btn danger" id="f-del">Remove</button>') +
       '<button class="btn ghost" id="f-cancel">Cancel</button>' +
@@ -1164,6 +1193,9 @@
       const sel = document.querySelector('#pick-color .sw.on');
       const row = {
         household_id: HH.id, display_name: name, role: $('f-role').value,
+        // Lower-cased going in, because the claim matches on lower(email) and
+        // the unique index is on lower(email) too.
+        email: $('f-email').value.trim().toLowerCase() || null,
         color: sel ? sel.dataset.color : MEMBER_COLORS[0],
         sort_order: m.sort_order != null ? m.sort_order : MEMBERS.length
       };
@@ -1203,6 +1235,7 @@
       }
       const { error: e2 } = await sb.from('household_members').insert({
         household_id: hid, user_id: uid, display_name: mine,
+        email: (email || '').toLowerCase() || null,
         role: 'admin', color: MEMBER_COLORS[0], sort_order: 0
       });
       if (e2) throw e2;
