@@ -118,6 +118,12 @@
     .bar { height: 8px; border-radius: 99px; background: var(--surface-warm); border: 1px solid var(--silver); overflow: hidden; }
     .bar span { display: block; height: 100%; border-radius: 99px; }
     .allownote { font-size: 0.76rem; color: var(--muted); margin: 0.5rem 0 0; line-height: 1.4; }
+    .allowsplit { font-size: 0.74rem; color: var(--muted); margin-top: 0.25rem; }
+    .stepper { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+    .stepbtn { width: 30px; height: 30px; border-radius: 8px; border: 2px solid var(--silver); background: var(--paper); font-size: 1rem; line-height: 1; cursor: pointer; color: var(--green); padding: 0; }
+    .stepbtn:disabled { opacity: .35; cursor: default; }
+    .stepn { min-width: 18px; text-align: center; font-weight: 700; font-size: 0.95rem; }
+    .worth { font-family: var(--f-display); font-weight: 700; color: var(--green-deep); }
 
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
@@ -146,7 +152,15 @@
     }
     textarea { resize: vertical; min-height: 60px; }
     .field { margin-bottom: 0.8rem; }
+    /* min-width:0 is the fix for the overlapping columns on iOS. Grid items
+       default to min-width:auto, which is the item's intrinsic size — and
+       Safari's date and time inputs report a large one, so the column refuses
+       to shrink and spills over its neighbour. Nothing about the 1fr 1fr is
+       wrong; the children just have to be allowed to be narrower than their
+       content wants. */
     .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .grid2 > * { min-width: 0; }
+    input[type=date], input[type=time] { max-width: 100%; -webkit-appearance: none; appearance: none; }
     .inline { display: flex; align-items: center; gap: 0.5rem; }
     .inline input[type=checkbox] { width: 18px; height: 18px; }
     .inline label { margin: 0; }
@@ -860,13 +874,26 @@
     const baseCents = (m.allowance_base_cents != null ? m.allowance_base_cents
                         : (HH && HH.allowance_base_cents != null ? HH.allowance_base_cents : 1500));
     const from = ymd(startOfPayWeek(new Date()));
-    const points = COMPLETIONS
-      .filter(x => x.member_id === m.id && x.due_on >= from)
-      .reduce((n, x) => n + (x.points_earned || 0), 0);
-    // Deliberately not capped: add-on chores are supposed to pay above base.
-    const cents = Math.round(points / target * baseCents);
-    return { points: points, target: target, cents: cents,
+    const mine = COMPLETIONS.filter(x => x.member_id === m.id && x.due_on >= from);
+    const points = mine.reduce((n, x) => n + (x.points_earned || 0), 0);
+    // Extras are added on top rather than divided out of the base, which is
+    // what keeps a $5 extra from revealing anything about the points rate.
+    const extra = mine.reduce((n, x) => n + (x.cents_earned || 0), 0);
+    const earned = Math.round(points / target * baseCents);
+    return { points: points, target: target,
+             cents: earned + extra, base: earned, extra: extra,
              pct: Math.min(100, Math.round(points / target * 100)) };
+  }
+
+  // Non-repeatable extras are booked against the Monday of the pay week, so
+  // the (chore_id, due_on) uniqueness enforces once-a-week on its own and
+  // waiting until tomorrow doesn't buy a second payout.
+  function extraDueOn(c) {
+    return c.repeatable ? todayYmd() : ymd(startOfPayWeek(new Date()));
+  }
+  function extraDoneCount(c) {
+    const from = ymd(startOfPayWeek(new Date()));
+    return COMPLETIONS.filter(x => x.chore_id === c.id && x.due_on >= from).length;
   }
   function money(cents) {
     return '$' + (cents / 100).toFixed(2);
@@ -885,13 +912,43 @@
         '<span class="allowpts">' + a.points + ' / ' + a.target + ' pts</span>' +
         '<span class="allowcash">' + money(a.cents) + '</span></div>' +
         '<div class="bar"><span style="width:' + a.pct + '%;background:' + esc(m.color) + '"></span></div>' +
+        (a.extra ? '<div class="allowsplit">' + money(a.base) + ' from chores · ' +
+                   money(a.extra) + ' from extras</div>' : '') +
         '</div>';
     }).join('') +
     '<p class="allownote">Resets Monday morning. Extra chores push past ' +
     'the target and pay above the base.</p></div>';
   }
 
+  // Extras read as an offer: what it pays, and how many times you've taken it
+  // this week. A repeatable one gets a stepper instead of a tick, because
+  // "done" isn't a state it has — you can always fold another load.
+  function extraRowHtml(c) {
+    const n = extraDoneCount(c);
+    const col = choreColor(c);
+    const bits = ['<span class="worth">' + money(c.extra_cents || 0) + '</span>'];
+    bits.push(c.repeatable ? 'as often as you like' : 'once a week');
+    if (n) bits.push('done ' + n + (c.repeatable ? '×' : '') + ' this week');
+    const control = c.repeatable
+      ? '<span class="stepper">' +
+        '<button class="stepbtn" data-extra-minus="' + c.id + '"' +
+        (n ? '' : ' disabled') + ' aria-label="One fewer">−</button>' +
+        '<span class="stepn">' + n + '</span>' +
+        '<button class="stepbtn" data-extra-plus="' + c.id + '" aria-label="One more">+</button>' +
+        '</span>'
+      : '<button class="check' + (n ? ' on' : '') + '" style="' +
+        (n ? 'background:' + col + ';border-color:' + col : 'border-color:' + col) +
+        '" data-extra-toggle="' + c.id + '" aria-label="Toggle">✓</button>';
+    return '<div class="row' + (!c.repeatable && n ? ' done' : '') + '">' + control +
+      '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
+      '<div class="meta">' + bits.join(' · ') + '</div>' +
+      choreWho(c) + '</span><span class="act">' +
+      '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
+      '</span></div>';
+  }
+
   function choreRowHtml(c, today) {
+    if (isExtra(c)) return extraRowHtml(c);
     const done = COMPLETIONS.find(x => x.chore_id === c.id && x.due_on === today);
     const col = choreColor(c);
     // The checkbox carries the colour rather than adding a third element
@@ -1474,6 +1531,9 @@
       '" placeholder="' + (kind === 'todo' ? 'Call the dentist' : 'Take the bins out') + '"></div>' +
       '<div class="field"><label>Who</label>' + whoPicker(c.assignee_ids || [], 'Anyone') + '</div>' +
       splitPicker() +
+      // Extras are standing offers rather than scheduled work, so the whole
+      // when-and-how-often block disappears for them and money takes its place.
+      '<div id="sched-wrap"' + (kind === 'extra' ? ' style="display:none"' : '') + '>' +
       '<div class="field"><label>When in the day</label><div class="pickers" id="pick-slot">' +
       SLOTS.map(s =>
         '<button type="button" class="pick' + (slotOf(c) === s.key ? ' on' : '') +
@@ -1484,7 +1544,18 @@
       '<input type="date" id="f-start" value="' + (c.starts_on || todayYmd()) + '"></div>' +
       '<div><label for="f-points">Points</label>' +
       '<input type="number" id="f-points" min="0" value="' + (c.points || 0) + '"></div></div>' +
-      repeatPicker(c.rrule) +
+      repeatPicker(c.rrule) + '</div>' +
+      '<div id="extra-wrap"' + (kind === 'extra' ? '' : ' style="display:none"') + '>' +
+      '<div class="field"><label for="f-cents">Worth ($)</label>' +
+      '<input type="text" id="f-cents" value="' +
+      (c.extra_cents ? (c.extra_cents / 100).toFixed(2) : '') + '" placeholder="5.00"></div>' +
+      '<div class="field"><label>How often</label><div class="pickers" id="pick-rep">' +
+      '<button type="button" class="pick' + (c.repeatable ? '' : ' on') +
+      '" data-pill="once">Once a week</button>' +
+      '<button type="button" class="pick' + (c.repeatable ? ' on' : '') +
+      '" data-pill="many">As often as you like</button></div></div>' +
+      '<p class="sub" style="margin:0 0 .8rem">Once a week suits mowing the lawn. ' +
+      'As often as you like suits folding a load of laundry — each one pays again.</p></div>' +
       '<div class="btnrow">' +
       (isNew ? '' : '<button class="btn danger" id="f-del">Delete</button>') +
       '<button class="btn ghost" id="f-cancel">Cancel</button>' +
@@ -1493,6 +1564,14 @@
     wireRepeat();
     wireSplit();
     wirePills('pick-ckind');
+    wirePills('pick-rep');
+    // Swapping kind swaps which half of the form applies.
+    document.querySelectorAll('#pick-ckind .pick').forEach(b =>
+      b.addEventListener('click', () => {
+        const isX = b.dataset.pill === 'extra';
+        $('sched-wrap').style.display = isX ? 'none' : 'block';
+        $('extra-wrap').style.display = isX ? 'block' : 'none';
+      }));
     // Radio group: a chore is in one part of the day or none.
     const slots = Array.from(document.querySelectorAll('#pick-slot .pick'));
     slots.forEach(b => b.addEventListener('click', () =>
@@ -1511,15 +1590,25 @@
     const title = $('f-title').value.trim();
     if (!title) { toast('Give it a name'); return; }
     const who = readWho();
+    const kind = readPill('pick-ckind', 'chore');
+    const isX = kind === 'extra';
+    if (isX && !(parseFloat($('f-cents').value) >= 0)) {
+      toast('What is it worth? Give a number like 5.00'); return;
+    }
     const base = {
       household_id: HH.id,
       title: title,
-      starts_on: $('f-start').value || todayYmd(),
-      points: parseInt($('f-points').value, 10) || 0,
-      kind: readPill('pick-ckind', 'chore'),
-      time_of_day: readSlot(),
-      rrule: readRepeat(),
-      created_by: ME.user_id
+      kind: kind,
+      created_by: ME.user_id,
+      // An extra is a standing offer: no start date that means anything, no
+      // recurrence, no part of the day. Those columns are cleared rather than
+      // left holding whatever the form last showed.
+      starts_on: isX ? todayYmd() : ($('f-start').value || todayYmd()),
+      points:      isX ? 0 : (parseInt($('f-points').value, 10) || 0),
+      time_of_day: isX ? null : readSlot(),
+      rrule:       isX ? null : readRepeat(),
+      extra_cents: isX ? Math.round(parseFloat($('f-cents').value) * 100) : 0,
+      repeatable:  isX ? (readPill('pick-rep', 'once') === 'many') : false
     };
     // "Each" means separate jobs, so it becomes separate rows. That's what
     // keeps chore_completions keyed on (chore_id, due_on) — one completion per
@@ -1554,6 +1643,43 @@
       if (error) throw error;
       closeSheet(); toast('Deleted'); await refresh();
     } catch (e) { fail(e, 'delete the chore'); }
+  }
+
+  // Extras pay cash, so the completion carries cents rather than points. The
+  // credit rule is the same as chores: the assignee if there's exactly one,
+  // otherwise whoever tapped.
+  async function addExtra(choreId) {
+    const c = CHORES.filter(x => x.id === choreId)[0];
+    if (!c) return;
+    const assignees = c.assignee_ids || [];
+    const credit = assignees.length === 1 ? assignees[0] : ME.id;
+    try {
+      const { error } = await sb.from('chore_completions').insert({
+        household_id: HH.id, chore_id: choreId, member_id: credit,
+        due_on: extraDueOn(c), points_earned: 0,
+        cents_earned: c.extra_cents || 0, repeatable: !!c.repeatable
+      });
+      // A non-repeatable extra already taken this week hits the partial unique
+      // index. That's the rule working, not a failure.
+      if (error && error.code !== '23505') throw error;
+      if (error) toast('Already claimed this week');
+      await refresh();
+    } catch (e) { fail(e, 'claim that extra'); }
+  }
+
+  async function removeExtra(choreId) {
+    const c = CHORES.filter(x => x.id === choreId)[0];
+    if (!c) return;
+    const from = ymd(startOfPayWeek(new Date()));
+    const rows = COMPLETIONS.filter(x => x.chore_id === choreId && x.due_on >= from);
+    if (!rows.length) return;
+    // Take the most recent one back, which is the one they meant.
+    const last = rows[rows.length - 1];
+    try {
+      const { error } = await sb.from('chore_completions').delete().eq('id', last.id);
+      if (error) throw error;
+      await refresh();
+    } catch (e) { fail(e, 'undo that'); }
   }
 
   async function toggleChore(choreId) {
@@ -2018,6 +2144,12 @@
     if (t.dataset.editEvent) { const ev = EVENTS.find(x => x.id === t.dataset.editEvent); if (ev) eventSheet(ev); }
     else if (t.dataset.delEvent) deleteEvent(t.dataset.delEvent, t.dataset.day);
     else if (t.dataset.chore) toggleChore(t.dataset.chore);
+    else if (t.dataset.extraPlus) addExtra(t.dataset.extraPlus);
+    else if (t.dataset.extraMinus) removeExtra(t.dataset.extraMinus);
+    else if (t.dataset.extraToggle) {
+      const c = CHORES.filter(x => x.id === t.dataset.extraToggle)[0];
+      if (c) (extraDoneCount(c) ? removeExtra(c.id) : addExtra(c.id));
+    }
     else if (t.dataset.editChore) { const c = CHORES.find(x => x.id === t.dataset.editChore); if (c) choreSheet(c); }
     else if (t.dataset.item) toggleItem(t.dataset.item);
     else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
