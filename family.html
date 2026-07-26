@@ -1114,14 +1114,19 @@
   }
 
   function renderFamily() {
+    // Money lives on the To-dos tab and nowhere else. The rate is the whole
+    // thing being kept out of sight: given the target and the full amount,
+    // a kid can divide one by the other and put a price back on every chore,
+    // which is exactly what points exist to prevent. Admin-only controls are
+    // hidden rather than merely disabled for the same reason — the settings
+    // sheet hands back both numbers just by opening.
+    const admin = !!(ME && ME.role === 'admin');
     let html = '<div class="card"><h2>' + esc(HH.name) + '</h2>' +
-      '<p class="sub" style="margin:0 0 0.75rem">Everyone below shares the calendar, chores and lists. ' +
+      '<p class="sub" style="margin:0' + (admin ? ' 0 0.75rem' : '') + '">' +
+      'Everyone below shares the calendar, chores and lists. ' +
       'Health data stays private to each person.</p>' +
-      '<p class="sub" style="margin:0 0 0.75rem">Allowance: <strong>' +
-      money(HH.allowance_base_cents == null ? 1500 : HH.allowance_base_cents) +
-      '</strong> for <strong>' + (HH.allowance_points_target || 500) +
-      ' points</strong> a week.</p>' +
-      '<button class="btn ghost" id="hh-settings">Household settings</button></div>';
+      (admin ? '<button class="btn ghost" id="hh-settings">Household settings</button>' : '') +
+      '</div>';
     MEMBERS.forEach(m => {
       // Three states, and the middle one is the useful one: an invite that's
       // been sent but not yet walked through.
@@ -1132,11 +1137,13 @@
         '<span class="swatch" style="background:' + esc(m.color) + '"></span>' +
         '<span class="body"><span class="t">' + esc(m.display_name) + '</span>' +
         '<div class="meta">' + esc(m.role) + ' · ' + status + '</div>' +
-        '</span><span class="act">' +
+        '</span>' + (admin ? '<span class="act">' +
         '<button class="iconbtn" data-edit-member="' + m.id + '" aria-label="Edit">✎</button>' +
-        '</span></div>';
+        '</span>' : '') + '</div>';
     });
-    html += '<div class="btnrow"><button class="btn ghost" id="add-member">Add someone</button></div>';
+    if (admin) {
+      html += '<div class="btnrow"><button class="btn ghost" id="add-member">Add someone</button></div>';
+    }
     $('fam-body').innerHTML = html;
   }
 
