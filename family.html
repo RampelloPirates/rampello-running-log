@@ -104,6 +104,8 @@
     .daygroup { margin-bottom: 1.25rem; }
     .dayhead { font-family: var(--f-display); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 0.5rem 0.15rem; }
     .dayhead.today { color: var(--amber); }
+    .slothead { font-family: var(--f-display); font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--green); margin: 1rem 0 0.4rem 0.15rem; }
+    .slothead:first-of-type { margin-top: 0.35rem; }
 
     .row { display: flex; align-items: flex-start; gap: 0.75rem; background: var(--paper); border: 1px solid var(--silver); border-radius: 13px; padding: 0.8rem 0.9rem; margin-bottom: 0.45rem; }
     .row .swatch { flex-shrink: 0; width: 4px; align-self: stretch; border-radius: 2px; background: var(--green); }
@@ -455,6 +457,20 @@
 
   // Chores borrow the member's colour so a glance at the list tells you whose
   // is whose, the same way the calendar already does.
+  // Same vocabulary as runs.time_of_day. Null means no particular time, which
+  // is a real answer rather than a missing one — hence "Anytime" last, after
+  // the parts of the day that actually have an order.
+  const SLOTS = [
+    { key: 'morning',   label: 'Morning' },
+    { key: 'afternoon', label: 'Afternoon' },
+    { key: 'evening',   label: 'Evening' },
+    { key: null,        label: 'Anytime' }
+  ];
+  function slotOf(c) {
+    const k = c.time_of_day || null;
+    return SLOTS.some(s => s.key === k) ? k : null;
+  }
+
   function choreColor(c) {
     const ids = c.assignee_ids || [];
     const m = ids.length ? memberById(ids[0]) : null;
@@ -710,6 +726,26 @@
                      : '<div class="empty">Nothing on this day.</div>');
   }
 
+  function choreRowHtml(c, today) {
+    const done = COMPLETIONS.find(x => x.chore_id === c.id && x.due_on === today);
+    const col = choreColor(c);
+    // The checkbox carries the colour rather than adding a third element
+    // ahead of the title — filled when done, outlined when not.
+    const style = done ? 'background:' + col + ';border-color:' + col
+                       : 'border-color:' + col;
+    const bits = [];
+    if (c.rrule) bits.push(esc(ruleLabel(c.rrule)));
+    if (c.points) bits.push(c.points + ' pts');
+    return '<div class="row' + (done ? ' done' : '') + '">' +
+      '<button class="check' + (done ? ' on' : '') + '" style="' + style +
+      '" data-chore="' + c.id + '" aria-label="Toggle">✓</button>' +
+      '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
+      (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '') +
+      choreWho(c) + '</span><span class="act">' +
+      '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
+      '</span></div>';
+  }
+
   function renderChores() {
     const today = todayYmd();
     const visible = MINE ? CHORES.filter(choreIsMine) : CHORES;
@@ -720,24 +756,14 @@
       html += '<div class="empty">' +
         (MINE ? 'Nothing of yours due today.' : 'No chores due today.') + '</div>';
     } else {
-      due.forEach(c => {
-        const done = COMPLETIONS.find(x => x.chore_id === c.id && x.due_on === today);
-        const col = choreColor(c);
-        // The checkbox carries the colour rather than adding a third element
-        // ahead of the title — filled when done, outlined when not.
-        const style = done ? 'background:' + col + ';border-color:' + col
-                           : 'border-color:' + col;
-        const bits = [];
-        if (c.rrule) bits.push(esc(ruleLabel(c.rrule)));
-        if (c.points) bits.push(c.points + ' pts');
-        html += '<div class="row' + (done ? ' done' : '') + '">' +
-          '<button class="check' + (done ? ' on' : '') + '" style="' + style +
-          '" data-chore="' + c.id + '" aria-label="Toggle">✓</button>' +
-          '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
-          (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '') +
-          choreWho(c) + '</span><span class="act">' +
-          '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
-          '</span></div>';
+      // Bucketed so the morning list can be short and finished, instead of
+      // re-reading everything due today at every hour of the day. Empty parts
+      // of the day don't get a heading.
+      SLOTS.forEach(s => {
+        const inSlot = due.filter(c => slotOf(c) === s.key);
+        if (!inSlot.length) return;
+        html += '<p class="slothead">' + s.label + '</p>' +
+                inSlot.map(c => choreRowHtml(c, today)).join('');
       });
     }
     html += '</div>';
@@ -746,10 +772,13 @@
     if (others.length) {
       html += '<div class="daygroup"><p class="dayhead">Other chores</p>';
       others.forEach(c => {
+        const slot = SLOTS.filter(s => s.key === slotOf(c))[0];
+        const meta = [esc(ruleLabel(c.rrule) || ('From ' + c.starts_on))];
+        if (slot && slot.key) meta.push(slot.label);
         html += '<div class="row">' +
           '<span class="swatch" style="background:' + esc(choreColor(c)) + '"></span>' +
           '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
-          '<div class="meta">' + esc(ruleLabel(c.rrule) || ('From ' + c.starts_on)) + '</div>' +
+          '<div class="meta">' + meta.join(' · ') + '</div>' +
           choreWho(c) + '</span><span class="act">' +
           '<button class="iconbtn" data-edit-chore="' + c.id + '" aria-label="Edit">✎</button>' +
           '</span></div>';
@@ -866,6 +895,12 @@
   function readSplit() {
     const b = document.querySelector('#pick-split .pick.on');
     return b ? b.dataset.split : 'together';
+  }
+  // Empty string is the Anytime pill; the column takes null, since the check
+  // constraint permits null but not ''.
+  function readSlot() {
+    const b = document.querySelector('#pick-slot .pick.on');
+    return (b && b.dataset.slot) ? b.dataset.slot : null;
   }
   function repeatPicker(rrule) {
     const r = parseRule(rrule);
@@ -1078,6 +1113,11 @@
       '<input type="text" id="f-title" value="' + esc(c.title || '') + '" placeholder="Take the bins out"></div>' +
       '<div class="field"><label>Who</label>' + whoPicker(c.assignee_ids || [], 'Anyone') + '</div>' +
       splitPicker() +
+      '<div class="field"><label>When in the day</label><div class="pickers" id="pick-slot">' +
+      SLOTS.map(s =>
+        '<button type="button" class="pick' + (slotOf(c) === s.key ? ' on' : '') +
+        '" data-slot="' + (s.key || '') + '">' + s.label + '</button>').join('') +
+      '</div></div>' +
       '<div class="field grid2">' +
       '<div><label for="f-start">Starting</label>' +
       '<input type="date" id="f-start" value="' + (c.starts_on || todayYmd()) + '"></div>' +
@@ -1091,6 +1131,10 @@
     );
     wireRepeat();
     wireSplit();
+    // Radio group: a chore is in one part of the day or none.
+    const slots = Array.from(document.querySelectorAll('#pick-slot .pick'));
+    slots.forEach(b => b.addEventListener('click', () =>
+      slots.forEach(x => x.classList.toggle('on', x === b))));
     const showSplit = (ids) => {
       $('split-wrap').style.display = ids.length > 1 ? 'block' : 'none';
     };
@@ -1110,6 +1154,7 @@
       title: title,
       starts_on: $('f-start').value || todayYmd(),
       points: parseInt($('f-points').value, 10) || 0,
+      time_of_day: readSlot(),
       rrule: readRepeat(),
       created_by: ME.user_id
     };
