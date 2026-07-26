@@ -89,6 +89,8 @@
     .row .meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
     .row .who { display: flex; gap: 0.25rem; margin-top: 0.35rem; flex-wrap: wrap; }
     .chip { font-size: 0.72rem; padding: 0.12rem 0.5rem; border-radius: 99px; color: #fff; font-weight: 600; }
+    .chip.fam { background: var(--green-deep); }
+    .pick.fam.on { border-color: var(--green-deep); background: var(--green-deep); color: #fff; }
     .row .act { display: flex; gap: 0.3rem; flex-shrink: 0; }
     .iconbtn { border: 1px solid var(--silver); background: var(--paper); border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 0.9rem; line-height: 1; color: var(--muted); }
     .iconbtn:hover { border-color: var(--green); color: var(--green); }
@@ -295,13 +297,16 @@
   }
 
   function memberById(id) { return MEMBERS.find(m => m.id === id) || null; }
+
+  // No attendees means the whole household, so every event says who it's for
+  // rather than some saying nothing. That convention is why "Family" needs no
+  // column of its own — it's the empty set, named.
   function memberChips(ids) {
-    if (!ids || !ids.length) return '';
-    return '<div class="who">' + ids.map(id => {
-      const m = memberById(id);
-      if (!m) return '';
-      return '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>';
-    }).join('') + '</div>';
+    const named = (ids || []).map(memberById).filter(Boolean);
+    if (!named.length) return '<div class="who"><span class="chip fam">Family</span></div>';
+    return '<div class="who">' + named.map(m =>
+      '<span class="chip" style="background:' + esc(m.color) + '">' + esc(m.display_name) + '</span>'
+    ).join('') + '</div>';
   }
 
   // ── Recurrence ───────────────────────────────────────────────────────────
@@ -697,10 +702,32 @@
   }
   $('sheet-bg').addEventListener('click', closeSheet);
 
+  // "Family" and the individual members are mutually exclusive: an event is
+  // either the household's or particular people's. Family is the empty
+  // selection, so it's also what you get by turning everyone back off.
   function attendeePicker(selected) {
-    return '<div class="pickers" id="pick-who">' + MEMBERS.map(m =>
-      '<button type="button" class="pick' + (selected.indexOf(m.id) !== -1 ? ' on' : '') +
-      '" data-who="' + m.id + '">' + esc(m.display_name) + '</button>').join('') + '</div>';
+    const fam = !selected || !selected.length;
+    return '<div class="pickers" id="pick-who">' +
+      '<button type="button" class="pick fam' + (fam ? ' on' : '') +
+      '" data-who="__family">Family</button>' +
+      MEMBERS.map(m =>
+        '<button type="button" class="pick' + ((selected || []).indexOf(m.id) !== -1 ? ' on' : '') +
+        '" data-who="' + m.id + '">' + esc(m.display_name) + '</button>').join('') + '</div>';
+  }
+
+  function wireWho() {
+    const all = Array.from(document.querySelectorAll('#pick-who .pick'));
+    const famBtn = all.filter(b => b.dataset.who === '__family')[0];
+    if (!famBtn) return;
+    all.forEach(b => b.addEventListener('click', () => {
+      if (b === famBtn) {
+        all.forEach(x => x.classList.toggle('on', x === famBtn));
+        return;
+      }
+      b.classList.toggle('on');
+      const anyone = all.some(x => x !== famBtn && x.classList.contains('on'));
+      famBtn.classList.toggle('on', !anyone);
+    }));
   }
   function repeatPicker(rrule) {
     const r = parseRule(rrule);
@@ -723,7 +750,7 @@
     sel.addEventListener('change', () => {
       $('byday-wrap').style.display = sel.value === 'WEEKLY' ? 'block' : 'none';
     });
-    document.querySelectorAll('#pick-days .pick, #pick-who .pick').forEach(b =>
+    document.querySelectorAll('#pick-days .pick').forEach(b =>
       b.addEventListener('click', () => b.classList.toggle('on')));
   }
   function readRepeat() {
@@ -736,8 +763,11 @@
     }
     return rule;
   }
+  // __family is the UI's way of saying "nobody in particular", which the
+  // column stores as an empty array.
   function readWho() {
-    return Array.from(document.querySelectorAll('#pick-who .pick.on')).map(b => b.dataset.who);
+    return Array.from(document.querySelectorAll('#pick-who .pick.on'))
+      .map(b => b.dataset.who).filter(id => id !== '__family');
   }
   function readKind() {
     const b = document.querySelector('#pick-kind .pick.on');
@@ -787,6 +817,7 @@
       '<button class="btn" id="f-save">' + (isNew ? 'Add' : 'Save') + '</button></div>'
     );
     wireRepeat();
+    wireWho();
     // Kind is a radio group, unlike the multi-select attendee pills.
     document.querySelectorAll('#pick-kind .pick').forEach(b => b.addEventListener('click', () => {
       document.querySelectorAll('#pick-kind .pick').forEach(x => x.classList.remove('on'));
