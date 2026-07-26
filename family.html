@@ -943,8 +943,9 @@
   // Unassigned work belongs to whoever gets to it. Counting it toward every
   // kid would overstate all of them, so it's reported on its own instead of
   // quietly inflating the totals.
-  function unassignedChores() {
-    return CHORES.filter(c => !isExtra(c) && !(c.assignee_ids || []).length);
+  function isUnassigned(c) { return !(c.assignee_ids || []).length; }
+  function unassignedChores(chores) {
+    return (chores || CHORES).filter(c => !isExtra(c) && isUnassigned(c));
   }
 
   // ── Allowance ────────────────────────────────────────────────────────────
@@ -1861,6 +1862,29 @@
   // the whole week live, so you tune against a number instead of guessing.
   let PA = [];        // working copy of the tiers; nothing is written until Save
   let PA_ASSIGN = {}; // choreId -> tier key, the working assignment
+  let PA_WHO = null;  // member id being allocated for, or '__none' for shared
+
+  // Allocation is done one kid at a time — their tasks have to reach their
+  // target, and a screen showing everyone's at once is the pooled number that
+  // answers nothing. Tiers stay shared; only which tasks you can see changes.
+  function paScope(c) {
+    return PA_WHO === '__none' ? isUnassigned(c)
+                               : (c.assignee_ids || []).indexOf(PA_WHO) !== -1;
+  }
+  function paPool() { return CHORES.filter(c => !isExtra(c) && paScope(c)); }
+
+  function paWhoTabs() {
+    const kids = MEMBERS.filter(m => m.role === 'kid');
+    return '<div class="listpick" id="pa-who">' +
+      kids.map(m => {
+        const on = PA_WHO === m.id;
+        return '<button class="pick' + (on ? ' on' : '') + '" data-pa-who="' + m.id + '"' +
+          (on ? ' style="border-color:' + esc(m.color) + ';background:' + esc(m.color) +
+                ';color:#fff"' : '') + '>' + esc(m.display_name) + '</button>';
+      }).join('') +
+      '<button class="pick' + (PA_WHO === '__none' ? ' on' : '') +
+      '" data-pa-who="__none">Nobody\'s yet</button></div>';
+  }
 
   // One block per kid: their chores, their target, their shortfall.
   function paPersonHtml(m, working, chores) {
@@ -1910,17 +1934,22 @@
     }));
     const chores = CHORES.filter(c => !isExtra(c)).map(c =>
       Object.assign({}, c, { bucket_id: PA_ASSIGN[c.id] || null }));
+    const scoped = PA_WHO === '__none' ? unassignedChores(chores)
+                                       : choresFor(PA_WHO, chores);
 
-    const kids = MEMBERS.filter(m => m.role === 'kid');
-    $('pa-total').innerHTML = kids.length
-      ? kids.map(m => paPersonHtml(m, working, chores)).join('')
-      : '<div class="empty">Nobody has the role <em>kid</em> yet, so there is ' +
-        'nothing to allocate against.</div>';
+    $('pa-whotabs').innerHTML = paWhoTabs();
 
-    // Anything still without a tier. It's worth whatever its own points column
-    // says, which is usually zero — so it's called out rather than left to be
-    // discovered as a hole in the total.
-    const unfiled = chores.filter(c => !c.bucket_id);
+    const m = MEMBERS.filter(x => x.id === PA_WHO)[0];
+    $('pa-total').innerHTML = m
+      ? paPersonHtml(m, working, chores)
+      : '<div class="pabk"><div class="pabkhead">Assigned to nobody' +
+        '<span class="pasub">' + weeklyTotal(scoped, working) + '/wk</span></div>' +
+        '<p class="pahint">These count toward no one\'s target — whoever gets to one ' +
+        'earns it. Assign them to someone from the task itself if they should count.</p></div>';
+
+    // Anything in view that still has no tier. Usually worth zero, so it's
+    // called out rather than left to be found as a hole in the total.
+    const unfiled = scoped.filter(c => !c.bucket_id);
     $('pa-unfiled').innerHTML = !unfiled.length ? '' :
       '<div class="pabk"><div class="pabkhead">No tier · ' + unfiled.length +
       ' task' + (unfiled.length === 1 ? '' : 's') + '<span class="pasub">' +
@@ -1931,11 +1960,17 @@
       '<p class="pahint">These keep whatever points they were given individually. ' +
       'Put them in a tier above to price them together.</p></div>';
 
-    const loose = unassignedChores();
-    $('pa-breakdown').innerHTML = !loose.length ? '' :
-      '<p class="allownote">' + loose.length + ' task' + (loose.length === 1 ? ' is' : 's are') +
-      ' assigned to nobody, so ' + (loose.length === 1 ? 'it counts' : 'they count') +
-      ' toward no one above — whoever does one gets the points.</p>';
+    // How the others are doing, so tuning a shared tier doesn't quietly wreck
+    // someone else's week while you're looking at this one.
+    const others = MEMBERS.filter(x => x.role === 'kid' && x.id !== PA_WHO);
+    $('pa-breakdown').innerHTML = !others.length ? '' :
+      '<label>Meanwhile</label>' + others.map(o => {
+        const s = settle(o, []);   // targets only; points come from the plan
+        const total = weeklyTotal(choresFor(o.id, chores), working);
+        const pct = Math.round(total / s.target * 100);
+        return '<div class="pachore">' + esc(o.display_name) +
+          '<span>' + total + ' / ' + s.target + ' · ' + pct + '%</span></div>';
+      }).join('');
   }
 
   // Read the inputs back into PA before any re-render, or whatever was typed
@@ -1951,8 +1986,9 @@
   }
 
   function paBucketHtml(b) {
-    const mine = CHORES.filter(c => !isExtra(c) && PA_ASSIGN[c.id] === b.key);
-    const elsewhere = CHORES.filter(c => !isExtra(c) && PA_ASSIGN[c.id] !== b.key);
+    const pool = paPool();
+    const mine = pool.filter(c => PA_ASSIGN[c.id] === b.key);
+    const elsewhere = pool.filter(c => PA_ASSIGN[c.id] !== b.key);
     return '<div class="pabk">' +
       '<div class="parow">' +
       '<input type="text" id="pa-n-' + b.key + '" value="' + esc(b.name) + '" placeholder="Tier">' +
@@ -2002,14 +2038,19 @@
       const b = PA.filter(x => x.id === c.bucket_id)[0];
       PA_ASSIGN[c.id] = b ? b.key : null;
     });
+    // Start on the first kid, since that's whose week you're here to balance.
+    const kids = MEMBERS.filter(x => x.role === 'kid');
+    PA_WHO = kids.length ? kids[0].id : '__none';
     openSheet(
       '<h2>Points allocation</h2>' +
-      '<p class="sub">Set what a tier is worth, then put tasks in it. The task takes ' +
-      'the tier\'s value, so re-pricing a tier re-prices everything in it.</p>' +
+      '<p class="sub">One kid at a time. Set what a tier is worth, then put their ' +
+      'tasks in it — the task takes the tier\'s value, so re-pricing a tier ' +
+      're-prices everything in it for everyone.</p>' +
+      '<div id="pa-whotabs"></div>' +
       '<div id="pa-buckets"></div>' +
       '<button class="btn ghost" id="pa-add" style="margin-bottom:1.25rem">+ Add a tier</button>' +
       '<div id="pa-unfiled"></div>' +
-      '<label>Each kid\'s week</label>' +
+      '<label>Their week</label>' +
       '<div id="pa-total"></div>' +
       '<div id="pa-breakdown"></div>' +
       '<div class="btnrow"><button class="btn ghost" id="f-cancel">Cancel</button>' +
@@ -2642,6 +2683,7 @@
       paRender();
     }
     else if (t.dataset.paDrop) { paCapture(); PA_ASSIGN[t.dataset.paDrop] = null; paRender(); }
+    else if (t.dataset.paWho) { paCapture(); PA_WHO = t.dataset.paWho; paRender(); }
   });
 
   const menuBtn = $('menu-btn'), menu = $('menu');
