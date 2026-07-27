@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Tally — Recipes</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --paper:#F4F1E9; --surface:#FFFFFF; --surface-warm:#FBF9F3; --ink:#1E241C;
+      --muted:#71776B; --green:#3A5A40; --green-deep:#2C4530; --amber:#BE722A;
+      --amber-soft:#F1E6D2; --border:#E2DCCF; --green-tint:#EBF0E8; --danger:#A8443A;
+      --teal:#5E8B86;
+      --f-display:'Space Grotesk',system-ui,sans-serif;
+      --f-body:'Inter',system-ui,sans-serif;
+      --f-mono:'JetBrains Mono',ui-monospace,monospace;
+    }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    html{overflow-x:hidden;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;overflow-x:hidden;}
+    input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    ::placeholder{color:var(--muted);opacity:.7;}
+    .wrap{max-width:520px;margin:0 auto;padding:0 16px 48px;}
+    header{padding:22px 0 14px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:14px;}
+    .card.tight{padding:6px 16px 14px;}
+    .row-between{display:flex;justify-content:space-between;align-items:center;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+    .kicker.sm{font-size:10px;}
+    .link{background:none;border:none;color:var(--green);font-size:12px;font-family:var(--f-body);font-weight:600;cursor:pointer;padding:0;}
+    .h2{font-family:var(--f-display);font-size:15px;margin:2px 0 12px;}
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:11px;background:var(--surface-warm);width:100%;}
+    textarea.field{resize:vertical;}
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:11px 16px;width:100%;transition:opacity .15s;}
+    .btn:disabled{opacity:.45;cursor:default;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+    .btn-quiet{background:var(--green-tint);color:var(--green-deep);}
+    .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--border);}
+    .btn-auto{width:auto;white-space:nowrap;}
+    .btn-row{display:flex;gap:8px;}
+    .x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;padding:0;}
+    .pill{background:var(--green-tint);color:var(--green-deep);border:none;border-radius:8px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;font-family:var(--f-body);}
+    .pill.quiet{background:var(--surface-warm);border:1px solid var(--border);font-weight:500;}
+    .stepper{display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:2px 8px;}
+    .stepper input{width:52px;font-family:var(--f-mono);font-size:14px;border:none;background:transparent;text-align:center;padding:6px 0;}
+    .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:26px 10px;line-height:1.5;}
+    .note{font-size:12px;color:var(--muted);font-style:italic;margin:0 0 12px;}
+    .sub{font-size:12px;color:var(--muted);line-height:1.45;margin:6px 0 0;}
+    .err{color:var(--danger);font-size:13px;margin:10px 0 0;}
+    .ok{color:var(--green-deep);background:var(--green-tint);border-radius:10px;padding:9px 12px;font-size:13px;margin:10px 0 0;}
+    .loading{padding:40px;text-align:center;color:var(--muted);font-size:14px;}
+    .recipe-summary{background:var(--green-tint);border-radius:12px;padding:14px;margin-bottom:12px;}
+
+    /* ── The box: search + the recipes it turns up ─────────────────────────── */
+    .search{display:flex;gap:8px;align-items:center;margin-bottom:4px;}
+    .search input{flex:1;}
+    .rcard{padding:14px 0;border-bottom:1px dashed var(--border);}
+    .rcard:last-child{border-bottom:none;}
+    .rname{flex:1;font-family:var(--f-display);font-weight:600;font-size:15px;min-width:0;overflow-wrap:anywhere;cursor:pointer;text-align:left;background:none;border:none;padding:0;color:inherit;}
+    .rmeta{font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin:3px 0 0;}
+    .rhit{font-size:11.5px;color:var(--green-deep);background:var(--green-tint);border-radius:6px;padding:4px 7px;margin:7px 0 0;line-height:1.4;}
+    .rhit b{font-weight:600;}
+    .ract{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;}
+    .tag{font-family:var(--f-mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;
+         background:var(--amber-soft);color:var(--amber);padding:2px 5px;border-radius:5px;margin-left:5px;}
+
+    /* Ingredient library picker (same shape as the one in Nutrition) */
+    .lib{border:1px solid var(--border);border-radius:12px;padding:10px;margin:8px 0 4px;background:var(--surface-warm);}
+    .libitem{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--border);cursor:pointer;}
+    .libitem:last-child{border-bottom:none;}
+    .libitem:hover{background:var(--green-tint);border-radius:8px;}
+    .libadd{flex-shrink:0;font-size:17px;color:var(--green);font-weight:600;line-height:1;}
+
+    /* Instructions, read mode: blank lines are what separates steps. */
+    .method{font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;}
+
+    /* Sheet — used by "add to a list" only, so it stays out of the way */
+    .scrim{position:fixed;inset:0;background:rgba(30,36,28,.45);display:flex;align-items:flex-end;
+           justify-content:center;z-index:60;padding:0;}
+    .sheet{background:var(--surface);width:100%;max-width:520px;max-height:88vh;overflow-y:auto;
+           border-radius:18px 18px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));}
+    @media (min-width:560px){ .scrim{align-items:center;} .sheet{border-radius:18px;} }
+    .checkrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border);}
+    .checkrow:last-of-type{border-bottom:none;}
+    .checkrow input{margin:2px 0 0;width:18px;height:18px;flex-shrink:0;accent-color:var(--green);}
+    .checkrow label{font-size:13.5px;line-height:1.4;overflow-wrap:anywhere;}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading your recipes…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  // ============================================================================
+  // Recipes — the recipe box
+  //
+  // Recipes live in `foods` with kind = 'recipe', the same rows the calorie
+  // tracker logs portions from. That's deliberate: a recipe you can cook from
+  // and a recipe you can log are the same recipe, and a second table would only
+  // create the question of which one is real. See sql/52_recipes.sql.
+  //
+  // The rows are personal (RLS to auth.uid()). The shopping list is household.
+  // Sending ingredients to a list therefore crosses a privacy boundary, and it
+  // crosses it the same way 51_recipe_nutrition_link does: as a copy made at
+  // the moment you act, by the one person who can read both sides. Nothing
+  // joins across the line at read time.
+  // ============================================================================
+
+  var S = {
+    view:'box', loaded:false, userId:null,
+    recipes:[],                 // every recipe of mine, newest first
+    q:'',                       // the search box
+    draft:null,                 // the recipe being built or edited
+    urlText:'', text:'',        // the two "start a recipe" inputs
+    libOpen:false, libQ:'',     // saved-ingredient picker
+    hh:null, lists:[],          // household + its lists, when there is one
+    listFor:null, listPick:{}, listId:'',
+    methodEdit:false,           // the method reads as text until you tap edit
+    busy:false, err:'', msg:''
+  };
+
+  // ── Small helpers ─────────────────────────────────────────────────────────
+  var _id = 0;
+  function uid(){ return Date.now() + '_' + (_id++); }
+  function num(v){ return v == null ? 0 : Number(v) || 0; }
+  function round1(n){ return Math.round((n||0)*10)/10; }
+  function round2(n){ return Math.round((n||0)*100)/100; }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function el(id){ return document.getElementById(id); }
+  function byId(id){ return S.recipes.filter(function(r){ return r.id===id; })[0]; }
+  function localDateKey(d){
+    d = d || new Date();
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  // A link is only ever rendered into an href once it's confirmed to be one.
+  // Without this, "javascript:…" typed into the link field would run on click.
+  function safeUrl(u){ return /^https?:\/\//i.test(u||'') ? u : null; }
+  function minutesText(m){
+    if(!(m>0)) return '';
+    return m < 60 ? m+' min' : (Math.floor(m/60)+'h'+(m%60 ? ' '+(m%60)+'m' : ''));
+  }
+  function flash(msg){ S.msg = msg; S.err=''; render(); setTimeout(function(){ if(S.msg===msg){ S.msg=''; render(); } }, 3500); }
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  async function loadRecipes(){
+    var r = await sb.from('foods').select('*').eq('kind','recipe').order('created_at',{ascending:false});
+    if(r.error) throw r.error;
+    S.recipes = (r.data||[]).map(function(f){
+      return { id:f.id, name:f.name, finalWeight:num(f.final_weight_g),
+        servings:f.servings?num(f.servings):null, minutes:f.total_minutes?num(f.total_minutes):null,
+        instructions:f.instructions||'', sourceUrl:f.source_url||'',
+        ingredients:f.ingredients||[],
+        per100:{cal:num(f.cal_100g),p:num(f.protein_100g),f:num(f.fat_100g),c:num(f.carbs_100g),fib:num(f.fiber_100g)} };
+    });
+  }
+
+  // The household, if you're in one. Fetched so the "add to a list" button can
+  // be offered — and deliberately soft: not being in a household is a perfectly
+  // ordinary state for this page, so it just means one button fewer.
+  async function loadLists(){
+    try{
+      var m = await sb.from('household_members').select('id, household_id')
+        .eq('user_id', S.userId).eq('active', true).maybeSingle();
+      if(m.error || !m.data) return;
+      S.hh = m.data;
+      var l = await sb.from('lists').select('id, name, kind')
+        .eq('household_id', m.data.household_id).order('sort_order');
+      if(l.error) return;
+      // Grocery lists first — that's what an ingredient is going to.
+      S.lists = (l.data||[]).sort(function(a,b){
+        return (a.kind==='grocery'?0:1) - (b.kind==='grocery'?0:1);
+      });
+    }catch(e){ /* the page works fine without a household */ }
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  // Filtering happens here rather than in Postgres because every recipe is
+  // already loaded (the ingredient library needs them all), so a keystroke
+  // costs nothing and matches on ingredients without teaching the database to
+  // search inside a jsonb array. See the note at the end of sql/52_recipes.sql.
+  function matches(){
+    var q = S.q.trim().toLowerCase();
+    if(!q) return S.recipes.map(function(r){ return {r:r, hits:[]}; });
+    return S.recipes.map(function(r){
+      var inName = r.name.toLowerCase().indexOf(q) !== -1;
+      var hits = (r.ingredients||[]).filter(function(i){
+        return String(i.name||'').toLowerCase().indexOf(q) !== -1;
+      }).map(function(i){ return i.name; });
+      return (inName || hits.length) ? {r:r, hits:hits} : null;
+    }).filter(Boolean);
+  }
+
+  // ── The model-backed parsing, via the ai-parse edge function ──────────────
+  async function callEdge(payload){
+    var s = (await sb.auth.getSession()).data.session;
+    var res = await fetch(SUPABASE_URL+'/functions/v1/ai-parse',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+(s?s.access_token:''),'apikey':SUPABASE_KEY},
+      body:JSON.stringify(payload),
+    });
+    var data = await res.json().catch(function(){return null;});
+    if(!res.ok) throw new Error((data&&data.error) || ('Service error ('+res.status+')'));
+    return data;
+  }
+
+  // ── Building a recipe ─────────────────────────────────────────────────────
+  // An ingredient carries per-gram macros as well as totals, so changing its
+  // weight rescales it exactly instead of re-asking the model.
+  function toDraftIngredient(g){
+    var grams = num(g.grams);
+    return {id:uid(), name:g.name||'', qty:(g.qty!=null?g.qty:''), unit:g.unit||'', grams:grams, wUnit:'g',
+      calories:Math.round(num(g.calories)), protein:num(g.protein), fat:num(g.fat), carbs:num(g.carbs), fiber:num(g.fiber),
+      calPerG:grams?num(g.calories)/grams:0, pPerG:grams?num(g.protein)/grams:0, fPerG:grams?num(g.fat)/grams:0,
+      cPerG:grams?num(g.carbs)/grams:0, fibPerG:grams?num(g.fiber)/grams:0};
+  }
+  function blankDraft(){
+    return {id:null, name:'', sourceUrl:'', servings:'', minutes:'', instructions:'',
+            ingredients:[], finalWeight:0, weightOverridden:false, note:''};
+  }
+  function draftFromParse(out, extra){
+    var d = blankDraft();
+    S.methodEdit = false;       // a freshly-read method is for checking, not typing
+    d.ingredients = (out.ingredients||[]).map(toDraftIngredient);
+    d.finalWeight = Math.round(d.ingredients.reduce(function(s,i){ return s+i.grams; },0));
+    d.note = out.note || '';
+    if(extra){ for(var k in extra) if(extra[k]!=null && extra[k]!=='') d[k] = extra[k]; }
+    return d;
+  }
+
+  // Start from a link. The page is fetched by the edge function, not here —
+  // recipe sites send no CORS headers, so the browser can't read one directly.
+  async function startFromUrl(){
+    var u = S.urlText.trim();
+    if(!u || S.busy) return;
+    if(!safeUrl(u)){ S.err = 'Links need to start with http:// or https://'; render(); return; }
+    S.busy=true; S.err=''; render();
+    try{
+      var out = await callEdge({mode:'scrape', url:u});
+      S.draft = draftFromParse(out, {
+        name: out.name || '', sourceUrl: out.source_url || u,
+        servings: out.servings != null ? String(out.servings) : '',
+        minutes: out.total_minutes != null ? String(out.total_minutes) : '',
+        instructions: out.instructions || ''
+      });
+      // Worth saying: a site that publishes its recipe properly gives exact
+      // amounts, and one that doesn't was read off the page by the model.
+      S.msg = out.parsed_by === 'schema'
+        ? 'Read from the page. Check the amounts before saving.'
+        : 'Estimated from the page — it had no recipe data, so this was read from the text. Check it over.';
+      S.view = 'edit'; S.urlText = '';
+      window.scrollTo(0,0);
+    }catch(e){ S.err = e.message || "Couldn't read that page."; }
+    finally{ S.busy=false; render(); }
+  }
+
+  async function startFromText(){
+    if(!S.text.trim() || S.busy) return;
+    S.busy=true; S.err=''; render();
+    try{
+      S.draft = draftFromParse(await callEdge({mode:'recipe', text:S.text.trim()}));
+      S.view='edit'; S.text=''; S.msg=''; window.scrollTo(0,0);
+    }catch(e){ S.err = e.message || "Couldn't read that. One ingredient per line."; }
+    finally{ S.busy=false; render(); }
+  }
+
+  async function startFromPhoto(file){
+    if(!file || S.busy) return;
+    S.busy=true; S.err=''; render();
+    try{
+      var b64 = await new Promise(function(res,rej){
+        var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file);
+      });
+      S.draft = draftFromParse(await callEdge({mode:'recipe', image:b64, media_type:file.type||'image/jpeg'}));
+      S.view='edit'; S.msg=''; window.scrollTo(0,0);
+    }catch(e){ S.err = e.message || "Couldn't read that photo. Try a clearer shot of the ingredient list."; }
+    finally{ S.busy=false; render(); }
+  }
+
+  function startBlank(){
+    S.draft = blankDraft(); S.draft.ingredients = [];
+    S.view='edit'; S.err=''; S.msg=''; S.methodEdit=true; window.scrollTo(0,0); render();
+  }
+
+  function openRecipe(id){
+    var r = byId(id); if(!r) return;
+    S.draft = {
+      id:r.id, name:r.name, sourceUrl:r.sourceUrl,
+      servings:(r.servings!=null?String(r.servings):''),
+      minutes:(r.minutes!=null?String(r.minutes):''),
+      instructions:r.instructions,
+      ingredients:(r.ingredients||[]).map(toDraftIngredient),
+      finalWeight:r.finalWeight, weightOverridden:true, note:''
+    };
+    S.view='edit'; S.err=''; S.msg=''; S.libOpen=false; S.methodEdit=false;
+    window.scrollTo(0,0); render();
+  }
+  function closeEditor(){
+    S.draft=null; S.view='box'; S.err=''; S.msg=''; S.libOpen=false;
+    history.replaceState(null,'','recipes.html');
+    window.scrollTo(0,0); render();
+  }
+
+  // ── Live ingredient-row handlers (mutate state, patch the readouts) ───────
+  function findIng(id){ return S.draft.ingredients.filter(function(x){return x.id===id;})[0]; }
+  function ingName(id,v){ var it=findIng(id); if(it) it.name=v; }
+  // Weight-unit conversion. The maths stays in grams; the dropdown only changes
+  // how a weight is typed and shown. (Volume units would need a density per
+  // ingredient — use the "add an ingredient" box for those.)
+  var WT_UNITS = { g:1, oz:28.3495, lb:453.592, kg:1000 };
+  function displayWeight(it){
+    var u = it.wUnit||'g'; var v = (it.grams||0)/WT_UNITS[u];
+    return u==='g' ? Math.round(v) : Math.round(v*100)/100;
+  }
+  function unitOptions(sel){
+    return ['g','oz','lb','kg'].map(function(u){
+      return '<option value="'+u+'"'+((sel||'g')===u?' selected':'')+'>'+u+'</option>'; }).join('');
+  }
+  function ingWeight(id,v){
+    var it=findIng(id); if(!it) return;
+    var g = Math.max(0,parseFloat(v)||0) * WT_UNITS[it.wUnit||'g']; it.grams=g;
+    it.calories=Math.round(it.calPerG*g); it.protein=round1(it.pPerG*g); it.fat=round1(it.fPerG*g);
+    it.carbs=round1(it.cPerG*g); it.fiber=round1((it.fibPerG||0)*g);
+    var c=el('rcal-'+id); if(c) c.value=it.calories;
+    syncFinalWeight(); refreshSummary();
+  }
+  function ingUnit(id,u){
+    var it=findIng(id); if(!it) return; it.wUnit=u;
+    var n=el('wt-'+id); if(n) n.value=displayWeight(it);
+  }
+  function ingCal(id,v){
+    var it=findIng(id); if(!it) return;
+    var cal=Math.max(0,parseInt(v)||0); it.calories=cal; it.calPerG = it.grams>0 ? cal/it.grams : cal;
+    refreshSummary();
+  }
+  function ingRemove(id){
+    S.draft.ingredients = S.draft.ingredients.filter(function(x){return x.id!==id;});
+    syncFinalWeight(); render();
+  }
+  function ingAdd(){
+    S.draft.ingredients.push({id:uid(),name:'',qty:'',unit:'',grams:0,wUnit:'g',calories:0,protein:0,fat:0,carbs:0,fiber:0,
+      calPerG:0,pPerG:0,fPerG:0,cPerG:0,fibPerG:0});
+    render();
+  }
+  function setFinalWeight(v){
+    S.draft.weightOverridden=true; S.draft.finalWeight=Math.max(0,parseFloat(v)||0); refreshSummary();
+  }
+  // The finished weight tracks the raw total until you overrule it, which is
+  // what you do after weighing the cooked dish.
+  function syncFinalWeight(){
+    if(S.draft && !S.draft.weightOverridden){
+      S.draft.finalWeight = Math.round(totals().g);
+      var n = el('finalWeight'); if(n) n.value = S.draft.finalWeight;
+    }
+  }
+
+  async function addIngredientEstimate(){
+    var t = ((el('addIngText')||{}).value || '').trim();
+    if(!t){ ingAdd(); return; }
+    if(S.busy) return; S.busy=true; S.err=''; render();
+    try{
+      var out = await callEdge({mode:'recipe', text:t});
+      var added = (out.ingredients||[]).map(toDraftIngredient);
+      if(added.length){ S.draft.ingredients = S.draft.ingredients.concat(added); syncFinalWeight(); }
+      else S.err = "Couldn't estimate that — add a blank row and fill it in by hand.";
+    }catch(e){ S.err = e.message || "Couldn't estimate that ingredient."; }
+    finally{ S.busy=false; render(); }
+  }
+
+  // ── The ingredient library ────────────────────────────────────────────────
+  // Everything already measured once, so "1 lb ground beef" isn't re-typed and
+  // re-estimated into a slightly different answer. Entries carry per-gram
+  // macros, so they rescale exactly to whatever weight you give them.
+  function ingredientLibrary(){
+    var byName = {};
+    S.recipes.forEach(function(r){
+      (r.ingredients||[]).forEach(function(g){
+        var grams = num(g.grams), cal = num(g.calories);
+        if(!grams || !cal) return;                  // can't rescale what wasn't weighed
+        var k = String(g.name||'').trim().toLowerCase();
+        if(!k || byName[k]) return;                 // newest recipe wins
+        byName[k] = { key:'i:'+k, name:g.name, grams:grams, qty:(g.qty!=null?g.qty:''), unit:g.unit||'',
+          calPerG:cal/grams, pPerG:num(g.protein)/grams, fPerG:num(g.fat)/grams,
+          cPerG:num(g.carbs)/grams, fibPerG:num(g.fiber)/grams };
+      });
+    });
+    return Object.keys(byName).map(function(k){ return byName[k]; })
+      .sort(function(a,b){ return a.name.localeCompare(b.name); });
+  }
+  function toggleLib(){ S.libOpen=!S.libOpen; S.libQ=''; render(); }
+  function addFromLibrary(key){
+    var it = ingredientLibrary().filter(function(x){ return x.key===key; })[0];
+    if(!it) return;
+    var g = it.grams || 100;
+    S.draft.ingredients.push({id:uid(), name:it.name, qty:it.qty, unit:it.unit, grams:g, wUnit:'g',
+      calories:Math.round(it.calPerG*g), protein:round1(it.pPerG*g), fat:round1(it.fPerG*g),
+      carbs:round1(it.cPerG*g), fiber:round1(it.fibPerG*g),
+      calPerG:it.calPerG, pPerG:it.pPerG, fPerG:it.fPerG, cPerG:it.cPerG, fibPerG:it.fibPerG});
+    syncFinalWeight();
+    render();   // the search term stays: you're usually adding two or three
+  }
+  function libListHTML(){
+    var all = ingredientLibrary();
+    var q = S.libQ.trim().toLowerCase();
+    var lib = q ? all.filter(function(x){ return x.name.toLowerCase().indexOf(q)!==-1; }) : all;
+    if(!lib.length) return '<p class="note" style="margin:0">Nothing matches.</p>';
+    return lib.slice(0,60).map(function(it){
+      var g = it.grams || 100;
+      return '<div class="libitem" onclick="addFromLibrary(\''+it.key+'\')">'+
+        '<div style="min-width:0;flex:1">'+
+          '<div style="font-size:13.5px;font-weight:500;overflow-wrap:anywhere">'+esc(it.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+
+            Math.round(it.calPerG*g)+' cal · '+Math.round(g)+'g'+(it.qty?(' · '+esc(it.qty)+' '+esc(it.unit)):'')+'</div>'+
+        '</div><span class="libadd">+</span></div>';
+    }).join('');
+  }
+  function libraryHTML(){
+    if(!S.libOpen) return '';
+    if(!ingredientLibrary().length){
+      return '<div class="lib"><p class="note" style="margin:0">Nothing in the library yet — it fills up from the ingredients of recipes you save.</p></div>';
+    }
+    return '<div class="lib">'+
+      '<input class="field" placeholder="Search your ingredients…" value="'+esc(S.libQ)+'" '+
+        'oninput="S.libQ=this.value; var n=el(\'libList\'); if(n) n.innerHTML=libListHTML();" '+
+        'style="padding:8px 10px;font-size:13px;margin-bottom:8px">'+
+      '<div id="libList">'+libListHTML()+'</div></div>';
+  }
+
+  // ── The maths ─────────────────────────────────────────────────────────────
+  function totals(){
+    return S.draft.ingredients.reduce(function(a,i){
+      return {cal:a.cal+i.calories, g:a.g+i.grams, p:a.p+i.protein, f:a.f+i.fat, c:a.c+i.carbs, fib:a.fib+(i.fiber||0)};
+    },{cal:0,g:0,p:0,f:0,c:0,fib:0});
+  }
+  function summaryHTML(){
+    var t = totals(); var fw = S.draft.finalWeight || t.g || 1;
+    var per100 = Math.round((t.cal/fw)*100);
+    var sv = parseFloat(S.draft.servings);
+    return '<div class="recipe-summary">'+
+      '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">'+
+        '<span style="font-family:var(--f-mono);font-size:32px;font-weight:600;color:var(--green-deep);line-height:1">'+per100+'</span>'+
+        '<span style="font-size:13px;color:var(--green-deep)">cal / 100g</span></div>'+
+      '<div style="font-size:12.5px;color:var(--green-deep);font-family:var(--f-mono);opacity:.85">Whole recipe '+
+        t.cal.toLocaleString()+' cal · '+Math.round(t.g)+'g raw'+
+        (sv>0 ? (' · '+Math.round(fw/sv)+'g/serving · '+Math.round(t.cal/sv)+' cal/serving') : '')+'</div>'+
+      '<div style="font-size:12px;color:var(--green-deep);font-family:var(--f-mono);opacity:.7;margin-top:3px">per 100g — P '+
+        round1((t.p/fw)*100)+'g · F '+round1((t.f/fw)*100)+'g · C '+round1((t.c/fw)*100)+'g · Fb '+round1((t.fib/fw)*100)+'g</div>'+
+      '</div>';
+  }
+  function refreshSummary(){ var n=el('summary'); if(n) n.innerHTML = summaryHTML(); }
+
+  // ── Saving ────────────────────────────────────────────────────────────────
+  async function saveRecipe(){
+    var d = S.draft;
+    var name = d.name.trim();
+    if(!name){ S.err='Give it a name first.'; render(); return; }
+    if(d.sourceUrl.trim() && !safeUrl(d.sourceUrl.trim())){
+      S.err='Links need to start with http:// or https://'; render(); return;
+    }
+    var t = totals(); var fw = d.finalWeight || t.g || 1;
+    var mins = parseInt(d.minutes,10);
+    var payload = {
+      user_id:S.userId, name:name, kind:'recipe',
+      cal_100g:Math.round((t.cal/fw)*100), protein_100g:round2((t.p/fw)*100), fat_100g:round2((t.f/fw)*100),
+      carbs_100g:round2((t.c/fw)*100), fiber_100g:round2((t.fib/fw)*100),
+      final_weight_g:fw, servings:parseFloat(d.servings)||null,
+      total_minutes: mins > 0 ? mins : null,
+      source_url: d.sourceUrl.trim() || null,
+      instructions: d.instructions.trim() || null,
+      ingredients: d.ingredients.map(function(i){
+        return {name:i.name, qty:i.qty, unit:i.unit, grams:i.grams, calories:i.calories,
+                protein:i.protein, fat:i.fat, carbs:i.carbs, fiber:i.fiber};
+      })
+    };
+    S.busy=true; S.err=''; render();
+    try{
+      var r = d.id ? await sb.from('foods').update(payload).eq('id', d.id).select('id').single()
+                   : await sb.from('foods').insert(payload).select('id').single();
+      if(r.error) throw r.error;
+      await loadRecipes();
+      S.draft=null; S.view='box'; S.libOpen=false;
+      history.replaceState(null,'','recipes.html');
+      flash(d.id ? 'Updated.' : 'Saved.');
+      window.scrollTo(0,0);
+    }catch(e){ S.err = e.message || 'Could not save that.'; }
+    finally{ S.busy=false; render(); }
+  }
+
+  async function deleteRecipe(){
+    var d = S.draft; if(!d || !d.id) return;
+    if(!confirm('Delete "'+d.name+'"?\n\nAnything already logged from it stays in your food log.')) return;
+    S.busy=true; S.err=''; render();
+    try{
+      var r = await sb.from('foods').delete().eq('id', d.id);
+      if(r.error) throw r.error;
+      await loadRecipes();
+      S.draft=null; S.view='box';
+      history.replaceState(null,'','recipes.html');
+      flash('Deleted.');
+    }catch(e){ S.err = e.message || 'Could not delete that.'; }
+    finally{ S.busy=false; render(); }
+  }
+
+  // ── Into the calorie tracker ──────────────────────────────────────────────
+  // Same shape Nutrition writes: the title carries no amount, so the same dish
+  // at 200g and 350g is one name in your usuals, with the weight on the item
+  // row underneath.
+  function portionPreview(id){
+    var r = byId(id); if(!r) return;
+    var grams = parseFloat((el('rp-'+id)||{}).value)||0;
+    var n = el('rpc-'+id); if(n) n.textContent = '= '+Math.round((r.per100.cal*grams)/100)+' cal';
+  }
+  function fillServing(id){
+    var r = byId(id); if(!r || !r.servings || !r.finalWeight) return;
+    var inp = el('rp-'+id); if(inp) inp.value = Math.round(r.finalWeight/r.servings);
+    portionPreview(id);
+  }
+  async function logPortion(id){
+    var r = byId(id); if(!r) return;
+    var grams = parseFloat((el('rp-'+id)||{}).value)||0;
+    if(!(grams>0)) return;
+    var cal = Math.round((r.per100.cal*grams)/100);
+    var m = {p:round1((r.per100.p*grams)/100), f:round1((r.per100.f*grams)/100),
+             c:round1((r.per100.c*grams)/100), fib:round1(((r.per100.fib||0)*grams)/100)};
+    S.busy=true; S.err=''; render();
+    try{
+      var ins = await sb.from('nutrition_entries').insert({
+        user_id:S.userId, log_date:localDateKey(), source:'recipe', title:r.name,
+        total_calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib
+      }).select('id').single();
+      if(ins.error) throw ins.error;
+      var it = await sb.from('nutrition_entry_items').insert({
+        entry_id:ins.data.id, position:0, name:r.name, qty:grams, unit:'g',
+        calories:cal, protein:m.p, fat:m.f, carbs:m.c, fiber:m.fib
+      });
+      if(it.error) throw it.error;
+      flash('Logged '+Math.round(grams)+'g — '+cal.toLocaleString()+' cal.');
+    }catch(e){ S.err = e.message || 'Could not log that.'; }
+    finally{ S.busy=false; render(); }
+  }
+
+  // ── Onto the shopping list ────────────────────────────────────────────────
+  // The line that goes on the list is what you'd read in a shop: the amount as
+  // it was written in the recipe, not the gram weight the nutrition maths uses.
+  // "2 cans kidney beans" is findable on a shelf; "800 g" is not.
+  function shoppingLine(i){
+    var qty = (i.qty===0 || i.qty) ? String(i.qty).trim() : '';
+    var amount = [qty, (i.unit||'').trim()].filter(Boolean).join(' ');
+    return (amount ? amount+' ' : '') + String(i.name||'').trim();
+  }
+  function openListSheet(id){
+    var r = byId(id); if(!r) return;
+    S.listFor = id; S.listPick = {};
+    (r.ingredients||[]).forEach(function(_,ix){ S.listPick[ix] = true; });
+    S.listId = (S.lists[0]||{}).id || '';
+    render();
+  }
+  function closeListSheet(){ S.listFor=null; render(); }
+  function togglePick(ix, on){ S.listPick[ix] = on; }
+  async function addToList(){
+    var r = byId(S.listFor); if(!r) return;
+    var listId = (el('listPick')||{}).value || S.listId;
+    if(!listId){ S.err='Pick a list first.'; render(); return; }
+    var chosen = (r.ingredients||[]).filter(function(_,ix){ return S.listPick[ix]; }).map(shoppingLine).filter(Boolean);
+    if(!chosen.length){ S.err='Nothing ticked.'; render(); return; }
+    S.busy=true; S.err=''; render();
+    try{
+      // Appended in order after whatever is already there, so items added
+      // together stay together on the fridge screen.
+      var last = await sb.from('list_items').select('position').eq('list_id', listId)
+        .order('position',{ascending:false}).limit(1);
+      if(last.error) throw last.error;
+      var pos = ((last.data||[])[0] || {}).position || 0;
+      var rows = chosen.map(function(body, ix){
+        return { household_id:S.hh.household_id, list_id:listId, body:body.slice(0,200), position:pos+1+ix };
+      });
+      var ins = await sb.from('list_items').insert(rows);
+      if(ins.error) throw ins.error;
+      var name = (S.lists.filter(function(l){ return l.id===listId; })[0]||{}).name || 'the list';
+      S.listFor = null;
+      flash(chosen.length+' added to '+name+'.');
+    }catch(e){ S.err = e.message || 'Could not add those.'; }
+    finally{ S.busy=false; render(); }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  function render(){
+    var h = '<header>'+
+      '<a class="home-back" href="home.html">← Home</a>'+
+      '<h1 class="logo">Recipes<span>.</span><small>What you cook, and what it costs you</small></h1>'+
+      '</header>';
+
+    h += S.view === 'edit' ? viewEdit() : viewBox();
+    if(S.listFor) h += listSheetHTML();
+
+    el('app').innerHTML = h;
+  }
+
+  function viewBox(){
+    var h = '';
+    if(S.msg) h += '<div class="ok">'+esc(S.msg)+'</div>';
+    if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
+
+    // ── Start a new one ─────────────────────────────────────────────────────
+    h += '<section class="card">'+
+      '<h2 class="h2">Add a recipe</h2>'+
+      '<p class="sub" style="margin:0 0 10px">Paste a link and I\'ll read the page — ingredients, method, servings — then estimate the weight and nutrition of each ingredient so you can log a portion later.</p>'+
+      '<div style="display:flex;gap:8px;margin-bottom:4px">'+
+        '<input class="field" id="urlBox" placeholder="https://…" autocapitalize="off" autocorrect="off" '+
+          'value="'+esc(S.urlText)+'" oninput="S.urlText=this.value" '+
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();startFromUrl();}" style="flex:1">'+
+        '<button class="btn btn-primary btn-auto" onclick="startFromUrl()"'+(S.busy?' disabled':'')+'>'+
+          (S.busy?'Reading…':'Read it')+'</button>'+
+      '</div>'+
+      '<div style="text-align:center;margin:12px 0 8px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">or</div>'+
+      '<textarea class="field" rows="4" placeholder="1 lb ground beef&#10;2 cans kidney beans&#10;1 onion, diced" '+
+        'oninput="S.text=this.value" style="line-height:1.5;margin-bottom:8px">'+esc(S.text)+'</textarea>'+
+      '<button class="btn btn-quiet" onclick="startFromText()"'+(S.busy?' disabled':'')+'>'+
+        (S.busy?'Calculating…':'Type the ingredients in')+'</button>'+
+      // Two file inputs, not one: `capture` forces the camera open, which is
+      // wrong when the photo is already in the camera roll.
+      '<input id="photoCam" type="file" accept="image/*" capture="environment" style="display:none" onchange="startFromPhoto(this.files&&this.files[0])">'+
+      '<input id="photoLib" type="file" accept="image/*" style="display:none" onchange="startFromPhoto(this.files&&this.files[0])">'+
+      '<div class="btn-row" style="margin-top:8px">'+
+        '<button class="btn btn-ghost" onclick="el(\'photoCam\').click()"'+(S.busy?' disabled':'')+'>📷 Photo</button>'+
+        '<button class="btn btn-ghost" onclick="el(\'photoLib\').click()"'+(S.busy?' disabled':'')+'>🖼 Library</button>'+
+        '<button class="btn btn-ghost" onclick="startBlank()"'+(S.busy?' disabled':'')+'>Blank</button>'+
+      '</div>'+
+      '</section>';
+
+    // ── The box ─────────────────────────────────────────────────────────────
+    if(!S.recipes.length){
+      h += '<section class="card"><div class="empty">No recipes yet.<br>Paste a link above, or type in the ingredients of something you cook.</div></section>';
+      return h;
+    }
+
+    var found = matches();
+    h += '<section class="card tight">'+
+      '<div style="padding:12px 0 8px">'+
+        '<div class="search">'+
+          '<input class="field" id="searchBox" placeholder="Search by name or ingredient…" value="'+esc(S.q)+'" '+
+            'oninput="S.q=this.value; renderBoxList()" style="padding:9px 11px;font-size:13.5px">'+
+          // Shown/hidden by renderBoxList rather than conditionally rendered:
+          // re-rendering the row would take the focus out of the search box.
+          '<button class="link" id="clearQ" onclick="S.q=\'\';render()"'+
+            (S.q ? '' : ' style="display:none"')+'>clear</button>'+
+        '</div>'+
+        '<div class="kicker sm" id="boxCount" style="margin-top:8px">'+countText(found)+'</div>'+
+      '</div>'+
+      '<div id="boxList">'+boxListHTML(found)+'</div>'+
+      '</section>';
+    return h;
+  }
+
+  function countText(found){
+    if(!S.q.trim()) return S.recipes.length + (S.recipes.length===1 ? ' recipe' : ' recipes');
+    return found.length ? found.length+' of '+S.recipes.length : 'nothing matches';
+  }
+  // Typing re-renders only the list, so the search box keeps focus and the
+  // caret doesn't jump to the end on every keystroke.
+  function renderBoxList(){
+    var found = matches();
+    var l = el('boxList'); if(l) l.innerHTML = boxListHTML(found);
+    var c = el('boxCount'); if(c) c.textContent = countText(found);
+    var x = el('clearQ'); if(x) x.style.display = S.q ? '' : 'none';
+  }
+
+  function boxListHTML(found){
+    if(!found.length){
+      return '<div class="empty">Nothing matches “'+esc(S.q)+'”.<br>Search looks at recipe names and ingredient names.</div>';
+    }
+    return found.map(function(x){
+      var r = x.r;
+      var defG = (r.servings && r.finalWeight) ? Math.round(r.finalWeight/r.servings) : 100;
+      var meta = [
+        r.per100.cal+' cal/100g',
+        (r.servings ? r.servings+' servings' : ''),
+        minutesText(r.minutes),
+        ((r.ingredients||[]).length + ' ingredients')
+      ].filter(Boolean).join(' · ');
+      var canList = S.hh && S.lists.length && (r.ingredients||[]).length;
+
+      return '<div class="rcard">'+
+        '<div style="display:flex;align-items:baseline;gap:8px">'+
+          '<button class="rname" onclick="openRecipe(\''+r.id+'\')">'+esc(r.name)+
+            (r.instructions ? '' : '<span class="tag">no method</span>')+'</button>'+
+          '<button class="link" onclick="openRecipe(\''+r.id+'\')">Open</button>'+
+        '</div>'+
+        '<div class="rmeta">'+esc(meta)+'</div>'+
+        // Why this recipe came back for a search that its name doesn't match.
+        (x.hits.length ? '<div class="rhit">has <b>'+x.hits.slice(0,4).map(esc).join('</b>, <b>')+'</b>'+
+          (x.hits.length>4 ? ' and '+(x.hits.length-4)+' more' : '')+'</div>' : '')+
+        '<div class="ract">'+
+          '<div class="stepper"><input id="rp-'+r.id+'" value="'+defG+'" inputmode="decimal" '+
+            'oninput="portionPreview(\''+r.id+'\')"><span style="font-size:12px;color:var(--muted)">g</span></div>'+
+          (r.servings ? '<button class="pill quiet" onclick="fillServing(\''+r.id+'\')">1 serving</button>' : '')+
+          '<span id="rpc-'+r.id+'" style="font-family:var(--f-mono);font-size:13px;font-weight:600">= '+
+            Math.round((r.per100.cal*defG)/100)+' cal</span>'+
+          '<div style="flex:1"></div>'+
+          '<button class="pill" onclick="logPortion(\''+r.id+'\')"'+(S.busy?' disabled':'')+'>+ Log</button>'+
+        '</div>'+
+        (canList ? '<div style="margin-top:8px"><button class="link" onclick="openListSheet(\''+r.id+'\')">🛒 Add ingredients to a list</button></div>' : '')+
+        '</div>';
+    }).join('');
+  }
+
+  function viewEdit(){
+    var d = S.draft;
+    var isNew = !d.id;
+    var h = '';
+
+    h += '<section class="card">'+
+      '<div class="row-between" style="margin-bottom:10px;align-items:baseline">'+
+        '<span class="kicker sm">'+(isNew?'New recipe':'Editing')+'</span>'+
+        '<button class="link" style="color:var(--muted)" onclick="closeEditor()">'+(isNew?'discard':'back to recipes')+'</button>'+
+      '</div>';
+
+    if(S.msg) h += '<div class="ok" style="margin:0 0 12px">'+esc(S.msg)+'</div>';
+
+    h += '<input class="field" placeholder="Recipe name" value="'+esc(d.name)+'" oninput="S.draft.name=this.value" '+
+        'style="font-family:var(--f-display);font-weight:600;font-size:16px;margin-bottom:8px">'+
+      '<input class="field" placeholder="Link (optional)" autocapitalize="off" autocorrect="off" value="'+esc(d.sourceUrl)+'" '+
+        'oninput="S.draft.sourceUrl=this.value" style="font-size:13px;margin-bottom:8px">'+
+      '<div style="display:flex;gap:8px">'+
+        '<label style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:8px 11px">'+
+          '<span style="font-size:12.5px;color:var(--muted)">Servings</span>'+
+          '<input value="'+esc(d.servings)+'" inputmode="decimal" placeholder="—" '+
+            'oninput="S.draft.servings=this.value;refreshSummary()" '+
+            'style="width:52px;font-family:var(--f-mono);font-size:14px;border:none;background:transparent;text-align:right;padding:0"></label>'+
+        '<label style="flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:8px 11px">'+
+          '<span style="font-size:12.5px;color:var(--muted)">Minutes</span>'+
+          '<input value="'+esc(d.minutes)+'" inputmode="numeric" placeholder="—" oninput="S.draft.minutes=this.value" '+
+            'style="width:52px;font-family:var(--f-mono);font-size:14px;border:none;background:transparent;text-align:right;padding:0"></label>'+
+      '</div>';
+    h += '</section>';
+
+    // ── Ingredients ─────────────────────────────────────────────────────────
+    h += '<section class="card">'+
+      '<h2 class="h2">Ingredients</h2>';
+    if(!d.ingredients.length){
+      h += '<p class="note">Nothing here yet — add one below.</p>';
+    }
+    h += d.ingredients.map(function(it){
+      return '<div style="padding:9px 0;border-bottom:1px solid var(--border)">'+
+        '<div style="display:flex;align-items:center;gap:8px">'+
+          '<input value="'+esc(it.name)+'" oninput="ingName(\''+it.id+'\',this.value)" placeholder="Ingredient" '+
+            'style="flex:1;font-family:var(--f-body);font-size:14px;border:none;background:transparent;font-weight:500;padding:0">'+
+          '<button class="x" style="font-size:17px" onclick="ingRemove(\''+it.id+'\')" aria-label="Remove">×</button></div>'+
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:5px">'+
+          '<span style="flex:1;font-size:11.5px;color:var(--muted);font-family:var(--f-mono)">'+esc(it.qty)+' '+esc(it.unit)+'</span>'+
+          '<div style="display:flex;align-items:center;gap:3px">'+
+            '<input id="wt-'+it.id+'" value="'+displayWeight(it)+'" inputmode="decimal" oninput="ingWeight(\''+it.id+'\',this.value)" '+
+              'style="width:52px;font-family:var(--f-mono);font-size:13px;border:1px solid var(--border);border-radius:7px;padding:5px 6px;text-align:center">'+
+            '<select id="wu-'+it.id+'" onchange="ingUnit(\''+it.id+'\',this.value)" '+
+              'style="font-family:var(--f-body);font-size:12px;border:1px solid var(--border);border-radius:7px;padding:5px 3px;background:var(--surface);color:var(--ink)">'+
+              unitOptions(it.wUnit)+'</select></div>'+
+          '<div style="display:flex;align-items:center;gap:3px">'+
+            '<input id="rcal-'+it.id+'" value="'+it.calories+'" inputmode="numeric" oninput="ingCal(\''+it.id+'\',this.value)" '+
+              'style="width:58px;font-family:var(--f-mono);font-size:13px;font-weight:600;border:1px solid var(--border);border-radius:7px;padding:5px 6px;text-align:center">'+
+            '<span style="font-size:11px;color:var(--muted)">cal</span></div>'+
+        '</div></div>';
+    }).join('');
+
+    h += '<div style="display:flex;gap:6px;margin:10px 0 2px">'+
+        '<input id="addIngText" class="field" placeholder="Add an ingredient — e.g. 2 tbsp olive oil" '+
+          'style="flex:1;padding:8px 10px;font-size:13px" '+
+          'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addIngredientEstimate();}">'+
+        '<button class="btn btn-quiet btn-auto" style="padding:8px 12px" onclick="addIngredientEstimate()"'+(S.busy?' disabled':'')+'>'+
+          (S.busy?'…':'+ Add')+'</button></div>'+
+      '<div style="display:flex;gap:12px;align-items:center;padding:4px 0">'+
+        '<button class="link" onclick="toggleLib()">'+(S.libOpen?'hide saved ingredients':'🥕 use a saved ingredient')+'</button>'+
+        '<button class="link" style="color:var(--muted)" onclick="ingAdd()">or a blank row</button></div>'+
+      libraryHTML();
+
+    h += '<div style="background:var(--surface-warm);border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0 12px">'+
+        '<label style="display:flex;align-items:center;justify-content:space-between;gap:10px">'+
+          '<span style="font-size:13px;font-weight:500">Finished dish weight</span>'+
+          '<span style="display:flex;align-items:center;gap:4px">'+
+            '<input id="finalWeight" value="'+d.finalWeight+'" inputmode="decimal" oninput="setFinalWeight(this.value)" '+
+              'style="width:72px;font-family:var(--f-mono);font-size:14px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;text-align:center">'+
+            '<span style="font-size:12px;color:var(--muted)">g</span></span></label>'+
+        '<p style="font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.45">Defaults to the raw ingredient total. Weigh the cooked dish and put that here for an accurate per-100g — cooking changes the weight, not the calories.</p></div>';
+
+    h += '<div id="summary">'+summaryHTML()+'</div>';
+    if(d.note) h += '<p class="note">'+esc(d.note)+'</p>';
+    h += '</section>';
+
+    // ── Method ──────────────────────────────────────────────────────────────
+    // Read mode by default when there's something to read. You open a recipe to
+    // cook from it far more often than to rewrite it, and a nine-row textarea
+    // is a poor thing to follow with your hands full.
+    var reading = !S.methodEdit && d.instructions.trim();
+    h += '<section class="card">'+
+      '<div class="row-between" style="margin-bottom:10px;align-items:baseline">'+
+        '<h2 class="h2" style="margin:0">Method</h2>'+
+        (d.instructions.trim()
+          ? '<button class="link" onclick="S.methodEdit='+(reading?'true':'false')+';render()">'+
+            (reading?'edit':'done')+'</button>'
+          : '')+
+      '</div>'+
+      (reading
+        ? '<p class="method">'+esc(d.instructions.trim())+'</p>'
+        : '<textarea class="field" rows="9" placeholder="1. Brown the beef with the onion.&#10;2. Add the beans and tomatoes.&#10;3. Simmer 40 minutes." '+
+          'oninput="S.draft.instructions=this.value" style="line-height:1.6">'+esc(d.instructions)+'</textarea>'+
+          '<p class="sub">Free text — however the recipe was written. Steps, notes, a reminder that the oven runs hot.</p>')+
+      '</section>';
+
+    // ── Save ────────────────────────────────────────────────────────────────
+    var link = safeUrl(d.sourceUrl.trim());
+    h += '<section class="card">'+
+      (link ? '<p class="sub" style="margin:0 0 12px">Came from <a href="'+esc(link)+'" target="_blank" rel="noopener noreferrer" style="color:var(--green)">the original page ↗</a></p>' : '')+
+      '<button class="btn btn-primary" onclick="saveRecipe()"'+(S.busy?' disabled':'')+'>'+
+        (S.busy ? 'Saving…' : (isNew ? 'Save recipe' : 'Save changes'))+'</button>'+
+      (isNew ? '' : '<button class="btn btn-danger" style="margin-top:8px" onclick="deleteRecipe()"'+(S.busy?' disabled':'')+'>Delete recipe</button>')+
+      (S.err ? '<p class="err">'+esc(S.err)+'</p>' : '')+
+      '</section>';
+    return h;
+  }
+
+  function listSheetHTML(){
+    var r = byId(S.listFor); if(!r) return '';
+    var items = r.ingredients||[];
+    return '<div class="scrim" onclick="if(event.target===this)closeListSheet()">'+
+      '<div class="sheet" role="dialog" aria-modal="true">'+
+        '<h2 class="h2" style="font-size:16px">Add to a list</h2>'+
+        '<p class="sub" style="margin:0 0 12px">From <b>'+esc(r.name)+'</b>. Untick what you already have in.</p>'+
+        '<label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px">List</label>'+
+        '<select class="field" id="listPick" style="margin-bottom:12px">'+
+          S.lists.map(function(l){
+            return '<option value="'+l.id+'"'+(l.id===S.listId?' selected':'')+'>'+esc(l.name)+
+              (l.kind==='grocery' ? '' : ' ('+esc(l.kind)+')')+'</option>';
+          }).join('')+
+        '</select>'+
+        items.map(function(i,ix){
+          return '<div class="checkrow">'+
+            '<input type="checkbox" id="pk-'+ix+'"'+(S.listPick[ix]?' checked':'')+' onchange="togglePick('+ix+',this.checked)">'+
+            '<label for="pk-'+ix+'">'+esc(shoppingLine(i))+'</label></div>';
+        }).join('')+
+        (S.err ? '<p class="err">'+esc(S.err)+'</p>' : '')+
+        '<div class="btn-row" style="margin-top:16px">'+
+          '<button class="btn btn-ghost" onclick="closeListSheet()">Cancel</button>'+
+          '<button class="btn btn-primary" onclick="addToList()"'+(S.busy?' disabled':'')+'>'+
+            (S.busy?'Adding…':'Add to list')+'</button></div>'+
+      '</div></div>';
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  (async function(){
+    var u = await requireUser();       // auth.js — redirects when signed out
+    if(!u) return;
+    S.userId = u.user.id;
+    try{
+      await loadRecipes();
+      await loadLists();
+    }catch(e){
+      el('app').innerHTML = '<div class="loading">Could not load your recipes.<br>'+esc(e.message||'')+'</div>';
+      return;
+    }
+    S.loaded = true;
+    // ?id=… opens straight into one, which is how Nutrition links across.
+    var want = new URLSearchParams(location.search).get('id');
+    if(want && byId(want)) openRecipe(want); else render();
+  })();
+  </script>
+</body>
+</html>

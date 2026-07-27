@@ -2281,7 +2281,7 @@
   let MY_FOODS = [];
   async function loadMyRecipes() {
     const { data, error } = await sb.from('foods')
-      .select('id, name, servings, ingredients')
+      .select('id, name, servings, ingredients, instructions')
       .eq('kind', 'recipe').order('name');
     // Deliberately not swallowed: an empty list and a failed query look
     // identical on screen, and the first time this was wrong it looked like
@@ -2302,6 +2302,9 @@
     const { data, error } = await sb.from('recipes').insert({
       household_id: HH.id, title: f.name,
       ingredients: ingredientLines(f) || null,
+      // The method comes across too. Leaving it behind is the sort of quiet
+      // loss you only notice standing at the hob — see sql/52_recipes.sql.
+      instructions: f.instructions || null,
       nutrition_food_id: f.id, created_by: ME.user_id
     }).select('id').single();
     if (error) throw error;
@@ -2312,12 +2315,13 @@
   // Nutrition recipes. Name and ingredients only — the macros belong to the
   // module that computes them, and inventing numbers here would be worse than
   // leaving them to be filled in there.
-  async function pushRecipeToNutrition(title, ingredientsText) {
+  async function pushRecipeToNutrition(title, ingredientsText, instructions) {
     const items = String(ingredientsText || '').split('\n')
       .map(s => s.trim()).filter(Boolean).map(name => ({ name: name }));
     const { data, error } = await sb.from('foods').insert({
       user_id: ME.user_id, name: title, kind: 'recipe',
-      ingredients: items.length ? items : null
+      ingredients: items.length ? items : null,
+      instructions: (instructions || '').trim() || null
     }).select('id').single();
     if (error) throw error;
     return data.id;
@@ -2352,6 +2356,9 @@
       '" placeholder="https://…" autocapitalize="off"></div>' +
       '<div class="field"><label for="f-ing">Ingredients</label>' +
       '<textarea id="f-ing" placeholder="One per line">' + esc(r.ingredients || '') + '</textarea></div>' +
+      '<div class="field"><label for="f-method">Method</label>' +
+      '<textarea id="f-method" placeholder="Optional — the steps, however they were written">' +
+      esc(r.instructions || '') + '</textarea></div>' +
       '<div class="field"><label for="f-notes">Notes</label>' +
       '<textarea id="f-notes" placeholder="Optional">' + esc(r.notes || '') + '</textarea></div>' +
       (r.nutrition_food_id
@@ -2373,6 +2380,7 @@
       if (!f) return;
       if (!$('f-title').value.trim()) $('f-title').value = f.name;
       if (!$('f-ing').value.trim()) $('f-ing').value = ingredientLines(f);
+      if (!$('f-method').value.trim()) $('f-method').value = f.instructions || '';
       toast('Copied from Nutrition');
     });
     $('f-cancel').addEventListener('click', closeSheet);
@@ -2382,9 +2390,11 @@
       const url = $('f-url').value.trim();
       if (url && !safeUrl(url)) { toast('Links need to start with http:// or https://'); return; }
       const ing = $('f-ing').value.trim();
+      const method = $('f-method').value.trim();
       const row = {
         household_id: HH.id, title: title, source_url: url || null,
         ingredients: ing || null,
+        instructions: method || null,
         notes: $('f-notes').value.trim() || null,
         nutrition_food_id: (imp && imp.value) || r.nutrition_food_id || null,
         created_by: ME.user_id
@@ -2392,7 +2402,7 @@
       try {
         const push = $('f-push');
         if (push && push.checked) {
-          row.nutrition_food_id = await pushRecipeToNutrition(title, ing);
+          row.nutrition_food_id = await pushRecipeToNutrition(title, ing, method);
         }
         const { error } = r.id ? await sb.from('recipes').update(row).eq('id', r.id)
                                : await sb.from('recipes').insert(row);
