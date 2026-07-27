@@ -128,7 +128,7 @@
     draft:null,                 // the recipe being built or edited
     urlText:'', text:'',        // the two "start a recipe" inputs
     libOpen:false, libQ:'',     // saved-ingredient picker
-    hh:null, lists:[],          // household + its lists, when there is one
+    hh:null, lists:[], listWhy:'',  // household + its lists, and why not if not
     listFor:null, listPick:{}, listId:'',
     methodEdit:false,           // the method reads as text until you tap edit
     busy:false, err:'', msg:''
@@ -172,20 +172,41 @@
   // The household, if you're in one. Fetched so the "add to a list" button can
   // be offered — and deliberately soft: not being in a household is a perfectly
   // ordinary state for this page, so it just means one button fewer.
+  // Not being in a household is an ordinary state for this page, so this never
+  // throws. But it records WHY it came back empty: a failed query and an empty
+  // household look identical on screen, and when they do, the feature simply
+  // appears not to exist. (family.html learned this the hard way; loadMyRecipes
+  // there carries the same warning.)
   async function loadLists(){
+    S.listWhy = '';
     try{
       var m = await sb.from('household_members').select('id, household_id')
         .eq('user_id', S.userId).eq('active', true).maybeSingle();
-      if(m.error || !m.data) return;
+      if(m.error){
+        console.error('household lookup', m.error);
+        // maybeSingle() errors rather than picking when there are two rows.
+        S.listWhy = 'Could not read your household: ' + m.error.message;
+        return;
+      }
+      if(!m.data){ S.listWhy = 'no-household'; return; }
       S.hh = m.data;
+
       var l = await sb.from('lists').select('id, name, kind')
         .eq('household_id', m.data.household_id).order('sort_order');
-      if(l.error) return;
+      if(l.error){
+        console.error('household lists', l.error);
+        S.listWhy = 'Could not read the household lists: ' + l.error.message;
+        return;
+      }
       // Grocery lists first — that's what an ingredient is going to.
       S.lists = (l.data||[]).sort(function(a,b){
         return (a.kind==='grocery'?0:1) - (b.kind==='grocery'?0:1);
       });
-    }catch(e){ /* the page works fine without a household */ }
+      if(!S.lists.length) S.listWhy = 'no-lists';
+    }catch(e){
+      console.error('loadLists', e);
+      S.listWhy = e.message || 'Could not reach the household lists.';
+    }
   }
 
   // ── Search ────────────────────────────────────────────────────────────────
@@ -562,20 +583,33 @@
     var amount = [qty, (i.unit||'').trim()].filter(Boolean).join(' ');
     return (amount ? amount+' ' : '') + String(i.name||'').trim();
   }
+  // The sheet is opened from two places: a card in the box, and the recipe
+  // you currently have open. The second reads the draft rather than the saved
+  // row, so ingredients you've just added go on the list without saving first.
+  function listSource(){
+    if(S.listFor === 'draft'){
+      return S.draft ? { name:(S.draft.name.trim() || 'this recipe'), items:S.draft.ingredients } : null;
+    }
+    var r = byId(S.listFor);
+    return r ? { name:r.name, items:(r.ingredients||[]) } : null;
+  }
   function openListSheet(id){
-    var r = byId(id); if(!r) return;
-    S.listFor = id; S.listPick = {};
-    (r.ingredients||[]).forEach(function(_,ix){ S.listPick[ix] = true; });
+    S.listFor = id;
+    var src = listSource();
+    if(!src){ S.listFor = null; return; }
+    S.listPick = {};
+    src.items.forEach(function(_,ix){ S.listPick[ix] = true; });
     S.listId = (S.lists[0]||{}).id || '';
+    S.err = '';
     render();
   }
   function closeListSheet(){ S.listFor=null; render(); }
   function togglePick(ix, on){ S.listPick[ix] = on; }
   async function addToList(){
-    var r = byId(S.listFor); if(!r) return;
+    var src = listSource(); if(!src) return;
     var listId = (el('listPick')||{}).value || S.listId;
     if(!listId){ S.err='Pick a list first.'; render(); return; }
-    var chosen = (r.ingredients||[]).filter(function(_,ix){ return S.listPick[ix]; }).map(shoppingLine).filter(Boolean);
+    var chosen = src.items.filter(function(_,ix){ return S.listPick[ix]; }).map(shoppingLine).filter(Boolean);
     if(!chosen.length){ S.err='Nothing ticked.'; render(); return; }
     S.busy=true; S.err=''; render();
     try{
@@ -692,7 +726,10 @@
         minutesText(r.minutes),
         ((r.ingredients||[]).length + ' ingredients')
       ].filter(Boolean).join(' · ');
-      var canList = S.hh && S.lists.length && (r.ingredients||[]).length;
+      // Shown whenever there's something to add. Whether there's a list to add
+      // it TO is answered when you tap it — hiding the button instead is how
+      // this looked like it was never built.
+      var canList = (r.ingredients||[]).length;
 
       return '<div class="rcard">'+
         '<div style="display:flex;align-items:baseline;gap:8px">'+
@@ -797,6 +834,12 @@
 
     h += '<div id="summary">'+summaryHTML()+'</div>';
     if(d.note) h += '<p class="note">'+esc(d.note)+'</p>';
+    // Straight from the recipe you're looking at — the moment you decide to
+    // cook a thing is the moment you notice you're out of half of it. Reads
+    // the rows above, so edits you haven't saved still come across.
+    if(d.ingredients.length){
+      h += '<button class="btn btn-quiet" onclick="openListSheet(\'draft\')" style="margin-top:4px">🛒 Add ingredients to a list</button>';
+    }
     h += '</section>';
 
     // ── Method ──────────────────────────────────────────────────────────────
@@ -832,12 +875,31 @@
   }
 
   function listSheetHTML(){
-    var r = byId(S.listFor); if(!r) return '';
-    var items = r.ingredients||[];
+    var src = listSource(); if(!src) return '';
+    var items = src.items;
+
+    // No list to add to. Say which of the two reasons it is — a silent
+    // missing button is what sent this back for a second go.
+    if(!S.lists.length){
+      var why = S.listWhy === 'no-household'
+        ? 'You’re not in a household yet. Lists live there — set one up in Family and this will find it.'
+        : S.listWhy === 'no-lists'
+          ? 'Your household has no lists yet. Make one in Family (a Grocery list is the obvious one) and it’ll show up here.'
+          : (S.listWhy || 'The household lists could not be read.');
+      return '<div class="scrim" onclick="if(event.target===this)closeListSheet()">'+
+        '<div class="sheet" role="dialog" aria-modal="true">'+
+          '<h2 class="h2" style="font-size:16px">No list to add to</h2>'+
+          '<p class="sub" style="margin:0 0 16px">'+esc(why)+'</p>'+
+          '<div class="btn-row">'+
+            '<button class="btn btn-ghost" onclick="closeListSheet()">Close</button>'+
+            '<a class="btn btn-primary" href="family.html" style="text-align:center;text-decoration:none">Open Family</a>'+
+          '</div></div></div>';
+    }
+
     return '<div class="scrim" onclick="if(event.target===this)closeListSheet()">'+
       '<div class="sheet" role="dialog" aria-modal="true">'+
         '<h2 class="h2" style="font-size:16px">Add to a list</h2>'+
-        '<p class="sub" style="margin:0 0 12px">From <b>'+esc(r.name)+'</b>. Untick what you already have in.</p>'+
+        '<p class="sub" style="margin:0 0 12px">From <b>'+esc(src.name)+'</b>. Untick what you already have in.</p>'+
         '<label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px">List</label>'+
         '<select class="field" id="listPick" style="margin-bottom:12px">'+
           S.lists.map(function(l){
