@@ -7,6 +7,7 @@
 // model call goes through here. The Anthropic key lives in Supabase secrets.
 //
 //   mode: "meal"    → free text          → { items:[...], note }
+//   mode: "plate"   → base64 food photo  → { title, items:[...], note }
 //   mode: "label"   → base64 panel image → { productName, caloriesPerServing, ... }
 //   mode: "recipe"  → ingredient list    → { ingredients:[...], note }
 //   mode: "scrape"  → a recipe page URL  → { name, servings, instructions,
@@ -42,6 +43,25 @@ If a quantity isn't stated, assume one typical serving.
 ALWAYS fill calories AND protein, fat, carbs and fiber with your best numeric estimate for the stated quantity. Never leave a macro at 0 unless the food genuinely contains none of it, and never put nutrition numbers only in the note — every number goes in its field.
 Return ONLY valid JSON, no markdown, no commentary, exactly:
 {"items":[{"name":"...","qty":1,"unit":"...","calories":0,"protein":0,"fat":0,"carbs":0,"fiber":0}],"note":"one short sentence on any big assumption, or empty string"}`;
+
+// Same output shape as PARSE_PROMPT plus a title, so a photographed meal lands
+// in the identical draft editor a typed one does. The title is asked for
+// because there's no typed text to name the entry with — and that name is what
+// turns up in Usuals afterwards, so it wants to be short.
+//
+// The two things this prompt spends its words on are the two things that make
+// a photo estimate wrong: portion size (a plate gives no scale on its own) and
+// the calories you can't see (oil, butter, dressing, sugar in a sauce).
+const PLATE_PROMPT =
+  `This photo shows food someone is about to eat. Identify each distinct food and estimate the portion visible.
+Return ONLY valid JSON, no markdown, exactly:
+{"title":"short name for the meal","items":[{"name":"...","qty":1,"unit":"...","calories":0,"protein":0,"fat":0,"carbs":0,"fiber":0}],"note":"one short sentence on what you had to guess, or empty string"}
+- title: what you'd call this meal in three or four words, e.g. "Chicken burrito bowl".
+- unit: short string like "cup","oz","g","piece","slice","serving".
+- calories/protein/fat/carbs/fiber: totals for the stated quantity, macros in grams. ALWAYS give your best numeric estimate for every one — never leave a macro at 0 unless the food genuinely contains none of it, and never put nutrition numbers in the note instead of their field.
+- Judge portion size against whatever gives scale: the plate or bowl rim, cutlery, a hand, a can or glass. Say in the note when there's nothing to scale against.
+- Account for what you cannot see. Cooking oil, butter, dressing and sauce are most of what gets missed and are worth real calories. Assume a restaurant plate is cooked with more fat than a home one.
+- If the photo has no food in it, return {"title":null,"items":[]}.`;
 
 const LABEL_PROMPT =
   `Read this Nutrition Facts label image.
@@ -475,6 +495,27 @@ Deno.serve(async (req) => {
         // "estimated from the page" so a wrong ingredient has an explanation.
         parsed_by: source,
       });
+    }
+
+    if (mode === "plate") {
+      const image = String(body.image || ""); // base64, no data: prefix
+      const mediaType = String(body.media_type || "image/jpeg");
+      if (!image) return json({ error: "Missing image" }, 400);
+      const out = parseJSON(
+        await callClaude([
+          { type: "image", source: { type: "base64", media_type: mediaType, data: image } },
+          { type: "text", text: PLATE_PROMPT },
+        ]),
+      ) as Json;
+      // An empty item list is the prompt's own way of saying "that isn't food".
+      // Caught here so the client shows a sentence instead of an empty editor.
+      if (!Array.isArray(out.items) || !out.items.length) {
+        return json({
+          error: "I couldn't find any food in that photo. Try a clearer shot of " +
+            "the whole plate, or describe the meal instead.",
+        }, 400);
+      }
+      return json(out);
     }
 
     if (mode === "label") {

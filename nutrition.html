@@ -44,6 +44,11 @@
     .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
     .kicker.sm{font-size:10px;}
     .link{background:none;border:none;color:var(--green);font-size:12px;font-family:var(--f-body);font-weight:600;cursor:pointer;padding:0;}
+    .daynav{background:none;border:none;color:var(--muted);font-size:18px;line-height:1;padding:2px 7px;cursor:pointer;font-family:var(--f-body);}
+    .daynav:disabled{opacity:.22;cursor:default;}
+    .daynav:not(:disabled):hover{color:var(--green);}
+    .backdate{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--amber-soft);border-radius:9px;
+              padding:8px 11px;margin-top:12px;font-size:12.5px;color:var(--ink);line-height:1.45;}
     .ring{display:flex;align-items:baseline;gap:10px;margin-top:6px;}
     .ring-val{font-family:var(--f-mono);font-size:46px;font-weight:600;line-height:1;letter-spacing:-1px;}
     .ring-unit{font-size:13px;color:var(--muted);}
@@ -56,7 +61,8 @@
     .macro-label{font-size:10.5px;color:var(--muted);}
     .macro-compact{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);}
     .seg{display:flex;gap:4px;margin-bottom:14px;background:var(--paper);padding:3px;border-radius:9px;}
-    .seg-btn{flex:1;font-family:var(--f-body);font-size:12.5px;font-weight:600;padding:7px 4px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);}
+    /* Four ways in now, so the labels have to survive a 320px screen. */
+    .seg-btn{flex:1;min-width:0;font-family:var(--f-body);font-size:12px;font-weight:600;padding:7px 2px;border-radius:6px;border:none;cursor:pointer;background:transparent;color:var(--muted);white-space:nowrap;}
     .seg-btn.active{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06);}
     .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:11px;background:var(--surface-warm);width:100%;}
     textarea.field{resize:none;}
@@ -115,6 +121,7 @@
   // ── State (var → reachable from inline handlers) ──────────────────────────
   var S = {
     view:'today', method:'type', loaded:false, userId:null,
+    day:null,                               // the calendar day being logged to
     target:null, log:[], usuals:[], recipes:[], history:[],
     burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
     weights:[], trendTable:false, historyLoaded:false,   // body weight from vitals + the chart/table toggle
@@ -170,6 +177,26 @@
     return mon.toLocaleDateString(undefined,opt)+' – '+sun.toLocaleDateString(undefined,opt);
   }
   function timeOf(ts){ return new Date(ts).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+  function isToday(key){ return key === localDateKey(); }
+
+  // When a meal gets logged to a day that isn't today there is no clock reading
+  // to take, so we borrow the current one and put it on that date. It's a
+  // fiction, but a small and useful one: entries keep appending in the order
+  // they were typed, and the time shown is at least in the right part of the
+  // day for someone catching up in the evening.
+  //
+  // The exception is catching up after midnight, where the borrowed time would
+  // land before breakfast and jump the queue. So a backdated entry never sorts
+  // earlier than what's already on that day.
+  function occurredAtFor(key){
+    var now = new Date();
+    if(isToday(key)) return now.toISOString();
+    var p = key.split('-').map(Number);
+    var d = new Date(p[0], p[1]-1, p[2], now.getHours(), now.getMinutes(), now.getSeconds());
+    var last = S.log.length ? new Date(S.log[S.log.length-1].ts) : null;   // S.log is ascending
+    if(last && localDateKey(last)===key && d <= last) d = new Date(last.getTime() + 60000);
+    return d.toISOString();
+  }
 
   // ── HTML fragments ────────────────────────────────────────────────────────
   function macroGridHTML(m){
@@ -193,8 +220,7 @@
       items:(items||[]).map(function(it){ return {name:it.name,qty:num(it.qty),unit:it.unit,calories:it.calories||0,protein:num(it.protein),fat:num(it.fat),carbs:num(it.carbs),fiber:num(it.fiber)}; }) };
   }
   async function loadLog(){
-    var today = localDateKey();
-    var r = await sb.from('nutrition_entries').select('*').eq('log_date',today).order('occurred_at',{ascending:true});
+    var r = await sb.from('nutrition_entries').select('*').eq('log_date',S.day).order('occurred_at',{ascending:true});
     var entries = r.data || [];
     var byEntry = {};
     if(entries.length){
@@ -289,7 +315,7 @@
     var e = d.entries.filter(function(x){return x.id===entryId;})[0]; if(!e) return;
     try{
       await insertEntry({title:e.title, source:e.source, total:e.total, macros:e.macros, items:e.items});
-      toast('Logged to today');
+      toast('Logged to '+prettyDate(S.day).toLowerCase());
     }catch(err){ S.err=err.message; render(); }
   }
   function toast(msg){
@@ -302,7 +328,7 @@
 
   async function insertEntry(o){
     var ins = await sb.from('nutrition_entries').insert({
-      user_id:S.userId, log_date:localDateKey(), source:o.source, title:o.title,
+      user_id:S.userId, log_date:S.day, occurred_at:occurredAtFor(S.day), source:o.source, title:o.title,
       total_calories:Math.round(o.total||0),
       protein:round1(o.macros.p), fat:round1(o.macros.f), carbs:round1(o.macros.c), fiber:round1(o.macros.fib),
     }).select('id').single();
@@ -332,25 +358,49 @@
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
+  function readAsBase64(file){
+    return new Promise(function(res,rej){
+      var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file);
+    });
+  }
+  // Model items → draft rows. The per-unit figures are what let the qty box
+  // rescale a row without another round trip, so they're worked out once here
+  // from whatever quantity the estimate came back denominated in.
+  function draftItems(items){
+    return (items||[]).map(function(it){
+      var qty = it.qty||1; var per=function(v){ return qty?((v||0)/qty):(v||0); };
+      return {id:uid(), name:it.name, qty:qty, unit:it.unit||'serving',
+        calories:Math.round(it.calories||0), protein:round1(it.protein), fat:round1(it.fat), carbs:round1(it.carbs), fiber:round1(it.fiber),
+        calPerUnit:per(it.calories), pPerUnit:per(it.protein), fPerUnit:per(it.fat), cPerUnit:per(it.carbs), fibPerUnit:per(it.fiber)};
+    });
+  }
+
   async function breakItDown(){
     if(!S.text.trim()||S.busy) return; S.busy=true; S.err=''; render();
     try{
       var out = await callEdge({mode:'meal', text:S.text.trim()});
-      var items = (out.items||[]).map(function(it){
-        var qty = it.qty||1; var per=function(v){ return qty?((v||0)/qty):(v||0); };
-        return {id:uid(), name:it.name, qty:qty, unit:it.unit||'serving',
-          calories:Math.round(it.calories||0), protein:round1(it.protein), fat:round1(it.fat), carbs:round1(it.carbs), fiber:round1(it.fiber),
-          calPerUnit:per(it.calories), pPerUnit:per(it.protein), fPerUnit:per(it.fat), cPerUnit:per(it.carbs), fibPerUnit:per(it.fiber)};
-      });
-      S.draft = {title:S.text.trim(), items:items, note:out.note||'', source:'meal_parse'};
+      S.draft = {title:S.text.trim(), items:draftItems(out.items), note:out.note||'', source:'meal_parse'};
     }catch(e){ S.err = e.message || "Couldn't parse that. Try rephrasing."; }
+    finally{ S.busy=false; render(); }
+  }
+
+  // A photo of the food itself. Lands in the same draft editor a typed meal
+  // does — the estimate is a starting point either way, and the thing you do
+  // next is correct a portion size.
+  async function snapPlate(file){
+    if(!file||S.busy) return; S.busy=true; S.err=''; render();
+    try{
+      var b64 = await readAsBase64(file);
+      var out = await callEdge({mode:'plate', image:b64, media_type:file.type||'image/jpeg'});
+      S.draft = {title:out.title||'Meal from a photo', items:draftItems(out.items), note:out.note||'', source:'plate'};
+    }catch(e){ S.err = e.message || "Couldn't read that photo. Try describing the meal instead."; }
     finally{ S.busy=false; render(); }
   }
 
   async function readLabel(file){
     if(!file||S.busy) return; S.busy=true; S.err=''; render();
     try{
-      var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file); });
+      var b64 = await readAsBase64(file);
       var out = await callEdge({mode:'label', image:b64, media_type:file.type||'image/jpeg'});
       // Default to one serving — that's what the label is denominated in and
       // what you almost always ate. Grams stay one tap away.
@@ -362,8 +412,9 @@
   async function commitDraft(){
     if(!S.draft) return;
     var items = S.draft.items.map(function(it){ return {name:it.name,qty:it.qty,unit:it.unit,calories:it.calories,protein:it.protein,fat:it.fat,carbs:it.carbs,fiber:it.fiber}; });
+    var title = (S.draft.title||'').trim() || 'Untitled meal';
     try{
-      await insertEntry({title:S.draft.title, source:S.draft.source||'meal_parse',
+      await insertEntry({title:title, source:S.draft.source||'meal_parse',
         total:items.reduce(function(s,i){return s+i.calories;},0), macros:sumMacros(items), items:items});
       S.draft=null; S.text=''; render();
     }catch(e){ S.err=e.message; render(); }
@@ -442,11 +493,12 @@
 
   // ── Live draft-row handlers (mutate state + patch readouts; keep focus) ────
   function findDraft(id){ return S.draft.items.filter(function(x){return x.id===id;})[0]; }
+  function draftTitle(v){ S.draft.title=v; }
   function draftName(id,v){ var it=findDraft(id); if(it) it.name=v; }
   function draftQty(id,v){
     var it=findDraft(id); if(!it) return; var qty=Math.max(0,parseFloat(v)||0); it.qty=qty;
     it.calories=Math.round(it.calPerUnit*qty); it.protein=round1(it.pPerUnit*qty); it.fat=round1(it.fPerUnit*qty); it.carbs=round1(it.cPerUnit*qty); it.fiber=round1(it.fibPerUnit*qty);
-    var c=el('cal-'+id); if(c) c.value=it.calories; var m=el('mac-'+id); if(m) m.textContent=macroCompact(it);
+    var c=el('cal-'+id); if(c) c.value=it.calories; var m=el('mac-'+id); if(m) m.textContent=macroCompact(sumMacros([it]));
     refreshDraftTotal();
   }
   function draftCal(id,v){ var it=findDraft(id); if(!it) return; var cal=Math.max(0,parseInt(v)||0); it.calories=cal; it.calPerUnit=it.qty>0?cal/it.qty:cal; refreshDraftTotal(); }
@@ -477,7 +529,7 @@
   async function scanBarcode(file){
     if(!file||S.busy) return; S.busy=true; S.err=''; render();
     try{
-      var b64 = await new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result.split(',')[1]);}; r.onerror=rej; r.readAsDataURL(file); });
+      var b64 = await readAsBase64(file);
       var out = await callEdge({mode:'barcode', image:b64, media_type:file.type||'image/jpeg'});
       // Open Food Facts is per-100g, but you ate a serving. Default to one
       // serving whenever the product tells us what a serving weighs; fall back
@@ -517,6 +569,19 @@
   function setView(v){ S.view=v; S.err=''; render(); if(v==='history') loadHistory().then(function(){ S.historyLoaded=true; render(); }); }
   function setMethod(m){ S.method=m; S.err=''; render(); }
 
+  // Move the log to another day. Anything half-finished belongs to the day it
+  // was started on, so it's dropped rather than silently carried across.
+  async function setDay(key){
+    if(key > localDateKey()) return;        // you can't have eaten it yet
+    S.day=key; S.draft=null; S.label=null; S.barcode=null;
+    S.editEntryId=null; S.editItems=null; S.err='';
+    render();                               // paint the new date before the round trip
+    await loadLog();
+    render();
+  }
+  function shiftDay(n){ setDay(dayAdd(S.day, n)); }
+  function openDay(key){ S.view='today'; setDay(key); window.scrollTo(0,0); }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   function render(){
     var app = el('app');
@@ -537,7 +602,7 @@
     var total = S.log.reduce(function(s,e){return s+e.total;},0);
     var dm = S.log.reduce(function(a,e){var m=e.macros||sumMacros(e.items); return {p:a.p+(m.p||0),f:a.f+(m.f||0),c:a.c+(m.c||0),fib:a.fib+(m.fib||0)};},{p:0,f:0,c:0,fib:0});
     var h = '<section class="card">';
-    h += '<div class="row-between" style="margin-bottom:10px"><span class="kicker">'+prettyDate(localDateKey())+'</span>';
+    h += '<div class="row-between" style="margin-bottom:10px">'+dayStepperHTML();
     if(!S.editTarget){
       h += '<button class="link" onclick="S.editTarget=true;render()">'+(S.target?'edit goal':'set a goal')+'</button>';
     }else{
@@ -545,19 +610,31 @@
     }
     h += '</div>'+ringHTML(total,S.target);
     if(dm.p||dm.f||dm.c||dm.fib) h += macroGridHTML(dm);
+    // Logging to the wrong day is the quiet mistake this whole control exists to
+    // prevent, so being off today is stated outright rather than left to a date
+    // you might not read.
+    if(!isToday(S.day)) h += '<div class="backdate"><span>Adding to <strong>'+prettyDate(S.day)+'</strong>, not today.</span>'+
+      '<button class="link" style="text-decoration:underline" onclick="setDay(localDateKey())">back to today</button></div>';
     h += '</section>';
 
-    h += balanceCard();
+    // Anchored on the last full day whatever you're looking at, so it stays put
+    // rather than following you back through the log and reading as that day's.
+    if(isToday(S.day)) h += balanceCard();
 
     // add methods
+    // Named for what you point the phone at, so "Plate" and "Label" don't both
+    // just read as "a photo".
     h += '<section class="card"><div class="seg">';
-    [['type','Type a meal'],['label','Photo label'],['barcode','Barcode']].forEach(function(m){
+    [['type','Type'],['plate','Plate'],['label','Label'],['barcode','Barcode']].forEach(function(m){
       h += '<button class="seg-btn'+(S.method===m[0]?' active':'')+'" onclick="setMethod(\''+m[0]+'\')">'+m[1]+'</button>';
     });
     h += '</div>';
 
+    // Typed and photographed meals share the draft editor: both are estimates,
+    // and the correction you make next is the same one.
     if(S.method==='type' && !S.draft) h += paneType();
-    else if(S.method==='type' && S.draft) h += paneDraft();
+    else if(S.method==='plate' && !S.draft) h += panePlateEmpty();
+    else if((S.method==='type'||S.method==='plate') && S.draft) h += paneDraft();
     else if(S.method==='label' && !S.label) h += paneLabelEmpty();
     else if(S.method==='label' && S.label) h += paneLabel();
     else if(S.method==='barcode') h += paneBarcode();
@@ -573,6 +650,14 @@
     }
     h += '</section><p class="fine">Calorie figures are estimates for general tracking, not medical or dietary advice.</p>';
     return h;
+  }
+
+  function dayStepperHTML(){
+    return '<span style="display:flex;align-items:center;gap:1px;min-width:0">'+
+      '<button class="daynav" onclick="shiftDay(-1)" title="Previous day" aria-label="Previous day">‹</button>'+
+      '<span class="kicker">'+prettyDate(S.day)+'</span>'+
+      '<button class="daynav"'+(isToday(S.day)?' disabled':'')+' onclick="shiftDay(1)" title="Next day" aria-label="Next day">›</button>'+
+      '</span>';
   }
 
   // Yesterday's intake vs Oura calorie burn → deficit / surplus.
@@ -618,7 +703,12 @@
 
   function paneDraft(){
     var d = S.draft;
-    var h = '<div class="draft-grid" style="padding-bottom:4px;border-bottom:1px solid var(--border)">';
+    // The title is the name this meal keeps in Usuals, so it's worth a moment
+    // here: a photo's guess needs confirming, and a typed description is
+    // usually a sentence when what you want back later is two words.
+    var h = '<label class="kicker sm" style="display:block;margin-bottom:4px">Meal name</label>'+
+      '<input class="field" value="'+esc(d.title||'')+'" oninput="draftTitle(this.value)" placeholder="Name this meal" style="margin-bottom:12px;font-weight:500">';
+    h += '<div class="draft-grid" style="padding-bottom:4px;border-bottom:1px solid var(--border)">';
     ['Item','Qty','Cal',''].forEach(function(t,i){ h += '<span class="kicker sm" style="text-align:'+(i===0?'left':'center')+'">'+t+'</span>'; });
     h += '</div>';
     h += d.items.map(function(it){
@@ -627,7 +717,10 @@
         '<input class="dcell" inputmode="decimal" value="'+it.qty+'" oninput="draftQty(\''+it.id+'\',this.value)">'+
         '<input id="cal-'+it.id+'" class="dcell bold" inputmode="numeric" value="'+it.calories+'" oninput="draftCal(\''+it.id+'\',this.value)">'+
         '<button class="x" onclick="draftRemove(\''+it.id+'\')">×</button></div>'+
-        '<div style="padding-top:4px"><span id="mac-'+it.id+'" class="macro-compact">'+macroCompact(it)+'</span></div></div>';
+        // sumMacros over the single row, because a draft item names its macros
+        // protein/fat/carbs/fiber while macroCompact reads p/f/c/fib. Passing
+        // the item straight in printed four zeros on every line.
+        '<div style="padding-top:4px"><span id="mac-'+it.id+'" class="macro-compact">'+macroCompact(sumMacros([it]))+'</span></div></div>';
     }).join('');
     h += '<button class="link" style="padding:8px 0" onclick="draftAddItem()">+ add item</button>';
     h += '<div class="row-between" style="padding:10px 0 2px;border-top:1px solid var(--border);margin-top:4px;align-items:baseline"><span style="font-size:13px;color:var(--muted)">Meal total</span><span id="draftTotal" style="font-family:var(--f-mono);font-size:22px;font-weight:600">'+d.items.reduce(function(s,i){return s+i.calories;},0).toLocaleString()+'</span></div>';
@@ -636,6 +729,14 @@
     h += '<button class="btn btn-primary" onclick="commitDraft()">Add to log</button>';
     h += '<button class="link" style="width:100%;color:var(--muted);padding:10px 0 0" onclick="S.draft=null;render()">discard</button>';
     return h;
+  }
+
+  function panePlateEmpty(){
+    return '<div style="text-align:center;padding:8px 0"><div style="font-size:26px;opacity:.4;margin-bottom:6px">◍</div>'+
+      '<p style="font-size:13px;color:var(--muted);margin:0 0 12px;line-height:1.5">Snap the food itself and I\'ll work out what\'s on the plate. Get the whole plate in frame — and something for scale beside it, like a fork, helps the portion sizes.</p>'+
+      '<input id="plateFile" type="file" accept="image/*" capture="environment" style="display:none" onchange="snapPlate(this.files&&this.files[0])">'+
+      '<button class="btn btn-amber" onclick="el(\'plateFile\').click()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Looking…':'Take a photo')+'</button>'+
+      '<p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.45">A photo can\'t see oil, butter or what\'s under the surface, so check the portions before you add it.</p></div>';
   }
 
   function paneLabelEmpty(){
@@ -752,13 +853,21 @@
     h += '<div class="btn-row"><button class="btn btn-primary" onclick="saveEntryEdit()">Save</button><button class="btn btn-ghost btn-auto" onclick="cancelEntryEdit()">Cancel</button></div></div>';
     return h;
   }
+  // Only the routes whose numbers came from somewhere other than you get a
+  // badge — a read label is near-exact, a photo estimate is a guess, and months
+  // later that's the difference worth being able to see at a glance.
+  function sourceBadge(src){
+    if(src==='label') return '<span class="badge">LABEL</span>';
+    if(src==='plate') return '<span class="badge">PHOTO</span>';
+    return '';
+  }
   function loggedRow(e){
     if(S.editEntryId===e.id) return entryEditor(e);
     var hasMacros = e.macros && (e.macros.p||e.macros.f||e.macros.c||e.macros.fib);
     var canOpen = hasMacros || (e.items && e.items.length>1);
     var h = '<div class="logrow"><div class="head"'+(canOpen?(' style="cursor:pointer" onclick="toggleRow(this)"'):'')+'>'+
       '<span class="time">'+timeOf(e.ts)+'</span>'+
-      '<span class="ltitle">'+esc(e.title)+(e.source==='label'?'<span class="badge">LABEL</span>':'')+'</span>'+
+      '<span class="ltitle">'+esc(e.title)+sourceBadge(e.source)+'</span>'+
       '<span class="lcal">'+e.total.toLocaleString()+'</span>'+
       '<button class="x" style="font-size:14px;padding:0 0 0 6px;color:var(--green)" title="Edit quantity" onclick="event.stopPropagation();openEntryEdit(\''+e.id+'\')">✎</button>'+
       '<button class="x" style="font-size:16px;padding:0 0 0 4px" onclick="event.stopPropagation();deleteEntry(\''+e.id+'\')">×</button></div>';
@@ -1223,8 +1332,10 @@
         '<span style="font-family:var(--f-mono);font-size:18px;font-weight:600;color:'+(over?'var(--danger)':'var(--ink)')+'">'+d.total.toLocaleString()+'</span></div>';
       var body='';
       if(d.expanded && d.entries){
-        if(!d.entries.length){ body = '<div style="padding:4px 0 12px;color:var(--muted);font-size:12px;border-bottom:1px dashed var(--border)">No items.</div>'; }
-        else body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)">'+d.entries.map(function(e){
+        // Noticing a day is short and being able to fix it are the same moment.
+        var jump = '<div style="padding:2px 0 10px 14px"><button class="link" onclick="openDay(\''+d.key+'\')">add to this day →</button></div>';
+        if(!d.entries.length){ body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)"><div style="color:var(--muted);font-size:12px;padding-left:14px">No items.</div>'+jump+'</div>'; }
+        else body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)">'+jump+d.entries.map(function(e){
           var em=e.macros||{}; var emac=(em.p||em.f||em.c||em.fib)?(' · '+macroCompact(em)):'';
           return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 14px">'+
             '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+esc(e.title)+'</div>'+
@@ -1242,6 +1353,7 @@
     var profile = await requireUser();   // from auth.js — any signed-in user
     if(!profile) return;                 // redirected to sign-in
     S.userId = profile.user.id;
+    S.day = localDateKey();
     var st = await sb.from('nutrition_settings').select('calorie_target').eq('user_id',S.userId).maybeSingle();
     S.target = st.data ? st.data.calorie_target : null;
     await Promise.all([loadLog(), loadUsuals(), loadRecipes(), loadEnergy(), loadWeights()]);
