@@ -49,6 +49,12 @@
     .daynav:not(:disabled):hover{color:var(--green);}
     .backdate{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:var(--amber-soft);border-radius:9px;
               padding:8px 11px;margin-top:12px;font-size:12.5px;color:var(--ink);line-height:1.45;}
+    .mealsel{font-family:var(--f-body);font-size:13px;font-weight:600;color:var(--ink);background:var(--surface-warm);
+             border:1px solid var(--border);border-radius:8px;padding:6px 9px;cursor:pointer;}
+    .mealhead{display:flex;justify-content:space-between;align-items:baseline;padding:15px 0 5px;
+              border-bottom:1px solid var(--border);}
+    .mealhead:first-child{padding-top:10px;}
+    .mealsub{font-family:var(--f-mono);font-size:12.5px;font-weight:600;color:var(--muted);}
     .ring{display:flex;align-items:baseline;gap:10px;margin-top:6px;}
     .ring-val{font-family:var(--f-mono);font-size:46px;font-weight:600;line-height:1;letter-spacing:-1px;}
     .ring-unit{font-size:13px;color:var(--muted);}
@@ -122,6 +128,8 @@
   var S = {
     view:'today', method:'type', loaded:false, userId:null,
     day:null,                               // the calendar day being logged to
+    meal:null,                              // which meal new entries join
+    editMeal:null,                          // and which one the open editor is moving to
     target:null, log:[], usuals:[], recipes:[], history:[],
     burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
     weights:[], trendTable:false, historyLoaded:false,   // body weight from vitals + the chart/table toggle
@@ -198,6 +206,41 @@
     return d.toISOString();
   }
 
+  // ── Meals ─────────────────────────────────────────────────────────────────
+  // In the order a day happens. The keys are exactly what nutrition_entries
+  // .meal_type's check constraint allows — the column has been in the schema
+  // since 10_nutrition.sql and nothing has ever written to it until now, so
+  // this needs no migration.
+  var MEALS = [['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snack','Snack']];
+  function mealLabel(k){
+    for(var i=0;i<MEALS.length;i++) if(MEALS[i][0]===k) return MEALS[i][1];
+    return 'Snack';
+  }
+  // A guess from the clock. It seeds the picker, and it's what groups every
+  // entry logged before the column was written — which is all of them so far.
+  //
+  // Inferring at display time rather than backfilling the column is deliberate:
+  // a backfill would put a guess on disk indistinguishable from a choice, and
+  // these boundaries are only ever roughly right. Nothing stored claims the old
+  // rows were told which meal they were.
+  function inferMeal(ts){
+    var hr = new Date(ts).getHours();
+    if(hr >= 4  && hr < 11) return 'breakfast';
+    if(hr >= 11 && hr < 16) return 'lunch';
+    if(hr >= 16 && hr < 22) return 'dinner';
+    return 'snack';                          // late night and small hours
+  }
+  function mealOf(e){ return e.meal || inferMeal(e.ts); }
+
+  // Meal order, not clock order, is the structure — but inside a meal the
+  // entries stay chronological. Empty meals don't get a heading.
+  function groupByMeal(entries){
+    var by = {};
+    (entries||[]).forEach(function(e){ var k=mealOf(e); (by[k]=by[k]||[]).push(e); });
+    return MEALS.filter(function(m){ return by[m[0]] && by[m[0]].length; })
+                .map(function(m){ return {key:m[0], label:m[1], entries:by[m[0]]}; });
+  }
+
   // ── HTML fragments ────────────────────────────────────────────────────────
   function macroGridHTML(m){
     var rows = [['Protein',Math.round(m.p||0),'var(--green)'],['Fat',Math.round(m.f||0),'var(--amber)'],
@@ -208,14 +251,25 @@
   }
   function ringHTML(value,target){
     var pct = target ? Math.min(value/target,1) : 0; var over = target && value>target;
-    return '<div class="ring"><span class="ring-val">'+value.toLocaleString()+'</span>'+
+    var h = '<div class="ring"><span class="ring-val">'+value.toLocaleString()+'</span>'+
       '<span class="ring-unit">cal'+(target?(' of '+target.toLocaleString()):'')+'</span>'+
       (target?('<div class="bar"><div class="bar-fill" style="width:'+(pct*100)+'%;background:'+(over?'var(--danger)':'var(--green)')+'"></div></div>'):'')+'</div>';
+    // What's left is the number that changes a decision at four in the
+    // afternoon; what's been eaten only tells you where you've been. The big
+    // figure stays the total because that's what the day is a record of, but
+    // the remainder gets said out loud rather than left as a subtraction.
+    if(target){
+      var left = target - value;
+      h += '<div style="text-align:right;font-size:12.5px;font-weight:600;margin-top:5px;color:'+
+        (over?'var(--danger)':'var(--green-deep)')+'">'+
+        (over ? Math.abs(left).toLocaleString()+' over' : left.toLocaleString()+' left')+'</div>';
+    }
+    return h;
   }
 
   // ── Data access (Supabase replaces window.storage) ────────────────────────
   function entryToView(e, items){
-    return { id:e.id, ts:e.occurred_at, title:e.title, source:e.source, total:e.total_calories||0,
+    return { id:e.id, ts:e.occurred_at, title:e.title, source:e.source, meal:e.meal_type||null, total:e.total_calories||0,
       macros:{p:num(e.protein),f:num(e.fat),c:num(e.carbs),fib:num(e.fiber)},
       items:(items||[]).map(function(it){ return {name:it.name,qty:num(it.qty),unit:it.unit,calories:it.calories||0,protein:num(it.protein),fat:num(it.fat),carbs:num(it.carbs),fiber:num(it.fiber)}; }) };
   }
@@ -315,7 +369,9 @@
     var e = d.entries.filter(function(x){return x.id===entryId;})[0]; if(!e) return;
     try{
       await insertEntry({title:e.title, source:e.source, total:e.total, macros:e.macros, items:e.items});
-      toast('Logged to '+prettyDate(S.day).toLowerCase());
+      // Says the meal too: the picker lives on the Today tab, so from here the
+      // choice it's applying is off screen, and this is the moment it matters.
+      toast('Logged to '+prettyDate(S.day).toLowerCase()+' · '+mealLabel(S.meal));
     }catch(err){ S.err=err.message; render(); }
   }
   function toast(msg){
@@ -328,7 +384,8 @@
 
   async function insertEntry(o){
     var ins = await sb.from('nutrition_entries').insert({
-      user_id:S.userId, log_date:S.day, occurred_at:occurredAtFor(S.day), source:o.source, title:o.title,
+      user_id:S.userId, log_date:S.day, occurred_at:occurredAtFor(S.day),
+      meal_type:S.meal || inferMeal(Date.now()), source:o.source, title:o.title,
       total_calories:Math.round(o.total||0),
       protein:round1(o.macros.p), fat:round1(o.macros.f), carbs:round1(o.macros.c), fiber:round1(o.macros.fib),
     }).select('id').single();
@@ -621,10 +678,18 @@
     // rather than following you back through the log and reading as that day's.
     if(isToday(S.day)) h += balanceCard();
 
+    // Which meal, then how to enter it. The clock's guess is right most of the
+    // time you're logging as you eat, and reliably wrong when you're catching
+    // up on an earlier day — so it's shown as a default you can see rather than
+    // applied behind your back.
+    h += '<section class="card">';
+    h += '<div class="row-between" style="margin-bottom:12px;align-items:center">'+
+      '<span class="kicker sm">Meal</span>'+mealSelectHTML('mealSel','S.meal=this.value;render()',S.meal)+'</div>';
+
     // add methods
     // Named for what you point the phone at, so "Plate" and "Label" don't both
     // just read as "a photo".
-    h += '<section class="card"><div class="seg">';
+    h += '<div class="seg">';
     [['type','Type'],['plate','Plate'],['label','Label'],['barcode','Barcode']].forEach(function(m){
       h += '<button class="seg-btn'+(S.method===m[0]?' active':'')+'" onclick="setMethod(\''+m[0]+'\')">'+m[1]+'</button>';
     });
@@ -641,15 +706,28 @@
     if(S.err) h += '<p class="err">'+esc(S.err)+'</p>';
     h += '</section>';
 
-    // today log
+    // today log, laid out meal by meal
     h += '<section class="card tight">';
     if(!S.log.length){ h += '<p class="empty">Nothing logged yet. Describe your first meal above — tap any line afterward to see its breakdown.</p>'; }
     else{
-      h += '<div class="kicker sm" style="padding:10px 0 2px">Logged</div>';
-      h += S.log.slice().reverse().map(loggedRow).join('');
+      h += groupByMeal(S.log).map(function(g){
+        var sub = g.entries.reduce(function(s,e){return s+e.total;},0);
+        return '<div class="mealhead"><span class="kicker sm">'+g.label+'</span>'+
+          '<span class="mealsub">'+sub.toLocaleString()+'</span></div>'+
+          g.entries.map(loggedRow).join('');
+      }).join('');
     }
     h += '</section><p class="fine">Calorie figures are estimates for general tracking, not medical or dietary advice.</p>';
     return h;
+  }
+
+  // A native select, so the phone gives its own picker and there's no second
+  // segmented control stacked on the first.
+  function mealSelectHTML(id, onchange, selected){
+    return '<select id="'+id+'" class="mealsel" onchange="'+onchange+'">'+
+      MEALS.map(function(m){
+        return '<option value="'+m[0]+'"'+(selected===m[0]?' selected':'')+'>'+m[1]+'</option>';
+      }).join('')+'</select>';
   }
 
   function dayStepperHTML(){
@@ -810,6 +888,7 @@
     var items = (e.items && e.items.length) ? e.items
       : [{name:e.title, unit:'serving', qty:1, calories:e.total, protein:(e.macros||{}).p, fat:(e.macros||{}).f, carbs:(e.macros||{}).c, fiber:(e.macros||{}).fib}];
     S.editEntryId = id;
+    S.editMeal = mealOf(e);          // an inferred meal becomes a chosen one on save
     S.editItems = items.map(function(it){
       var q = it.qty || 1; var per = function(v){ return q ? ((v||0)/q) : (v||0); };
       return {name:it.name, unit:it.unit, qty:q,
@@ -824,19 +903,19 @@
     var c=el('eecal-'+idx); if(c) c.textContent=it.calories;
     var t=el('eeTotal'); if(t) t.textContent=S.editItems.reduce(function(s,x){return s+x.calories;},0).toLocaleString();
   }
-  function cancelEntryEdit(){ S.editEntryId=null; S.editItems=null; render(); }
+  function cancelEntryEdit(){ S.editEntryId=null; S.editItems=null; S.editMeal=null; render(); }
   async function saveEntryEdit(){
     var id=S.editEntryId, items=S.editItems;
     var total=items.reduce(function(s,i){return s+i.calories;},0);
     var m=sumMacros(items);
     try{
-      var up=await sb.from('nutrition_entries').update({total_calories:Math.round(total), protein:round1(m.p), fat:round1(m.f), carbs:round1(m.c), fiber:round1(m.fib)}).eq('id',id);
+      var up=await sb.from('nutrition_entries').update({total_calories:Math.round(total), meal_type:S.editMeal, protein:round1(m.p), fat:round1(m.f), carbs:round1(m.c), fiber:round1(m.fib)}).eq('id',id);
       if(up.error) throw up.error;
       var del=await sb.from('nutrition_entry_items').delete().eq('entry_id',id);
       if(del.error) throw del.error;
       var rows=items.map(function(it,i){ return {entry_id:id, position:i, name:it.name, qty:it.qty, unit:it.unit||'serving', calories:Math.round(it.calories), protein:round1(it.protein), fat:round1(it.fat), carbs:round1(it.carbs), fiber:round1(it.fiber)}; });
       if(rows.length){ var ins=await sb.from('nutrition_entry_items').insert(rows); if(ins.error) throw ins.error; }
-      S.editEntryId=null; S.editItems=null; await loadLog(); render();
+      S.editEntryId=null; S.editItems=null; S.editMeal=null; await loadLog(); render();
     }catch(e){ S.err=e.message; render(); }
   }
   function entryEditor(e){
@@ -850,6 +929,10 @@
         '<span id="eecal-'+i+'" style="font-family:var(--f-mono);font-size:13px;font-weight:600;width:48px;text-align:right">'+it.calories+'</span></div>';
     }).join('');
     h += '<div class="row-between" style="padding:8px 0 8px;border-top:1px solid var(--border);margin-top:6px;align-items:baseline"><span style="font-size:12px;color:var(--muted)">Total</span><span id="eeTotal" style="font-family:var(--f-mono);font-size:16px;font-weight:600">'+S.editItems.reduce(function(s,x){return s+x.calories;},0).toLocaleString()+'</span></div>';
+    // The other half of getting a meal wrong is putting it in the right day and
+    // the wrong part of it, so the fix lives next to the quantity fix.
+    h += '<div class="row-between" style="padding:0 0 10px;align-items:center"><span style="font-size:12px;color:var(--muted)">Meal</span>'+
+      mealSelectHTML('eeMeal-'+e.id,'S.editMeal=this.value',S.editMeal)+'</div>';
     h += '<div class="btn-row"><button class="btn btn-primary" onclick="saveEntryEdit()">Save</button><button class="btn btn-ghost btn-auto" onclick="cancelEntryEdit()">Cancel</button></div></div>';
     return h;
   }
@@ -1335,13 +1418,21 @@
         // Noticing a day is short and being able to fix it are the same moment.
         var jump = '<div style="padding:2px 0 10px 14px"><button class="link" onclick="openDay(\''+d.key+'\')">add to this day →</button></div>';
         if(!d.entries.length){ body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)"><div style="color:var(--muted);font-size:12px;padding-left:14px">No items.</div>'+jump+'</div>'; }
-        else body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)">'+jump+d.entries.map(function(e){
-          var em=e.macros||{}; var emac=(em.p||em.f||em.c||em.fib)?(' · '+macroCompact(em)):'';
-          return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 14px">'+
-            '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+esc(e.title)+'</div>'+
-            '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+e.total.toLocaleString()+' cal'+emac+'</div></div>'+
-            '<button class="pill" onclick="relogEntry(\''+d.key+'\',\''+e.id+'\')">+ Log</button></div>';
-        }).join('')+'</div>';
+        // Grouped the same way Today is — a past day is asked the same question
+        // ("where did that go"), and it deserves the same answer.
+        else body = '<div style="padding:4px 0 12px;border-bottom:1px dashed var(--border)">'+jump+
+          groupByMeal(d.entries).map(function(g){
+            var sub = g.entries.reduce(function(s,e){return s+e.total;},0);
+            return '<div class="mealhead" style="padding:9px 0 4px 14px"><span class="kicker sm">'+g.label+'</span>'+
+              '<span class="mealsub">'+sub.toLocaleString()+'</span></div>'+
+              g.entries.map(function(e){
+                var em=e.macros||{}; var emac=(em.p||em.f||em.c||em.fib)?(' · '+macroCompact(em)):'';
+                return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 6px 14px">'+
+                  '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">'+esc(e.title)+'</div>'+
+                  '<div style="font-size:11px;color:var(--muted);font-family:var(--f-mono)">'+e.total.toLocaleString()+' cal'+emac+'</div></div>'+
+                  '<button class="pill" onclick="relogEntry(\''+d.key+'\',\''+e.id+'\')">+ Log</button></div>';
+              }).join('');
+          }).join('')+'</div>';
       }
       return head+body;
     }).join('');
@@ -1354,6 +1445,7 @@
     if(!profile) return;                 // redirected to sign-in
     S.userId = profile.user.id;
     S.day = localDateKey();
+    S.meal = inferMeal(Date.now());
     var st = await sb.from('nutrition_settings').select('calorie_target').eq('user_id',S.userId).maybeSingle();
     S.target = st.data ? st.data.calorie_target : null;
     await Promise.all([loadLog(), loadUsuals(), loadRecipes(), loadEnergy(), loadWeights()]);
