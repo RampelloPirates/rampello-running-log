@@ -565,20 +565,21 @@
     }catch(e){ S.err=e.message; render(); }
   }
 
-  // Calories are the only thing required. Sometimes you know roughly what a
-  // thing cost you and naming it is work you'd rather not do — a handful of
-  // something at a party, the second half of a plate you didn't order. An
-  // unnamed 250 in the log beats an accurate nothing.
-  async function addManual(){
-    var name = ((el('mName')||{}).value || '').trim();
+  // A number and nothing else. Anything with a name and a breakdown belongs in
+  // Break it down, which does the same job better — this is only for the times
+  // you already know what it cost you and describing the food is work you'd
+  // rather not do: a handful of something at a party, the half of a plate you
+  // didn't order. Those have no good phrasing for an estimator anyway, and
+  // waiting on a round trip to be told a figure you supplied is absurd.
+  var QUICK_ADD_TITLE = 'Quick add';
+  async function quickAdd(){
     var cal = parseInt((el('mCal')||{}).value)||0;
     if(cal<=0) return;
-    var title = name || 'Quick add';
-    var item = {name:title, qty:1, unit:'serving', calories:cal,
-      protein:parseFloat((el('mP')||{}).value)||0, fat:parseFloat((el('mF')||{}).value)||0, carbs:parseFloat((el('mC')||{}).value)||0, fiber:parseFloat((el('mFib')||{}).value)||0};
     try{
-      await insertEntry({title:title, source:'manual', total:cal, macros:{p:item.protein,f:item.fat,c:item.carbs,fib:item.fiber}, items:[item]});
-      render();                              // rebuilds the pane, which clears the fields
+      await insertEntry({title:QUICK_ADD_TITLE, source:'manual', total:cal,
+        macros:{p:0,f:0,c:0,fib:0},
+        items:[{name:QUICK_ADD_TITLE, qty:1, unit:'serving', calories:cal, protein:0, fat:0, carbs:0, fiber:0}]});
+      render();                              // rebuilds the pane, which clears the field
     }catch(e){ S.err=e.message; render(); }
   }
 
@@ -936,13 +937,17 @@
   function paneType(){
     var h = '<textarea class="field" rows="2" placeholder="e.g. chicken burrito bowl with rice, black beans, guac and a handful of chips" oninput="S.text=this.value" style="margin-bottom:10px">'+esc(S.text)+'</textarea>';
     h += '<button class="btn btn-primary" onclick="breakItDown()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Working…':'Break it down')+'</button>';
-    h += '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)"><div class="kicker sm" style="margin-bottom:8px">or add by hand</div>';
-    h += '<div style="display:flex;gap:7px"><input id="mName" class="field" placeholder="Food — optional" style="flex:2;min-width:0;padding:9px 10px"><input id="mCal" class="field" inputmode="numeric" placeholder="cal" style="width:64px;font-family:var(--f-mono);text-align:center;padding:9px 8px"><button class="btn btn-primary btn-auto" style="padding:0 16px" onclick="addManual()">Add</button></div>';
-    h += '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:7px">';
-    [['P','mP'],['F','mF'],['C','mC'],['Fb','mFib']].forEach(function(x){
-      h += '<div style="display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:9px;padding:0 8px;min-width:0"><span style="font-family:var(--f-mono);font-size:12px;color:var(--muted);font-weight:600">'+x[0]+'</span><input id="'+x[1]+'" inputmode="decimal" placeholder="0" style="flex:1;font-family:var(--f-mono);font-size:13px;border:none;background:transparent;padding:8px 0;min-width:0;width:100%"><span style="font-size:11px;color:var(--muted)">g</span></div>';
-    });
-    h += '</div><div style="font-size:11px;color:var(--muted);margin-top:6px">Calories are the only thing needed — a nameless one lands as “Quick add”.</div></div>';
+    // No name, no macro boxes, no heading. Naming a food and breaking it down
+    // is what the box above already does, and better; all this needs to be is
+    // somewhere to put a number you already have.
+    h += '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">'+
+      // No align-items: the default stretch is what makes the button match the
+      // input's height rather than collapsing to its own line-height.
+      '<div style="display:flex;gap:7px">'+
+        '<input id="mCal" class="field" inputmode="numeric" placeholder="cal" style="width:82px;font-family:var(--f-mono);font-size:15px;text-align:center;padding:9px 8px">'+
+        '<button class="btn btn-primary btn-auto" style="padding:0 18px" onclick="quickAdd()">Add</button>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--muted);margin-top:7px;line-height:1.45">Already know the number? This logs it on its own, as “Quick add”.</div></div>';
     return h;
   }
 
