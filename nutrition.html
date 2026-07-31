@@ -65,6 +65,10 @@
     .macro-val{font-family:var(--f-mono);font-size:15px;font-weight:600;line-height:1.1;}
     .macro-val .g{font-size:10px;color:var(--muted);margin-left:1px;}
     .macro-label{font-size:10.5px;color:var(--muted);}
+    .macro-foot{display:flex;justify-content:space-between;align-items:baseline;gap:3px;}
+    .macro-goal{font-family:var(--f-mono);font-size:9.5px;color:var(--muted);flex-shrink:0;}
+    .macro-bar{height:3px;background:var(--border);border-radius:99px;overflow:hidden;margin-top:5px;}
+    .macro-bar>div{height:100%;border-radius:99px;transition:width .4s;}
     .macro-compact{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);}
     .seg{display:flex;gap:4px;margin-bottom:14px;background:var(--paper);padding:3px;border-radius:9px;}
     /* Four ways in now, so the labels have to survive a 320px screen. */
@@ -94,6 +98,7 @@
     .lcal{font-family:var(--f-mono);font-size:15px;font-weight:600;}
     .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:26px 10px;line-height:1.5;}
     .note{font-size:12px;color:var(--muted);font-style:italic;margin:0 0 12px;}
+    .hint{font-size:11.5px;color:var(--muted);margin:8px 0 0;line-height:1.5;}
     .fine{font-size:11px;color:var(--muted);text-align:center;margin-top:16px;line-height:1.5;}
     .h2{font-family:var(--f-display);font-size:15px;margin:2px 0 12px;}
     .recipe-summary{background:var(--green-tint);border-radius:12px;padding:14px;margin-bottom:12px;}
@@ -130,7 +135,9 @@
     day:null,                               // the calendar day being logged to
     meal:null,                              // which meal new entries join
     editMeal:null,                          // and which one the open editor is moving to
-    target:null, log:[], usuals:[], recipes:[], history:[],
+    target:null,                            // daily calorie goal
+    mt:{p:null,f:null,c:null,fib:null},     // and the macro goals beside it
+    log:[], usuals:[], recipes:[], history:[],
     burnByDay:{}, yIntake:0, yKey:null,   // Oura calorie burn per day + yesterday's intake
     weights:[], trendTable:false, historyLoaded:false,   // body weight from vitals + the chart/table toggle
     draft:null, label:null, barcode:null, editEntryId:null, editItems:null,
@@ -243,10 +250,19 @@
 
   // ── HTML fragments ────────────────────────────────────────────────────────
   function macroGridHTML(m){
-    var rows = [['Protein',Math.round(m.p||0),'var(--green)'],['Fat',Math.round(m.f||0),'var(--amber)'],
-                ['Carbs',Math.round(m.c||0),'var(--green-deep)'],['Fiber',Math.round(m.fib||0),'var(--teal)']];
+    var rows = [['Protein',Math.round(m.p||0),'var(--green)',S.mt.p],['Fat',Math.round(m.f||0),'var(--amber)',S.mt.f],
+                ['Carbs',Math.round(m.c||0),'var(--green-deep)',S.mt.c],['Fiber',Math.round(m.fib||0),'var(--teal)',S.mt.fib]];
     return '<div class="macro-grid">'+rows.map(function(r){
-      return '<div class="macro-cell"><div class="macro-val" style="color:'+r[2]+'">'+r[1]+'<span class="g">g</span></div><div class="macro-label">'+r[0]+'</div></div>';
+      var goal = r[3];
+      var h = '<div class="macro-cell"><div class="macro-val" style="color:'+r[2]+'">'+r[1]+'<span class="g">g</span></div>'+
+        '<div class="macro-foot"><span class="macro-label">'+r[0]+'</span>'+
+        (goal ? '<span class="macro-goal">'+goal+'</span>' : '')+'</div>';
+      // The bar caps at full and keeps the macro's own colour past the goal.
+      // Going over on protein is not the same kind of event as going over on
+      // calories, and a red bar would say it was — the number above is where
+      // the truth about overshooting lives.
+      if(goal) h += '<div class="macro-bar"><div style="width:'+(Math.min(r[1]/goal,1)*100)+'%;background:'+r[2]+'"></div></div>';
+      return h+'</div>';
     }).join('')+'</div>';
   }
   function ringHTML(value,target){
@@ -512,10 +528,82 @@
   async function deleteEntry(id){ await sb.from('nutrition_entries').delete().eq('id',id); await loadLog(); render(); }
 
   async function saveTarget(){
-    var v = parseInt((el('targetInput')||{}).value); var t = v>0?v:null;
-    S.target=t; S.editTarget=false;
-    await sb.from('nutrition_settings').upsert({user_id:S.userId, calorie_target:t, updated_at:new Date().toISOString()},{onConflict:'user_id'});
+    var iv = function(id){ var v = parseInt((el(id)||{}).value); return v>0 ? v : null; };
+    S.target = iv('gCal');
+    S.mt = {p:iv('gP'), f:iv('gF'), c:iv('gC'), fib:iv('gFib')};
+    S.editTarget = false;
+    await sb.from('nutrition_settings').upsert({user_id:S.userId,
+      calorie_target:S.target, protein_target:S.mt.p, fat_target:S.mt.f,
+      carbs_target:S.mt.c, fiber_target:S.mt.fib,
+      updated_at:new Date().toISOString()},{onConflict:'user_id'});
     render();
+  }
+
+  // ── Setting the goals ─────────────────────────────────────────────────────
+  // The average burn over the last `days` full days. Today is left out on
+  // purpose: its Oura figure is a day in progress, and counting it would drag
+  // the average down by however much of the day is still to come.
+  var BURN_WINDOW = 14, BURN_MIN_DAYS = 7;
+  function recentBurn(days){
+    var k = dayAdd(localDateKey(), -1), vals = [];
+    for(var i=0;i<days;i++){
+      var v = S.burnByDay ? S.burnByDay[k] : null;
+      if(v!=null) vals.push(v);
+      k = dayAdd(k,-1);
+    }
+    // Too few days and the average is describing one hard week rather than you.
+    if(vals.length < BURN_MIN_DAYS) return null;
+    return {avg: Math.round(vals.reduce(function(a,b){return a+b;},0)/vals.length), n: vals.length};
+  }
+  function fillGoal(v){ var n=el('gCal'); if(n){ n.value=v; n.focus(); } }
+  function fillProtein(v){ var n=el('gP'); if(n){ n.value=v; n.focus(); } }
+
+  // Most apps work the goal out from height, weight and an activity guess.
+  // There's no need to guess here — Oura has been measuring the burn all along,
+  // so the suggestion is built from what actually happened.
+  function burnSuggestHTML(){
+    var b = recentBurn(BURN_WINDOW);
+    if(!b) return '<p class="hint">Once Oura has synced about a fortnight of burn, this will suggest a figure from what you actually burn rather than a formula.</p>';
+    var span = (b.n === BURN_WINDOW) ? ('over the last '+BURN_WINDOW+' days')
+                                     : ('across '+b.n+' of the last '+BURN_WINDOW+' days');
+    var h = '<p class="hint">Your Oura burn averaged <strong>'+b.avg.toLocaleString()+'</strong> cal a day '+span+'.</p>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">';
+    // A pound of fat is the same 3,500 cal the History chart models with, so
+    // the two halves of the app can't disagree about what a deficit buys.
+    [['Maintain',0],['Lose ½ lb a week',0.5],['Lose 1 lb a week',1]].forEach(function(o){
+      var v = Math.round((b.avg - (o[1]*CAL_PER_LB/7))/10)*10;
+      h += '<button class="pill" style="font-size:12px;padding:7px 10px" onclick="fillGoal('+v+')">'+o[0]+' · '+v.toLocaleString()+'</button>';
+    });
+    return h+'</div>';
+  }
+  function proteinSuggestHTML(){
+    if(!S.weights.length) return '';
+    var w = S.weights[S.weights.length-1];
+    var g = Math.round((w.lb*0.8)/5)*5;
+    return '<p class="hint">A common rule of thumb is roughly 0.8 g of protein per pound of bodyweight — that\'s '+
+      '<button class="link" style="text-decoration:underline" onclick="fillProtein('+g+')">'+g+' g</button> '+
+      'at your last weigh-in of '+w.lb+' lb.</p>';
+  }
+
+  function goalEditor(){
+    var h = '<div style="padding-top:2px">';
+    h += '<label class="kicker sm" style="display:block;margin-bottom:5px">Daily calories</label>'+
+      '<input id="gCal" class="field" inputmode="numeric" placeholder="e.g. 2,100" value="'+(S.target||'')+'" style="font-family:var(--f-mono);font-size:16px">';
+    h += burnSuggestHTML();
+    h += '<div class="kicker sm" style="margin:18px 0 6px">Macro goals — optional</div>';
+    h += '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px">';
+    [['P','gP',S.mt.p],['F','gF',S.mt.f],['C','gC',S.mt.c],['Fb','gFib',S.mt.fib]].forEach(function(x){
+      h += '<div style="display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:9px;padding:0 8px;min-width:0">'+
+        '<span style="font-family:var(--f-mono);font-size:12px;color:var(--muted);font-weight:600">'+x[0]+'</span>'+
+        '<input id="'+x[1]+'" inputmode="numeric" placeholder="—" value="'+(x[2]||'')+'" style="flex:1;font-family:var(--f-mono);font-size:13px;border:none;background:transparent;padding:9px 0;min-width:0;width:100%">'+
+        '<span style="font-size:11px;color:var(--muted)">g</span></div>';
+    });
+    h += '</div>';
+    h += proteinSuggestHTML();
+    h += '<p class="hint">Leave any of them blank and that macro stays a plain total, the way it is now.</p>';
+    h += '<div class="btn-row" style="margin-top:14px"><button class="btn btn-primary" onclick="saveTarget()">Save goals</button>'+
+      '<button class="btn btn-ghost btn-auto" onclick="S.editTarget=false;render()">Cancel</button></div>';
+    return h+'</div>';
   }
 
   // ── Recipes: logging a portion ─────────────────────────────────────────────
@@ -659,19 +747,25 @@
     var total = S.log.reduce(function(s,e){return s+e.total;},0);
     var dm = S.log.reduce(function(a,e){var m=e.macros||sumMacros(e.items); return {p:a.p+(m.p||0),f:a.f+(m.f||0),c:a.c+(m.c||0),fib:a.fib+(m.fib||0)};},{p:0,f:0,c:0,fib:0});
     var h = '<section class="card">';
-    h += '<div class="row-between" style="margin-bottom:10px">'+dayStepperHTML();
-    if(!S.editTarget){
-      h += '<button class="link" onclick="S.editTarget=true;render()">'+(S.target?'edit goal':'set a goal')+'</button>';
+    h += '<div class="row-between" style="margin-bottom:10px">'+dayStepperHTML()+
+      '<button class="link" onclick="S.editTarget=!S.editTarget;render()">'+
+        (S.editTarget ? 'close' : (S.target ? 'edit goals' : 'set goals'))+'</button></div>';
+
+    if(S.editTarget){
+      h += goalEditor();
     }else{
-      h += '<span style="display:flex;gap:6px;align-items:center"><input id="targetInput" inputmode="numeric" placeholder="—" value="'+(S.target||'')+'" style="width:70px;font-family:var(--f-mono);font-size:13px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;text-align:center"><button class="link" style="background:var(--green);color:#fff;border-radius:6px;padding:5px 9px" onclick="saveTarget()">set</button></span>';
+      h += ringHTML(total,S.target);
+      // Once a macro has a goal, its cell earns its place even at zero — the
+      // bar is the thing you're checking, and an empty one still says so.
+      var anyMacro = dm.p||dm.f||dm.c||dm.fib;
+      var anyGoal  = S.mt.p||S.mt.f||S.mt.c||S.mt.fib;
+      if(anyMacro || anyGoal) h += macroGridHTML(dm);
+      // Logging to the wrong day is the quiet mistake this whole control exists
+      // to prevent, so being off today is stated outright rather than left to a
+      // date you might not read.
+      if(!isToday(S.day)) h += '<div class="backdate"><span>Adding to <strong>'+prettyDate(S.day)+'</strong>, not today.</span>'+
+        '<button class="link" style="text-decoration:underline" onclick="setDay(localDateKey())">back to today</button></div>';
     }
-    h += '</div>'+ringHTML(total,S.target);
-    if(dm.p||dm.f||dm.c||dm.fib) h += macroGridHTML(dm);
-    // Logging to the wrong day is the quiet mistake this whole control exists to
-    // prevent, so being off today is stated outright rather than left to a date
-    // you might not read.
-    if(!isToday(S.day)) h += '<div class="backdate"><span>Adding to <strong>'+prettyDate(S.day)+'</strong>, not today.</span>'+
-      '<button class="link" style="text-decoration:underline" onclick="setDay(localDateKey())">back to today</button></div>';
     h += '</section>';
 
     // Anchored on the last full day whatever you're looking at, so it stays put
@@ -1446,8 +1540,10 @@
     S.userId = profile.user.id;
     S.day = localDateKey();
     S.meal = inferMeal(Date.now());
-    var st = await sb.from('nutrition_settings').select('calorie_target').eq('user_id',S.userId).maybeSingle();
-    S.target = st.data ? st.data.calorie_target : null;
+    var st = await sb.from('nutrition_settings').select('*').eq('user_id',S.userId).maybeSingle();
+    var g = st.data || {};
+    S.target = g.calorie_target || null;
+    S.mt = {p:g.protein_target||null, f:g.fat_target||null, c:g.carbs_target||null, fib:g.fiber_target||null};
     await Promise.all([loadLog(), loadUsuals(), loadRecipes(), loadEnergy(), loadWeights()]);
     S.loaded = true;
     render();
