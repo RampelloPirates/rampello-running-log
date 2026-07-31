@@ -114,6 +114,15 @@
     .stepper{display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:2px 8px;}
     .stepper input{width:46px;font-family:var(--f-mono);font-size:14px;border:none;background:transparent;text-align:center;padding:6px 0;}
     .pill{background:var(--green-tint);color:var(--green-deep);border:none;border-radius:8px;padding:8px 13px;font-weight:600;font-size:13px;cursor:pointer;font-family:var(--f-body);}
+    .pill.mini{background:var(--surface-warm);border:1px solid var(--border);color:var(--muted);padding:7px 9px;font-size:12.5px;}
+    .pill.mini:hover{color:var(--green-deep);}
+    /* One-tap row: wraps rather than scrolling, so nothing hides off the edge. */
+    .chiprow{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
+    .chip{display:flex;align-items:center;gap:7px;max-width:100%;background:var(--green-tint);color:var(--green-deep);
+          border:none;border-radius:9px;padding:8px 11px;font-family:var(--f-body);font-size:12.5px;font-weight:600;cursor:pointer;}
+    .chip:hover{background:var(--amber-soft);}
+    .chipname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;}
+    .chipcal{font-family:var(--f-mono);font-size:11px;opacity:.65;flex-shrink:0;}
     /* serving ⇄ grams switch on the label / barcode panes */
     .unit-sw{display:inline-flex;background:var(--surface-warm);border:1px solid var(--border);border-radius:8px;padding:2px;}
     .unit-sw button{font-family:var(--f-body);font-size:11.5px;font-weight:600;border:none;background:transparent;
@@ -306,10 +315,24 @@
   // collapses to one row you re-log at whatever size you want.
   var USUALS_SCAN = 400;   // entries to look back over
   var USUALS_MAX  = 150;   // distinct foods to keep
+  // Half-life, in days, on how much a past meal counts towards "often". Two
+  // weeks means a thing eaten daily this month outranks a thing eaten daily
+  // last winter, without the old thing vanishing the moment you skip a week.
+  var USUALS_HALFLIFE = 14;
   async function loadUsuals(){
     var r = await sb.from('nutrition_entries').select('*').order('occurred_at',{ascending:false}).limit(USUALS_SCAN);
+    var rows = r.data || [];
+    // Score every occurrence before deduping — the dedupe keeps one row per
+    // food, so counting after it would make everything equally frequent.
+    var now = Date.now(), stat = {};
+    rows.forEach(function(e){
+      var k = String(e.title||'').trim().toLowerCase(); if(!k) return;
+      var days = Math.max(0, (now - new Date(e.occurred_at).getTime())/86400000);
+      var s = stat[k] = stat[k] || {count:0, score:0};
+      s.count++; s.score += Math.pow(0.5, days/USUALS_HALFLIFE);
+    });
     var seen = {}, keep = [];
-    (r.data||[]).forEach(function(e){
+    rows.forEach(function(e){
       var k = String(e.title||'').trim().toLowerCase();
       if(!k || seen[k] || keep.length>=USUALS_MAX) return;
       seen[k] = 1; keep.push(e);
@@ -321,8 +344,19 @@
     }
     S.usuals = keep.map(function(e){
       var v = entryToView(e, byEntry[e.id]);
-      return {id:v.id, name:v.title, total:v.total, macros:v.macros, items:v.items, ts:v.ts};
+      var s = stat[String(e.title||'').trim().toLowerCase()] || {count:1, score:0};
+      return {id:v.id, name:v.title, total:v.total, macros:v.macros, items:v.items, ts:v.ts,
+              count:s.count, score:s.score};
     });
+  }
+  // The handful you actually eat, for the one-tap row on Today. Ranked by the
+  // decayed score rather than raw count, so "often" tracks the current month
+  // rather than the whole history.
+  var CHIP_COUNT = 5;
+  function topUsuals(n){
+    return S.usuals.slice().sort(function(a,b){
+      return (b.score - a.score) || (b.ts < a.ts ? -1 : 1);
+    }).slice(0, n);
   }
   async function loadRecipes(){
     var r = await sb.from('foods').select('*').eq('kind','recipe').order('created_at',{ascending:false});
@@ -493,10 +527,27 @@
     }catch(e){ S.err=e.message; render(); }
   }
 
-  async function addUsual(id){
+  // `mult` scales the whole thing — half a portion when you shared it, double
+  // when you went back for more. It rides on the item quantities as well as the
+  // totals, so opening the entry afterwards shows 2 cups rather than 1 cup that
+  // mysteriously costs twice as much.
+  async function addUsual(id, mult){
     var u = S.usuals.filter(function(x){return x.id===id;})[0]; if(!u) return;
-    try{ await insertEntry({title:u.name, source:'usual', total:u.total, macros:u.macros||sumMacros(u.items), items:u.items}); S.view='today'; render(); }
-    catch(e){ S.err=e.message; render(); }
+    var k = mult || 1;
+    var m0 = u.macros || sumMacros(u.items);
+    var macros = {p:round1(num(m0.p)*k), f:round1(num(m0.f)*k), c:round1(num(m0.c)*k), fib:round1(num(m0.fib)*k)};
+    var items = (u.items||[]).map(function(it){
+      return {name:it.name, qty:round2(num(it.qty||1)*k), unit:it.unit,
+        calories:Math.round(num(it.calories)*k), protein:round1(num(it.protein)*k),
+        fat:round1(num(it.fat)*k), carbs:round1(num(it.carbs)*k), fiber:round1(num(it.fiber)*k)};
+    });
+    try{
+      await insertEntry({title:u.name, source:'usual', total:Math.round(u.total*k), macros:macros, items:items});
+      // The Usuals tab and the chips both land here, and neither shows the log,
+      // so say where it went and as what.
+      toast(u.name+' · '+mealLabel(S.meal));
+      S.view='today'; render();
+    }catch(e){ S.err=e.message; render(); }
   }
 
   async function commitLabel(){
@@ -514,14 +565,20 @@
     }catch(e){ S.err=e.message; render(); }
   }
 
+  // Calories are the only thing required. Sometimes you know roughly what a
+  // thing cost you and naming it is work you'd rather not do — a handful of
+  // something at a party, the second half of a plate you didn't order. An
+  // unnamed 250 in the log beats an accurate nothing.
   async function addManual(){
-    var name = (el('mName')||{}).value || ''; var cal = parseInt((el('mCal')||{}).value)||0;
-    if(!name.trim() || cal<=0) return;
-    var item = {name:name.trim(), qty:1, unit:'serving', calories:cal,
+    var name = ((el('mName')||{}).value || '').trim();
+    var cal = parseInt((el('mCal')||{}).value)||0;
+    if(cal<=0) return;
+    var title = name || 'Quick add';
+    var item = {name:title, qty:1, unit:'serving', calories:cal,
       protein:parseFloat((el('mP')||{}).value)||0, fat:parseFloat((el('mF')||{}).value)||0, carbs:parseFloat((el('mC')||{}).value)||0, fiber:parseFloat((el('mFib')||{}).value)||0};
     try{
-      await insertEntry({title:item.name, source:'manual', total:cal, macros:{p:item.protein,f:item.fat,c:item.carbs,fib:item.fiber}, items:[item]});
-      render();
+      await insertEntry({title:title, source:'manual', total:cal, macros:{p:item.protein,f:item.fat,c:item.carbs,fib:item.fiber}, items:[item]});
+      render();                              // rebuilds the pane, which clears the fields
     }catch(e){ S.err=e.message; render(); }
   }
 
@@ -780,6 +837,11 @@
     h += '<div class="row-between" style="margin-bottom:12px;align-items:center">'+
       '<span class="kicker sm">Meal</span>'+mealSelectHTML('mealSel','S.meal=this.value;render()',S.meal)+'</div>';
 
+    // The fastest path there is, and it sits above the four slower ones. The
+    // meal picker comes first because a chip logs the moment it's tapped and
+    // takes whatever meal is showing.
+    h += chipsHTML();
+
     // add methods
     // Named for what you point the phone at, so "Plate" and "Label" don't both
     // just read as "a photo".
@@ -813,6 +875,17 @@
     }
     h += '</section><p class="fine">Calorie figures are estimates for general tracking, not medical or dietary advice.</p>';
     return h;
+  }
+
+  function chipsHTML(){
+    var top = topUsuals(CHIP_COUNT);
+    if(!top.length) return '';
+    return '<div class="kicker sm" style="margin-bottom:7px">Often</div><div class="chiprow">'+
+      top.map(function(u){
+        return '<button class="chip" onclick="addUsual(\''+u.id+'\',1)" title="'+esc(u.name)+' — '+u.total+' cal">'+
+          '<span class="chipname">'+esc(u.name)+'</span>'+
+          '<span class="chipcal">'+u.total.toLocaleString()+'</span></button>';
+      }).join('')+'</div>';
   }
 
   // A native select, so the phone gives its own picker and there's no second
@@ -864,12 +937,12 @@
     var h = '<textarea class="field" rows="2" placeholder="e.g. chicken burrito bowl with rice, black beans, guac and a handful of chips" oninput="S.text=this.value" style="margin-bottom:10px">'+esc(S.text)+'</textarea>';
     h += '<button class="btn btn-primary" onclick="breakItDown()"'+(S.busy?' disabled':'')+'>'+(S.busy?'Working…':'Break it down')+'</button>';
     h += '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)"><div class="kicker sm" style="margin-bottom:8px">or add by hand</div>';
-    h += '<div style="display:flex;gap:7px"><input id="mName" class="field" placeholder="Food" style="flex:2;min-width:0;padding:9px 10px"><input id="mCal" class="field" inputmode="numeric" placeholder="cal" style="width:64px;font-family:var(--f-mono);text-align:center;padding:9px 8px"><button class="btn btn-primary btn-auto" style="padding:0 16px" onclick="addManual()">Add</button></div>';
+    h += '<div style="display:flex;gap:7px"><input id="mName" class="field" placeholder="Food — optional" style="flex:2;min-width:0;padding:9px 10px"><input id="mCal" class="field" inputmode="numeric" placeholder="cal" style="width:64px;font-family:var(--f-mono);text-align:center;padding:9px 8px"><button class="btn btn-primary btn-auto" style="padding:0 16px" onclick="addManual()">Add</button></div>';
     h += '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:7px">';
     [['P','mP'],['F','mF'],['C','mC'],['Fb','mFib']].forEach(function(x){
       h += '<div style="display:flex;align-items:center;gap:4px;background:var(--surface-warm);border:1px solid var(--border);border-radius:9px;padding:0 8px;min-width:0"><span style="font-family:var(--f-mono);font-size:12px;color:var(--muted);font-weight:600">'+x[0]+'</span><input id="'+x[1]+'" inputmode="decimal" placeholder="0" style="flex:1;font-family:var(--f-mono);font-size:13px;border:none;background:transparent;padding:8px 0;min-width:0;width:100%"><span style="font-size:11px;color:var(--muted)">g</span></div>';
     });
-    h += '</div><div style="font-size:11px;color:var(--muted);margin-top:6px">Macros optional — calories are all you need to log.</div></div>';
+    h += '</div><div style="font-size:11px;color:var(--muted);margin-top:6px">Calories are the only thing needed — a nameless one lands as “Quick add”.</div></div>';
     return h;
   }
 
@@ -1071,7 +1144,13 @@
       var m=u.macros; var macro = (m.p||m.f||m.c||m.fib)?(' · P'+Math.round(m.p)+' F'+Math.round(m.f)+' C'+Math.round(m.c)+' Fb'+Math.round(m.fib||0)):'';
       return '<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px dashed var(--border)"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500;overflow-wrap:anywhere">'+esc(u.name)+'</div>'+
         '<div style="font-size:12px;color:var(--muted);font-family:var(--f-mono)">'+u.total.toLocaleString()+' cal'+macro+' · '+prettyDate(localDateKey(new Date(u.ts)))+'</div></div>'+
-        '<button class="pill" onclick="addUsual(\''+u.id+'\')">+ Log</button></div>';
+        // Half and double flank the plain log, because a shared plate and a
+        // second helping are the two ways the same food isn't the same amount.
+        '<span style="display:flex;align-items:center;gap:5px;flex-shrink:0">'+
+          '<button class="pill mini" title="Half a portion" onclick="addUsual(\''+u.id+'\',0.5)">½</button>'+
+          '<button class="pill" onclick="addUsual(\''+u.id+'\',1)">+ Log</button>'+
+          '<button class="pill mini" title="Double portion" onclick="addUsual(\''+u.id+'\',2)">2×</button>'+
+        '</span></div>';
     }).join('');
   }
   function viewUsuals(){
@@ -1540,6 +1619,12 @@
     S.userId = profile.user.id;
     S.day = localDateKey();
     S.meal = inferMeal(Date.now());
+    // ?add=plate and friends open straight into that way of logging. It's what
+    // the manifest shortcuts point at (long-press the icon on Android and
+    // desktop Chrome), and it's the hook an iOS Shortcut can use, since iOS
+    // ignores manifest shortcuts entirely.
+    var want = new URLSearchParams(location.search).get('add');
+    if(['type','plate','label','barcode'].indexOf(want) !== -1) S.method = want;
     var st = await sb.from('nutrition_settings').select('*').eq('user_id',S.userId).maybeSingle();
     var g = st.data || {};
     S.target = g.calorie_target || null;

@@ -27,5 +27,28 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Photograph a plate",
+      "short_name": "Plate",
+      "description": "Log a meal from a photo of the food",
+      "url": "/nutrition.html?add=plate",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Describe a meal",
+      "short_name": "Type",
+      "description": "Say what you ate and have it broken down",
+      "url": "/nutrition.html?add=type",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Scan a barcode",
+      "short_name": "Barcode",
+      "description": "Look a packaged food up by its barcode",
+      "url": "/nutrition.html?add=barcode",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
   ]
 }
