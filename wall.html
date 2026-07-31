@@ -155,6 +155,58 @@
                     color: #fff; cursor: pointer; }
     #err { color: var(--danger); font-size: 0.88rem; min-height: 1.2em; }
 
+    /* ── The sheet: the wall's one modal ──────────────────────────────────
+       Body switches text selection off so a tablet doesn't highlight half the
+       calendar on every stray touch; the form has to switch it back on or you
+       cannot correct a typo. */
+    input, textarea { -webkit-user-select: text; user-select: text; }
+    .nav.add { background: var(--green); border-color: var(--green); color: #fff;
+               font-weight: 700; font-size: 1.35rem; }
+    .ev, .mp { cursor: pointer; }
+    .mc { cursor: pointer; }
+
+    #sheet { position: fixed; inset: 0; background: rgba(30, 36, 28, .55); z-index: 30;
+             display: none; align-items: center; justify-content: center; padding: 1rem; }
+    #sheet.show { display: flex; }
+    #card { background: var(--paper); border-radius: 16px; width: 100%; max-width: 30rem;
+            max-height: 92vh; overflow-y: auto; padding: 1.1rem 1.2rem; }
+    #card h3 { font-family: var(--f-display); font-size: 1.15rem; margin: 0 0 .15rem;
+               color: var(--green-deep); display: flex; align-items: center; gap: .45rem; }
+    #card .sub { color: var(--muted); font-size: .92rem; margin: 0 0 .9rem; }
+    .evdot { width: .7rem; height: .7rem; border-radius: 3px; flex-shrink: 0; }
+
+    .dl { display: flex; gap: .7rem; padding: .5rem 0; border-bottom: 1px solid var(--silver); }
+    .dl:last-of-type { border-bottom: none; }
+    .dl .k { width: 4.6rem; flex-shrink: 0; color: var(--muted); font-size: .7rem;
+             text-transform: uppercase; letter-spacing: .06em; font-weight: 700; padding-top: .18rem; }
+    .dl .v { min-width: 0; font-size: .95rem; line-height: 1.4; overflow-wrap: anywhere; }
+
+    .frow { margin-bottom: .65rem; }
+    .frow > label { display: block; font-size: .7rem; font-weight: 700; letter-spacing: .06em;
+                    text-transform: uppercase; color: var(--muted); margin-bottom: .22rem; }
+    .fin { width: 100%; font-family: var(--f-body); font-size: 1rem; padding: .6rem .7rem;
+           border: 1px solid var(--silver); border-radius: 10px; background: var(--paper);
+           color: var(--ink); }
+    textarea.fin { resize: none; }
+    .fgrid { display: flex; gap: .5rem; }
+    .fgrid > div { flex: 1; min-width: 0; }
+    .toggle { display: flex; align-items: center; gap: .5rem; font-size: .95rem; cursor: pointer; }
+    .toggle input { width: 1.15rem; height: 1.15rem; }
+    .picks { display: flex; flex-wrap: wrap; gap: .35rem; }
+    .pick { border: 1px solid var(--silver); background: var(--paper); border-radius: 99px;
+            padding: .35rem .75rem; font-size: .85rem; font-family: var(--f-body);
+            color: var(--muted); cursor: pointer; }
+    .pick.on { border-color: var(--green); background: var(--green-tint);
+               color: var(--green-deep); font-weight: 600; }
+    .seriesnote { background: var(--green-tint); border-radius: 10px; padding: .6rem .7rem;
+                  font-size: .82rem; color: var(--green-deep); line-height: 1.45; margin-bottom: .7rem; }
+    .btnrow { display: flex; gap: .5rem; margin-top: 1rem; }
+    .btn { flex: 1; font-family: var(--f-body); font-size: .95rem; font-weight: 600;
+           padding: .7rem .9rem; border-radius: 10px; border: 1px solid var(--green);
+           background: var(--green); color: #fff; cursor: pointer; }
+    .btn.ghost { background: var(--paper); color: var(--green); }
+    .btn.danger { background: var(--paper); color: var(--danger); border-color: var(--danger); }
+
     #toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 1.5rem;
              background: var(--ink); color: #fff; font-size: 0.9rem; padding: 0.6rem 1rem;
              border-radius: 10px; display: none; z-index: 20; }
@@ -191,6 +243,7 @@
           <button class="nav" id="c-prev" aria-label="Back">‹</button>
           <button class="nav" id="c-today">Today</button>
           <button class="nav" id="c-next" aria-label="Forward">›</button>
+          <button class="nav add" id="c-add" aria-label="Add an event">+</button>
         </div>
         <div id="days"></div>
         <div id="month" style="display:none">
@@ -213,6 +266,7 @@
     </div>
   </div>
 
+  <div id="sheet"><div id="card"></div></div>
   <div id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -248,6 +302,9 @@
   let MCUR = null;          // first of the displayed month
   let LIST_ID = null;
   let IDLE_AT = 0;          // when to snap back to today
+  let SHEET = null;         // null | 'detail' | 'form' — the open modal, if any
+  let SHEET_EV = null;      // which event it's about
+  let SHEET_DAY = null;     // and which occurrence of it
 
   const $ = (id) => document.getElementById(id);
 
@@ -309,7 +366,8 @@
           const bits = [when];
           if (ev.kind === 'travel') bits.push('✈');
           if (ev.location) bits.push(escHtml(ev.location));
-          return '<div class="ev"><span class="bar" style="background:' +
+          return '<div class="ev" data-ev="' + escHtml(ev.id) + '" data-day="' + k +
+            '"><span class="bar" style="background:' +
             escHtml(eventColor(ev)) + '"></span><span class="txt">' +
             '<span class="t">' + escHtml(ev.title) + '</span>' +
             '<div class="w">' + bits.join(' · ') + '</div></span></div>';
@@ -346,15 +404,281 @@
       const cls = ['mc'];
       if (d.getMonth() !== MCUR.getMonth()) cls.push('out');
       if (k === today) cls.push('today');
-      html += '<div class="' + cls.join(' ') + '"><span class="n">' + d.getDate() + '</span>' +
+      // The cell itself jumps to that day in the Days view. That's what makes a
+      // fourth event reachable at all — only three pills fit, and "+2" would
+      // otherwise be a dead end.
+      html += '<div class="' + cls.join(' ') + '" data-goday="' + k + '">' +
+        '<span class="n">' + d.getDate() + '</span>' +
         occ.slice(0, 3).map(o =>
-          '<span class="mp" style="background:' + escHtml(eventColor(o.ev)) + '">' +
+          '<span class="mp" data-ev="' + escHtml(o.ev.id) + '" data-day="' + k +
+          '" style="background:' + escHtml(eventColor(o.ev)) + '">' +
           escHtml((o.ev.all_day ? '' : shortTime(o.ev.starts_at) + ' ') + o.ev.title) +
           '</span>').join('') +
-        (occ.length > 3 ? '<span class="more">+' + (occ.length - 3) + '</span>' : '') +
+        (occ.length > 3 ? '<span class="more">+' + (occ.length - 3) + ' more</span>' : '') +
         '</div>';
     }
     $('mgrid').innerHTML = html;
+  }
+
+  // ── The sheet ─────────────────────────────────────────────────────────────
+  // One modal, two faces: reading an event and editing one. It's the first
+  // thing on this page that can change the calendar, so the destructive
+  // choices sit on their own row, away from the ones you reach for.
+  function openSheet(html) {
+    $('card').innerHTML = html;
+    $('sheet').classList.add('show');
+    nudgeIdle();
+  }
+  function closeSheet() {
+    SHEET = null; SHEET_EV = null; SHEET_DAY = null;
+    $('sheet').classList.remove('show');
+    $('card').innerHTML = '';
+    nudgeIdle();
+  }
+  function eventById(id) { return (DATA.events || []).filter(e => e.id === id)[0] || null; }
+
+  function localIsoW(dateStr, timeStr) {
+    const p = String(dateStr).split('-').map(Number);
+    const t = String(timeStr || '00:00').split(':').map(Number);
+    return new Date(p[0], p[1] - 1, p[2], t[0] || 0, t[1] || 0).toISOString();
+  }
+  function hhmm(iso) {
+    const d = new Date(iso);
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+  function nextHalfHour() {
+    const d = new Date(); d.setSeconds(0, 0);
+    d.setMinutes(d.getMinutes() > 30 ? 60 : 30);
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+  function plusHour(t) {
+    const p = String(t).split(':').map(Number);
+    return pad2((p[0] + 1) % 24) + ':' + pad2(p[1] || 0);
+  }
+  // The day a new event lands on: whatever the screen is currently showing,
+  // because you press + while looking at the week you mean.
+  function defaultNewDay() {
+    if (VIEW === 'month' && MCUR) {
+      const now = new Date();
+      const sameMonth = now.getFullYear() === MCUR.getFullYear() && now.getMonth() === MCUR.getMonth();
+      return sameMonth ? todayYmd() : ymd(MCUR);
+    }
+    return ymd(addDays(new Date(), DAY_OFF));
+  }
+  function whenText(ev, dayStr) {
+    if (ev.all_day) {
+      const multi = ev.end_date && ev.end_date !== ev.start_date;
+      return multi
+        ? 'All day · ' + fmtDayHead(ev.start_date) + ' – ' + fmtDayHead(ev.end_date)
+        : 'All day · ' + fmtDayHead(dayStr || ev.start_date);
+    }
+    const day = fmtDayHead(dayStr || ymd(new Date(ev.starts_at)));
+    const end = (ev.ends_at && ev.ends_at !== ev.starts_at) ? ' – ' + shortTime(ev.ends_at) : '';
+    return day + ' · ' + shortTime(ev.starts_at) + end;
+  }
+  function whoChips(ids) {
+    const named = (ids || []).map(memberById).filter(Boolean);
+    return named.length
+      ? named.map(m => '<span class="chip" style="background:' + escHtml(m.color) + '">' +
+          escHtml(m.display_name) + '</span>').join(' ')
+      : '<span class="chip any">Everyone</span>';
+  }
+
+  function detailSheet(id, dayStr) {
+    const ev = eventById(id); if (!ev) return;
+    SHEET = 'detail'; SHEET_EV = id; SHEET_DAY = dayStr;
+    const row = (k, v) => '<div class="dl"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>';
+
+    let rows = '';
+    if (ev.rrule) rows += row('Repeats', escHtml(ruleLabel(ev.rrule)));
+    if (ev.location) rows += row('Where', escHtml(ev.location));
+    if (ev.kind === 'travel') rows += row('Travel', 'Away from home ✈');
+    rows += row('Who', whoChips(ev.attendee_ids));
+    if (ev.notes) rows += row('Notes', escHtml(ev.notes).replace(/\n/g, '<br>'));
+
+    openSheet(
+      '<h3><span class="evdot" style="background:' + escHtml(eventColor(ev)) + '"></span>' +
+        escHtml(ev.title) + '</h3>' +
+      '<p class="sub">' + escHtml(whenText(ev, dayStr)) + '</p>' +
+      rows +
+      '<div class="btnrow"><button class="btn ghost" id="s-close">Close</button>' +
+      '<button class="btn" id="s-edit">Edit</button></div>' +
+      // Cancelling one occurrence is what a kitchen needs; dropping a whole
+      // series is a decision for the app, and the wall says so rather than
+      // offering a button that fails.
+      (ev.rrule
+        ? '<div class="btnrow"><button class="btn danger" id="s-skip">Skip ' +
+            escHtml(fmtDayHead(dayStr)) + '</button></div>' +
+          '<p class="sub" style="margin:.6rem 0 0;font-size:.8rem">Deleting the whole series is done in the Family app.</p>'
+        : '<div class="btnrow"><button class="btn danger" id="s-del">Delete</button></div>')
+    );
+    $('s-close').addEventListener('click', closeSheet);
+    $('s-edit').addEventListener('click', () => formSheet(ev, dayStr));
+    if ($('s-del')) $('s-del').addEventListener('click', () => confirmDelete(ev));
+    if ($('s-skip')) $('s-skip').addEventListener('click', () => skipOccurrence(ev, dayStr));
+  }
+
+  function formSheet(ev, dayStr) {
+    SHEET = 'form'; SHEET_EV = ev ? ev.id : null; SHEET_DAY = dayStr || null;
+    const series = !!(ev && ev.rrule);
+    const allDay = ev ? !!ev.all_day : false;
+    const day = ev
+      ? (ev.all_day ? ev.start_date : ymd(new Date(ev.starts_at)))
+      : defaultNewDay();
+    const st = (ev && !ev.all_day) ? hhmm(ev.starts_at) : nextHalfHour();
+    const et = (ev && !ev.all_day && ev.ends_at) ? hhmm(ev.ends_at) : plusHour(st);
+    const edate = (ev && ev.all_day && ev.end_date) ? ev.end_date : day;
+    const on = new Set((ev && ev.attendee_ids) || []);
+
+    let h = '<h3>' + (ev ? 'Edit event' : 'New event') + '</h3>';
+    if (series) {
+      h += '<div class="seriesnote"><strong>' + escHtml(ruleLabel(ev.rrule)) + '.</strong> ' +
+        'Changes here apply to every occurrence. When it happens, and how often, ' +
+        'are set in the Family app.</div>';
+    }
+    h += '<div class="frow"><label for="e-title">What</label>' +
+      '<input class="fin" id="e-title" autocomplete="off" placeholder="Football practice" value="' +
+      escHtml(ev ? ev.title : '') + '"></div>';
+
+    if (!series) {
+      h += '<div class="frow"><label class="toggle" for="e-allday">' +
+        '<input type="checkbox" id="e-allday"' + (allDay ? ' checked' : '') + '> All day</label></div>';
+      h += '<div class="frow" id="e-when"></div>';
+    }
+
+    h += '<div class="frow"><label for="e-loc">Where</label>' +
+      '<input class="fin" id="e-loc" autocomplete="off" placeholder="Optional" value="' +
+      escHtml((ev && ev.location) || '') + '"></div>';
+
+    h += '<div class="frow"><label>Who</label><div class="picks" id="e-who">' +
+      (DATA.members || []).map(m =>
+        '<button type="button" class="pick' + (on.has(m.id) ? ' on' : '') + '" data-who="' +
+        escHtml(m.id) + '">' + escHtml(m.display_name) + '</button>').join('') +
+      '</div></div>';
+
+    h += '<div class="frow"><label>Kind</label><div class="picks" id="e-kind">' +
+      '<button type="button" class="pick' + (!ev || ev.kind !== 'travel' ? ' on' : '') +
+        '" data-kind="in_town">In town</button>' +
+      '<button type="button" class="pick' + (ev && ev.kind === 'travel' ? ' on' : '') +
+        '" data-kind="travel">Travel ✈</button></div></div>';
+
+    h += '<div class="frow"><label for="e-notes">Notes</label>' +
+      '<textarea class="fin" id="e-notes" rows="2" placeholder="Optional">' +
+      escHtml((ev && ev.notes) || '') + '</textarea></div>';
+
+    h += '<div class="btnrow"><button class="btn ghost" id="e-cancel">Cancel</button>' +
+      '<button class="btn" id="e-save">Save</button></div>';
+
+    openSheet(h);
+
+    // The date/time block is redrawn on the all-day toggle rather than hidden,
+    // because the two shapes need different inputs — a span of days versus a
+    // span of hours — and the table refuses to hold both.
+    function paintWhen() {
+      const box = $('e-when'); if (!box) return;
+      const isAll = $('e-allday').checked;
+      box.innerHTML = isAll
+        ? '<div class="fgrid"><div><label for="e-date">From</label>' +
+            '<input class="fin" type="date" id="e-date" value="' + escHtml(day) + '"></div>' +
+          '<div><label for="e-edate">To</label>' +
+            '<input class="fin" type="date" id="e-edate" value="' + escHtml(edate) + '"></div></div>'
+        : '<div class="fgrid"><div><label for="e-date">Date</label>' +
+            '<input class="fin" type="date" id="e-date" value="' + escHtml(day) + '"></div>' +
+          '<div><label for="e-stime">Starts</label>' +
+            '<input class="fin" type="time" id="e-stime" value="' + escHtml(st) + '"></div>' +
+          '<div><label for="e-etime">Ends</label>' +
+            '<input class="fin" type="time" id="e-etime" value="' + escHtml(et) + '"></div></div>';
+    }
+    if (!series) {
+      paintWhen();
+      $('e-allday').addEventListener('change', paintWhen);
+    }
+    $('e-who').querySelectorAll('.pick').forEach(b =>
+      b.addEventListener('click', () => b.classList.toggle('on')));
+    $('e-kind').querySelectorAll('.pick').forEach(b =>
+      b.addEventListener('click', () => {
+        $('e-kind').querySelectorAll('.pick').forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+      }));
+    $('e-cancel').addEventListener('click', () => ev ? detailSheet(ev.id, dayStr) : closeSheet());
+    $('e-save').addEventListener('click', () => saveEventFromSheet(ev));
+  }
+
+  async function saveEventFromSheet(ev) {
+    const title = $('e-title').value.trim();
+    if (!title) { toast('Give it a name'); return; }
+    const series = !!(ev && ev.rrule);
+
+    let allDay = false, sd = null, ed = null, sa = null, ea = null;
+    if (!series) {
+      allDay = $('e-allday').checked;
+      const d = $('e-date').value;
+      if (!d) { toast('Pick a date'); return; }
+      if (allDay) {
+        sd = d; ed = $('e-edate').value || d;
+        if (ed < sd) { toast('It ends before it starts'); return; }
+      } else {
+        const s = $('e-stime').value || '00:00';
+        const e = $('e-etime').value || s;
+        if (e < s) { toast('It ends before it starts'); return; }
+        sa = localIsoW(d, s); ea = localIsoW(d, e);
+      }
+    }
+
+    const who = Array.from($('e-who').querySelectorAll('.pick.on')).map(b => b.dataset.who);
+    const kindBtn = $('e-kind').querySelector('.pick.on');
+
+    try {
+      const { data, error } = await sb.rpc('wall_event_save', {
+        p_token: TOKEN, p_id: ev ? ev.id : null,
+        p_title: title,
+        p_location: $('e-loc').value.trim() || null,
+        p_notes: $('e-notes').value.trim() || null,
+        p_all_day: allDay,
+        p_start_date: sd, p_end_date: ed,
+        p_starts_at: sa, p_ends_at: ea,
+        p_attendees: who,
+        p_kind: kindBtn ? kindBtn.dataset.kind : 'in_town'
+      });
+      if (error) throw error;
+      if (!data) { toast('That did not save — check the display key'); return; }
+      if (data.ok === false) {
+        toast(data.reason === 'no_title' ? 'Give it a name' : 'That did not save');
+        return;
+      }
+      closeSheet(); toast(ev ? 'Updated' : 'Added'); await poll();
+    } catch (e) { console.error(e); toast('Could not save that'); }
+  }
+
+  function confirmDelete(ev) {
+    SHEET = 'detail';
+    openSheet(
+      '<h3>Delete this event?</h3>' +
+      '<p class="sub">' + escHtml(ev.title) + '</p>' +
+      '<div class="btnrow"><button class="btn ghost" id="d-keep">Keep it</button>' +
+      '<button class="btn danger" id="d-go">Delete</button></div>'
+    );
+    $('d-keep').addEventListener('click', () => detailSheet(ev.id, SHEET_DAY));
+    $('d-go').addEventListener('click', async () => {
+      try {
+        const { data, error } = await sb.rpc('wall_event_delete', { p_token: TOKEN, p_id: ev.id });
+        if (error) throw error;
+        if (data && data.ok === false && data.reason === 'recurring') {
+          toast('That one repeats — delete the series in the app'); return;
+        }
+        closeSheet(); toast('Deleted'); await poll();
+      } catch (e) { console.error(e); toast('Could not delete that'); }
+    });
+  }
+
+  async function skipOccurrence(ev, dayStr) {
+    try {
+      const { data, error } = await sb.rpc('wall_event_skip',
+        { p_token: TOKEN, p_id: ev.id, p_day: dayStr });
+      if (error) throw error;
+      if (!data || data.ok === false) { toast('Could not remove that day'); return; }
+      closeSheet(); toast('Removed that day'); await poll();
+    } catch (e) { console.error(e); toast('Could not remove that day'); }
   }
 
   // ── Chores ────────────────────────────────────────────────────────────────
@@ -501,12 +825,36 @@
     VIEW = 'days'; DAY_OFF = 0; MCUR = null; IDLE_AT = 0;
     renderCalendar();
   }
+  // Month cell → that day at the head of the Days view, which is the only way
+  // to reach a fourth event on a crowded square.
+  function showDay(k) {
+    const target = parseYmd(k); target.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    VIEW = 'days';
+    DAY_OFF = Math.round((target - today) / 86400000);
+    nudgeIdle();
+    renderCalendar();
+  }
   setInterval(() => {
+    // Never while somebody is mid-sentence in the form. Snapping the calendar
+    // back is meant to tidy up after a passer-by, not interrupt one.
+    if (SHEET) return;
     if (IDLE_AT && Date.now() > IDLE_AT) backToToday();
   }, 10000);
 
   document.addEventListener('click', (e) => {
     const t = e.target;
+
+    // The sheet wires its own buttons, so the routing below must not also
+    // claim them — a .pick inside the form is not a calendar nav button.
+    if (t.closest('#card')) return;
+    if (t.closest('#sheet')) { closeSheet(); return; }   // tapped the backdrop
+
+    const ev = t.closest('[data-ev]');
+    if (ev) { detailSheet(ev.dataset.ev, ev.dataset.day); return; }
+    const goday = t.closest('[data-goday]');
+    if (goday) { showDay(goday.dataset.goday); return; }
+
     const chore = t.closest('[data-chore]');
     if (chore) { tapChore(chore.dataset.chore); return; }
     const item = t.closest('[data-item]');
@@ -517,6 +865,7 @@
     const b = t.closest('button');
     if (!b) return;
     if (b.id === 'additem-go') { addItem(); return; }
+    if (b.id === 'c-add') { nudgeIdle(); formSheet(null, null); return; }
     // Everything below moves the calendar off today, so it arms the timer.
     if (b.id === 'v-days')  { VIEW = 'days';  nudgeIdle(); renderCalendar(); }
     else if (b.id === 'v-month') { VIEW = 'month'; nudgeIdle(); renderCalendar(); }
@@ -535,6 +884,13 @@
   });
 
   $('newitem').addEventListener('keydown', (e) => { if (e.key === 'Enter') addItem(); });
+
+  // A wall-mounted tablet has no Escape key, but the same page gets opened on a
+  // laptop to set it up, and a modal you can't dismiss with Escape there feels
+  // broken.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && SHEET) closeSheet();
+  });
 
   // ── Staying awake and staying on ──────────────────────────────────────────
   // Best-effort: Wake Lock is Android Chrome and iOS 16.4+, and a screen that
