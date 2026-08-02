@@ -170,7 +170,7 @@
     tab:'bills',
     period:null,            // 'YYYY-MM-01' — the month on screen
     bills:[], payments:[], accounts:[], balances:[],
-    income:[], incomeEntries:[], allocs:[], sections:[], acctSections:[],
+    income:[], incomeEntries:[], allocs:[], deposits:[], sections:[], acctSections:[],
     groupBy:'section',      // 'section' — the spreadsheet's blocks | 'due' — the pay run
     worthGroupBy:'section', // 'section' — nets to equity | 'kind' — assets vs debts
     sectKind:'bill',        // which manage screen is open
@@ -450,6 +450,34 @@
   }
   function allocsFor(sourceId){ return S.allocs.filter(function(x){return x.source_id===sourceId;}); }
 
+  // ── weekly pay ────────────────────────────────────────────────────────────
+  // A paycheque is a set of deposits sharing a date. The month it counts in is
+  // derived from that date, so one on 31 July and one on 1 August land where
+  // they belong without anybody deciding.
+  function monthEnd(p){ var a=p.split('-').map(Number); var d=new Date(a[0],a[1],0); return a[0]+'-'+pad(a[1])+'-'+pad(d.getDate()); }
+  function depositsIn(sourceId, period){
+    var lo=period, hi=monthEnd(period);
+    return S.deposits.filter(function(d){
+      return d.source_id===sourceId && d.paid_on>=lo && d.paid_on<=hi;
+    });
+  }
+  function payDates(sourceId, period){
+    var seen={}, out=[];
+    depositsIn(sourceId,period).forEach(function(d){ if(!seen[d.paid_on]){ seen[d.paid_on]=true; out.push(d.paid_on); } });
+    return out.sort();
+  }
+  function depositsOn(sourceId, date){ return S.deposits.filter(function(d){ return d.source_id===sourceId && d.paid_on===date; }); }
+
+  // Precedence, stated once: deposits win where they exist, and the monthly
+  // entry covers everything else — which is all 32 imported months, where no
+  // account detail was ever recorded because the spreadsheet had none.
+  function monthIncome(s, period){
+    var dep=depositsIn(s.id, period);
+    if(dep.length) return dep.reduce(function(a,d){ return a+Number(d.amount); }, 0);
+    var e=incomeFor(s.id, period);
+    return e ? Number(e.amount) : null;
+  }
+
   // The named slices, then whatever is left. The remainder is computed, never
   // stored — a third number kept in step with two others is the one that ends up
   // wrong. It only appears once the month's figure is in, since until then there
@@ -490,13 +518,21 @@
     // in progress reads as a forecast, not as a surplus you haven't earned.
     var out=t.paid+t.due, inn=0, missing=0;
     var rows=srcs.map(function(s){
-      var e=incomeFor(s.id,S.period);
-      if(e) inn+=Number(e.amount); else missing++;
-      return '<div class="arow" onclick="openIncomeEntry(\''+esc(s.id)+'\')">'+
-        '<div class="an" style="font-weight:500">'+esc(s.name)+'</div>'+
-        '<div class="av"><div class="b'+(e?'':' ')+'" style="'+(e?'':'color:var(--muted);font-weight:400')+'">'+
-        esc(e?money(e.amount):'—')+'</div></div></div>'+
-        splitRowsHTML(s, e);
+      var total=monthIncome(s,S.period);
+      if(total!=null) inn+=total; else missing++;
+      var weekly=s.cadence==='weekly';
+      var dates=weekly?payDates(s.id,S.period):[];
+      var head='<div class="arow" onclick="'+(weekly?'openPaycheck(\''+esc(s.id)+'\',null)':'openIncomeEntry(\''+esc(s.id)+'\')')+'">'+
+        '<div style="min-width:0"><div class="an" style="font-weight:500">'+esc(s.name)+'</div>'+
+        (weekly?'<div class="asub">'+(dates.length?dates.length+' payday'+(dates.length===1?'':'s'):'no paydays yet')+' · tap to add</div>':'')+'</div>'+
+        '<div class="av"><div class="b" style="'+(total!=null?'':'color:var(--muted);font-weight:400')+'">'+
+        esc(total!=null?money(total):'—')+'</div></div></div>';
+      if(!weekly) return head+splitRowsHTML(s, incomeFor(s.id,S.period));
+      return head+dates.map(function(dt){
+        var tot=depositsOn(s.id,dt).reduce(function(a,d){return a+Number(d.amount);},0);
+        return '<div class="splitrow" style="cursor:pointer" onclick="openPaycheck(\''+esc(s.id)+'\',\''+esc(dt)+'\')">'+
+          '<span>'+esc(dayLabel(dt))+'</span><span class="v">'+esc(money(tot))+'</span></div>';
+      }).join('');
     }).join('');
     var surplus=inn-out;
     return '<div class="card" style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Income &amp; surplus</div>'+
@@ -801,7 +837,18 @@
       if(s && s.active) out.push('+'+money(x.amount)+'/mo from '+s.name);
     });
     S.income.forEach(function(s){
-      if(s.active && s.to_account_id===a.id) out.push('+ rest of '+s.name);
+      if(s.active && s.to_account_id===a.id && s.cadence!=='weekly') out.push('+ rest of '+s.name);
+    });
+    // Weekly pay has no standing figure, so state what actually landed here
+    // this month rather than an average that would be a guess.
+    var bySrc={};
+    S.deposits.forEach(function(d){
+      if(d.account_id!==a.id || d.paid_on<S.period || d.paid_on>monthEnd(S.period)) return;
+      bySrc[d.source_id]=(bySrc[d.source_id]||0)+Number(d.amount);
+    });
+    Object.keys(bySrc).forEach(function(sid){
+      var s=srcById(sid);
+      if(s) out.push('+'+money(bySrc[sid])+' this month from '+s.name);
     });
     return out;
   }
@@ -907,6 +954,7 @@
     if(f.type==='incomeSource') return incomeSourceForm(f);
     if(f.type==='section') return sectionForm(f);
     if(f.type==='alloc') return allocForm(f);
+    if(f.type==='paycheck') return paycheckForm(f);
     return '';
   }
 
@@ -1297,6 +1345,120 @@
   // ── income forms ──────────────────────────────────────────────────────────
   function srcById(id){ for(var i=0;i<S.income.length;i++) if(S.income[i].id===id) return S.income[i]; return null; }
 
+  // ── a paycheque ───────────────────────────────────────────────────────────
+  // One form, one payday, a row per account. New paycheques come pre-filled
+  // from the last one and dated a week later, because five accounts times fifty
+  // weeks is a lot of typing and the figures barely move.
+  function lastPayday(sourceId){
+    var d=S.deposits.filter(function(x){return x.source_id===sourceId;});
+    var best=null; d.forEach(function(x){ if(!best||x.paid_on>best) best=x.paid_on; });
+    return best;
+  }
+  function openPaycheck(sourceId, date){
+    var s=srcById(sourceId); if(!s) return;
+    var vals={}, order=[], from=date||lastPayday(sourceId);
+    if(from) depositsOn(sourceId, from).forEach(function(d){
+      vals[d.account_id]= date ? String(d.amount) : String(d.amount);
+      order.push(d.account_id);
+    });
+    var when=date;
+    if(!when){
+      when = from ? plusDays(from,7) : todayISO();
+      // A pre-filled date that already has a paycheque would collide on save,
+      // so walk it forward a week at a time until it is free.
+      while(depositsOn(sourceId, when).length) when=plusDays(when,7);
+    }
+    S.form={type:'paycheck', sourceId:sourceId, orig:date||null, paid_on:when,
+            accts:order, vals:vals, name:s.name};
+    S.err=''; render();
+  }
+  function stashPaycheck(){
+    var f=S.form; if(!f||f.type!=='paycheck') return;
+    if(el('pkDate')) f.paid_on=el('pkDate').value;
+    f.accts.forEach(function(aid){ var i=el('pk_'+aid); if(i) f.vals[aid]=i.value; });
+  }
+  function addPaycheckAcct(aid){
+    stashPaycheck();
+    if(aid && S.form.accts.indexOf(aid)<0){ S.form.accts.push(aid); S.form.vals[aid]=''; }
+    render();
+  }
+  function dropPaycheckAcct(aid){
+    stashPaycheck();
+    S.form.accts=S.form.accts.filter(function(x){return x!==aid;});
+    delete S.form.vals[aid];
+    render();
+  }
+  function paycheckForm(f){
+    var avail=activeAccounts().filter(function(a){ return f.accts.indexOf(a.id)<0; });
+    var total=0;
+    var rows=f.accts.map(function(aid){
+      var a=acctById(aid), v=numOrNull(f.vals[aid]);
+      if(v!=null) total+=v;
+      return '<div class="balrow"><span class="n">'+esc(a?a.name:'(deleted account)')+'</span>'+
+        '<div class="minput" style="width:120px"><span>$</span>'+
+        '<input class="field full" id="pk_'+esc(aid)+'" inputmode="decimal" onblur="fmtMoneyInput(this)"'+
+        ' placeholder="—" value="'+esc(fmtMoneyStr(f.vals[aid]||''))+'"></div>'+
+        '<button class="link" style="padding:0 0 0 8px;color:var(--danger)" onclick="dropPaycheckAcct(\''+esc(aid)+'\')" aria-label="Remove">×</button></div>';
+    }).join('');
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:2px">'+(f.orig?'Edit paycheque':'Add a paycheque')+'</div>'+
+      '<div class="an" style="font-size:17px">'+esc(f.name)+'</div>'+
+      '<label class="lbl">Paid on</label><input id="pkDate" type="date" class="field full" value="'+esc(f.paid_on)+'" onchange="stashPaycheck()">'+
+      (f.accts.length?('<div class="kicker" style="margin:16px 0 2px">Deposited into</div>'+rows+
+        '<div class="subtot"><span>This paycheque</span><span class="v">'+esc(money(total))+'</span></div>'):
+        '<p class="empty" style="margin-top:14px">Add the accounts this pay is split across.</p>')+
+      (avail.length?('<label class="lbl">Add an account</label><select class="field full" onchange="addPaycheckAcct(this.value)">'+
+        '<option value="">— pick one —</option>'+
+        avail.map(function(a){ return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>'; }).join('')+'</select>'):'')+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="savePaycheck()">Save</button>'+
+      (f.orig?'<button class="btn btn-danger" onclick="deletePaycheck()">Delete</button>':'')+'</div>'+
+      (f.orig?'':'<p class="asub" style="margin-top:10px">Pre-filled from your last paycheque and dated a week on. Change what moved.</p>')+
+      '</div>';
+  }
+  async function savePaycheck(){
+    stashPaycheck();
+    var f=S.form;
+    if(!f.paid_on){ S.err='Pick the date it was paid.'; render(); return; }
+    var rows=[], any=false;
+    f.accts.forEach(function(aid){
+      var v=numOrNull(f.vals[aid]);
+      if(v==null) return;                       // blank means no deposit there
+      if(v<0){ S.err='Amounts can\'t be negative.'; return; }
+      any=true;
+      rows.push({user_id:S.userId, source_id:f.sourceId, account_id:aid, paid_on:f.paid_on, amount:v});
+    });
+    if(S.err){ render(); return; }
+    if(!any){ S.err='Enter at least one amount.'; render(); return; }
+    S.busy=true;
+    try{
+      // Replace the payday wholesale. Editing can drop an account or move the
+      // date, and clearing first means the result is exactly what is on screen
+      // rather than a merge with whatever was there before.
+      if(f.orig){
+        var old=depositsOn(f.sourceId, f.orig);
+        for(var i=0;i<old.length;i++){
+          var d=await sb.from('income_deposits').delete().eq('id',old[i].id); if(d.error) throw d.error;
+        }
+      }
+      var up=await sb.from('income_deposits').upsert(rows,{onConflict:'source_id,paid_on,account_id'});
+      if(up.error) throw up.error;
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function deletePaycheck(){
+    var f=S.form, old=depositsOn(f.sourceId, f.orig);
+    if(!confirm('Delete the paycheque of '+dayLabel(f.orig)+'?\n\nAll '+old.length+' deposit'+(old.length===1?'':'s')+' on that date are removed.')) return;
+    S.busy=true;
+    try{
+      for(var i=0;i<old.length;i++){
+        var d=await sb.from('income_deposits').delete().eq('id',old[i].id); if(d.error) throw d.error;
+      }
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
   function openIncomeEntry(sourceId){
     var s=srcById(sourceId); if(!s) return;
     var e=incomeFor(sourceId,S.period);
@@ -1357,8 +1519,8 @@
   function openIncomeSource(id){
     if(id){ var s=srcById(id); if(!s) return;
       S.form={type:'incomeSource', id:id, name:s.name, amount:s.amount_default!=null?String(s.amount_default):'',
-              to_account_id:s.to_account_id||'', active:s.active}; }
-    else S.form={type:'incomeSource', id:null, name:'', amount:'', to_account_id:'', active:true};
+              to_account_id:s.to_account_id||'', cadence:s.cadence||'monthly', active:s.active}; }
+    else S.form={type:'incomeSource', id:null, name:'', amount:'', to_account_id:'', cadence:'monthly', active:true};
     S.err=''; render();
   }
   function stashIncomeSource(){
@@ -1367,6 +1529,7 @@
     if(el('sAmt'))  f.amount=el('sAmt').value;
     if(el('sAcct')) f.to_account_id=el('sAcct').value;
   }
+  function setIncField(k,v){ stashIncomeSource(); S.form[k]=v; render(); }
   // Splits need the source to exist before they can point at it, so a brand new
   // source says so rather than showing an editor that cannot save.
   function splitsEditorHTML(f){
@@ -1438,9 +1601,14 @@
       '<label class="lbl">Name</label><input id="sName" class="field full" placeholder="Payroll" value="'+esc(f.name)+'">'+
       '<label class="lbl">Usual amount</label>'+moneyField('sAmt', f.amount, 'varies')+
       '<p class="asub" style="margin:6px 0 0">Leave blank for anything irregular — reimbursements, side work.</p>'+
-      (activeAccounts().length?(
-        '<label class="lbl">Rest lands in</label>'+acctSelect('sAcct', f.to_account_id, activeAccounts())):'')+
-      splitsEditorHTML(f)+
+      '<label class="lbl">Paid</label><div class="seg two">'+
+        '<button type="button" class="seg-btn'+(f.cadence==='weekly'?'':' on')+'" onclick="setIncField(\'cadence\',\'monthly\')">Monthly</button>'+
+        '<button type="button" class="seg-btn'+(f.cadence==='weekly'?' on':'')+'" onclick="setIncField(\'cadence\',\'weekly\')">Weekly</button></div>'+
+      (f.cadence==='weekly'
+        ? '<p class="asub" style="margin:8px 0 0">Entered a paycheque at a time, with the amount for each account. The month adds them up, so there is no standing figure and no splits to keep — the deposits are the split.</p>'
+        : (activeAccounts().length?(
+            '<label class="lbl">Rest lands in</label>'+acctSelect('sAcct', f.to_account_id, activeAccounts())):'')+
+          splitsEditorHTML(f))+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveIncomeSource()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireIncomeSource(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
             '<button class="btn btn-danger" onclick="deleteIncomeSource(\''+esc(f.id)+'\')">Delete</button>':'')+'</div></div>';
@@ -1450,7 +1618,7 @@
     var f=S.form, name=(f.name||'').trim(), amt=numOrNull(f.amount);
     if(!name){ S.err='Give the source a name.'; render(); return; }
     if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
-    var row={name:name, amount_default:amt, to_account_id:f.to_account_id||null};
+    var row={name:name, amount_default:amt, to_account_id:f.to_account_id||null, cadence:f.cadence||'monthly'};
     S.busy=true;
     try{
       if(f.id){ var u=await sb.from('income_sources').update(row).eq('id',f.id); if(u.error) throw u.error; }
@@ -1591,13 +1759,15 @@
       sb.from('income_entries').select('*').order('period',{ascending:false}),
       sb.from('bill_sections').select('*').order('sort_order'),
       sb.from('account_sections').select('*').order('sort_order'),
-      sb.from('income_allocations').select('*')
+      sb.from('income_allocations').select('*'),
+      sb.from('income_deposits').select('*').order('paid_on',{ascending:false})
     ]);
     for(var i=0;i<r.length;i++) if(r[i].error) throw r[i].error;
     S.bills=r[0].data||[]; S.payments=r[1].data||[];
     S.accounts=r[2].data||[]; S.balances=r[3].data||[];
     S.income=r[4].data||[]; S.incomeEntries=r[5].data||[];
-    S.sections=r[6].data||[]; S.acctSections=r[7].data||[]; S.allocs=r[8].data||[];
+    S.sections=r[6].data||[]; S.acctSections=r[7].data||[];
+    S.allocs=r[8].data||[]; S.deposits=r[9].data||[];
   }
 
   (async function(){
