@@ -279,12 +279,18 @@
     S.balances.forEach(function(b){ months[b.as_of]=true; });
     var keys=Object.keys(months).sort();
     if(!keys.length) return [];
-    var carried={}, out=[];
+    var carried={}, out=[], now=thisMonth();
     keys.forEach(function(m){
       S.balances.forEach(function(b){ if(b.as_of===m) carried[b.account_id]=Number(b.balance); });
       var assets=0, debts=0;
       Object.keys(carried).forEach(function(aid){
         var a=acctById(aid); if(!a) return;
+        // Carry-forward exists to cover a month you didn't get round to
+        // updating, and would otherwise leave a closed account propping up net
+        // worth for ever. So a retired account drops out of this month and
+        // everything after, and keeps every month before — the same line
+        // retiring a bill draws, for the same reason.
+        if(!a.active && m>=now) return;
         if(a.kind==='asset') assets+=carried[aid]; else debts+=carried[aid];
       });
       out.push({ month:m, assets:assets, debts:debts, net:assets-debts });
@@ -716,7 +722,9 @@
         '<button type="button" class="seg-btn'+(S.worthGroupBy==='kind'?' on':'')+'" onclick="setWorthGroupBy(\'kind\')">Assets &amp; debts</button></div>';
 
     h += (S.worthGroupBy==='section' && S.acctSections.length) ? worthBySectionHTML() : worthByKindHTML(cur);
-    h+='<button class="link" onclick="go(\'accounts\')">Manage accounts ›</button>';
+    h+='<div style="display:flex;gap:14px;justify-content:space-between">'+
+       '<button class="link" onclick="go(\'accounts\')">Manage accounts ›</button>'+
+       '<button class="link" onclick="openAccount(null)">+ Add an account</button></div>';
     return h;
   }
   function setWorthGroupBy(g){ S.worthGroupBy=g; S.err=''; render(); }
@@ -875,6 +883,15 @@
     }).join('');
     h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openAccount(null)">+ Add an account</button>'+
        '<button class="link full" style="text-align:left" onclick="goSections(\'account\')">Manage sections ›</button></div>';
+    var gone=S.accounts.filter(function(a){return !a.active;});
+    if(gone.length) h+='<div class="card tight"><div class="kicker" style="margin-bottom:6px">Retired</div>'+
+      gone.map(function(a){
+        var b=latestBalance(a.id);
+        return '<div class="arow" onclick="openAccount(\''+esc(a.id)+'\')">'+
+          '<div><div class="an" style="color:var(--muted)">'+esc(a.name)+'</div>'+
+          '<div class="asub">'+(b?'last read '+esc(shortMonth(b.as_of)):'no balances recorded')+'</div></div>'+
+          '<div class="av"><div class="d flat">history kept</div></div></div>';
+      }).join('')+'</div>';
     return h;
   }
   function ordinal(n){ var s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
@@ -1143,7 +1160,13 @@
       moneyField('aBal', f.balance)+
       '<p class="asub" style="margin:6px 0 0">Enter what you owe as a positive number — Tally subtracts debts for you.</p>'+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveAccount()">Save</button>'+
-      (f.id?'<button class="btn btn-danger" onclick="deleteAccount(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
+      (f.id?'<button class="btn btn-ghost" onclick="retireAccount(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
+            '<button class="btn btn-danger" onclick="deleteAccount(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
+      (f.id?('<p class="asub" style="margin-top:10px">'+
+        (f.active
+          ? 'Retiring is for an account you have closed. Every balance you recorded stays, so past months read exactly as they did — but it stops counting from its last reading onward, rather than being carried forward for ever.'
+          : 'Reactivating brings it back into net worth and into the pickers, carrying its last balance forward again.')+
+        ' Deleting is the other thing: it removes the account and its whole balance history.</p>'):'')+
       (hist.length?('<div class="kicker" style="margin:18px 0 4px">History</div>'+hist.slice(0,18).map(function(b){
         return '<div class="arow" style="cursor:default"><span style="font-size:13px">'+esc(monthLabel(b.as_of))+'</span>'+
           '<div class="av"><div class="b">'+esc(money(b.balance))+'</div></div></div>'; }).join('')):'')+
@@ -1189,6 +1212,24 @@
     }catch(e){ S.err=e.message; }
     S.busy=false; render();
   }
+  async function retireAccount(id){
+    var a=acctById(id); if(!a || S.busy) return;
+    if(a.active){
+      var b=latestBalance(id), v=b?Number(b.balance):0;
+      var links=S.bills.filter(function(x){return x.active && (x.from_account_id===id||x.to_account_id===id);}).map(function(x){return x.name;})
+        .concat(S.income.filter(function(s){return s.active && s.to_account_id===id;}).map(function(s){return s.name+' (remainder)';}))
+        .concat(S.allocs.filter(function(x){return x.account_id===id;}).map(function(x){var s=srcById(x.source_id);return s?s.name+' (split)':null;}).filter(Boolean));
+      var msg='Retire "'+a.name+'"?\n\nIts '+(b?'last balance of '+money(v):'history')+' stays on record and past months are unchanged. It stops counting from there on.';
+      if(v>0) msg+='\n\nNote its balance is not zero, so net worth will drop by '+money(v)+'. If the account still holds money and you are only stopping tracking it, that drop is real either way.';
+      if(links.length) msg+='\n\nStill linked to: '+links.join(', ')+'. Those keep working and simply stop pointing anywhere.';
+      if(!confirm(msg)) return;
+    }
+    S.busy=true;
+    try{ var u=await sb.from('accounts').update({active:!a.active}).eq('id',id); if(u.error) throw u.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
   async function deleteAccount(id){
     var a=acctById(id);
     var n=S.balances.filter(function(b){return b.account_id===id;}).length;
