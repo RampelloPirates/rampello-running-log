@@ -117,6 +117,8 @@
     .seg{display:flex;gap:6px;flex-wrap:wrap;}
     .seg-btn{font-family:var(--f-body);font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-warm);color:var(--muted);cursor:pointer;}
     .seg-btn.on{background:var(--green);color:#fff;border-color:var(--green);}
+    .seg.two{flex-wrap:nowrap;}
+    .seg.two .seg-btn{flex:1;}
     .balrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border);}
     .balrow:last-of-type{border-bottom:none;}
     .balrow .n{flex:1;font-size:13.5px;font-weight:500;}
@@ -355,8 +357,9 @@
       '<button class="mnav" onclick="stepMonth(1)" aria-label="Next month">›</button></div>';
 
     if(!rows.length){
-      h+='<div class="card"><p class="empty">Nothing set up for '+esc(monthLabel(S.period))+' yet.</p>'+
-        '<button class="btn btn-primary full" style="margin-top:12px" onclick="fillMonth()">Add this month\'s bills</button></div>';
+      h+='<div class="card"><p class="empty">'+esc(monthLabel(S.period))+' has no bills recorded.'+
+        (isPast?'<br><br>Past months aren\'t filled in automatically — that would invent a record of bills you never actually logged.':'')+'</p>'+
+        '<button class="btn btn-primary full" style="margin-top:12px" onclick="fillMonth()">Lay out '+esc(monthLabel(S.period))+'\'s bills</button></div>';
       h+='<button class="link" onclick="go(\'bills\')">Manage bills ›</button>';
       return h;
     }
@@ -458,11 +461,31 @@
       '<b>Names and amounts only.</b> Don\'t put account numbers or logins in here.</p>'+
       '<button class="btn btn-primary full" style="margin-top:12px" onclick="openBill(null)">+ Add a bill</button></div>';
   }
-  function stepMonth(n){ S.period=addMonths(S.period,n); S.err=''; render(); }
+  async function stepMonth(n){
+    S.period=addMonths(S.period,n); S.err='';
+    render();                       // move immediately; the fill catches up
+    if(await maybeAutoFill()) render();
+  }
 
-  // Generate this month's payment rows from the active bills. Explicit rather
-  // than automatic on every load: a bill you deleted from a month because it
-  // genuinely wasn't due would otherwise come back the next time you looked.
+  // A month lays itself out the first time you look at it. The rule is narrow
+  // on purpose:
+  //
+  //   * only when the month has NO rows at all, so a bill you deleted because
+  //     it genuinely wasn't due that month stays deleted;
+  //   * only for this month and later, because filling in a past month would
+  //     invent a record of bills you never actually recorded — and the imported
+  //     history has real gaps (July 2026) that deserve to stay visible as gaps.
+  //
+  // Past months keep the explicit button, so backfilling is still one tap but
+  // is always something you chose.
+  async function maybeAutoFill(){
+    if(S.period < thisMonth()) return false;
+    if(!activeBills().length) return false;
+    for(var i=0;i<S.payments.length;i++) if(S.payments[i].period===S.period) return false;
+    await fillMonth();
+    return true;
+  }
+
   async function fillMonth(){
     if(S.busy) return; S.busy=true;
     var have={}; S.payments.forEach(function(p){ if(p.period===S.period) have[p.bill_id]=true; });
@@ -658,9 +681,11 @@
   function openBill(id){
     if(id){ var b=billById(id); if(!b) return;
       S.form={type:'bill', id:id, name:b.name, category:b.category, due_day:b.due_day||'',
-              amount:b.amount_default!=null?String(b.amount_default):'', autopay:!!b.autopay,
-              account_id:b.account_id||'', active:b.active, notes:b.notes||''}; }
-    else S.form={type:'bill', id:null, name:'', category:'other', due_day:'', amount:'', autopay:false, account_id:'', active:true, notes:''};
+              amount:b.amount_default!=null?String(b.amount_default):'', varies:b.amount_default==null,
+              autopay:!!b.autopay, account_id:b.account_id||'', active:b.active, notes:b.notes||''}; }
+    // A new bill defaults to a fixed amount: that's the mortgage, the insurance,
+    // the subscriptions — most of what anyone sets up by hand.
+    else S.form={type:'bill', id:null, name:'', category:'other', due_day:'', amount:'', varies:false, autopay:false, account_id:'', active:true, notes:''};
     S.err=''; render();
   }
   function billForm(f){
@@ -671,9 +696,14 @@
       '<label class="lbl">Category</label><div class="seg">'+
         Object.keys(BILL_CATS).map(function(k){ return '<button type="button" class="seg-btn'+(f.category===k?' on':'')+'" onclick="setBillField(\'category\',\''+k+'\')">'+BILL_CATS[k].icon+' '+BILL_CATS[k].label+'</button>'; }).join('')+
       '</div>'+
-      '<div class="grid2"><div><label class="lbl">Due day</label><input id="bDay" class="field full" inputmode="numeric" placeholder="1" value="'+esc(f.due_day)+'"></div>'+
-      '<div><label class="lbl">Usual amount</label><input id="bAmt" class="field full" inputmode="decimal" placeholder="varies" value="'+esc(f.amount)+'"></div></div>'+
-      '<p class="asub" style="margin:6px 0 0">Leave the amount blank for bills that change every month — power, water, credit cards.</p>'+
+      '<label class="lbl">Due day</label><input id="bDay" class="field full" inputmode="numeric" placeholder="1" value="'+esc(f.due_day)+'">'+
+      '<label class="lbl">Amount</label><div class="seg two">'+
+        '<button type="button" class="seg-btn'+(f.varies?'':' on')+'" onclick="setBillVaries(false)">Same every month</button>'+
+        '<button type="button" class="seg-btn'+(f.varies?' on':'')+'" onclick="setBillVaries(true)">Varies</button></div>'+
+      (f.varies
+        ? '<p class="asub" style="margin:8px 0 0">Arrives blank each month and you fill in what it actually came to — power, water, credit cards.</p>'
+        : '<input id="bAmt" class="field full" style="margin-top:8px" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
+          '<p class="asub" style="margin:6px 0 0">Every month starts prefilled with this, and you can still change it on the day.</p>')+
       (liabs.length?('<label class="lbl">Pays down</label><select id="bAcct" class="field full">'+
         '<option value="">— nothing (an expense) —</option>'+
         liabs.map(function(a){ return '<option value="'+esc(a.id)+'"'+(f.account_id===a.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+
@@ -686,6 +716,9 @@
       '</div>';
   }
   function setBillField(k,v){ stashBill(); S.form[k]=v; render(); }
+  // The typed figure is kept when switching to Varies, so flipping back and
+  // forth to read the hint doesn't cost you what you already entered.
+  function setBillVaries(v){ stashBill(); S.form.varies=!!v; render(); }
   function stashBill(){
     var f=S.form;
     f.name=((el('bName')||{}).value!=null)?el('bName').value:f.name;
@@ -700,7 +733,11 @@
     if(!name){ S.err='Give the bill a name.'; render(); return; }
     var day=f.due_day===''?null:parseInt(f.due_day,10);
     if(day!=null && (isNaN(day)||day<1||day>31)){ S.err='Due day has to be between 1 and 31.'; render(); return; }
-    var amt=numOrNull(f.amount);
+    // "Varies" is what makes amount_default null — not an empty box. Otherwise
+    // saying "same every month" and forgetting to type a figure would silently
+    // give you a varying bill, and you'd only find out a month later.
+    var amt=f.varies?null:numOrNull(f.amount);
+    if(!f.varies && amt==null){ S.err='Enter the amount, or switch it to Varies.'; render(); return; }
     if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
     var row={ name:name, category:f.category, due_day:day, amount_default:amt,
               autopay:!!f.autopay, account_id:f.account_id||null };
@@ -995,7 +1032,7 @@
     var profile=await requireUser(); if(!profile) return;
     S.userId=profile.user.id;
     S.period=thisMonth();
-    try{ await load(); }
+    try{ await load(); await maybeAutoFill(); }
     catch(e){
       el('app').innerHTML='<header><a href="home.html" class="home-back">‹ Home</a></header>'+
         '<div class="card"><p class="empty">Couldn\'t load your money data.<br><br><code>'+esc(e.message)+'</code>'+

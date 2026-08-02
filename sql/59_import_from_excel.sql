@@ -47,21 +47,57 @@
 --  * Jan 2026: the four income lines total 0 but Total Pay says 18,000 — the 18,000 difference imports as "Unallocated (from sheet Total Pay)"
 --  * Feb 2026: the four income lines total 0 but Total Pay says 25,451 — the 25,451 difference imports as "Unallocated (from sheet Total Pay)"
 --  * Apr 2026: the four income lines total 13,050 but Total Pay says 13,940 — the 890 difference imports as "Unallocated (from sheet Total Pay)"
+--  * 5 of 24 bills prefill (last three months identical); the other 19 arrive blank
+--      529 Funds                  prefills at 300.00
+--      Appliances                 varies
+--      BMW                        varies
+--      Banana Republic            varies
+--      Capital One Venture        varies
+--      Car Insurance              prefills at 243.00
+--      Chase                      varies
+--      Citi - American Airlines   varies
+--      Delta AMEX                 varies
+--      Electric                   varies
+--      Frontier                   varies
+--      Health Insurance           varies
+--      Life Insurance             prefills at 158.00
+--      Medical Expenses           varies
+--      Mortgage                   prefills at 2,423.00
+--      Other cards                varies
+--      Quicksilver                varies
+--      REI                        varies
+--      Rent                       varies
+--      Savor                      varies
+--      Tires                      varies
+--      Treadmill                  prefills at 33.00
+--      Verizon                    varies
+--      Water                      varies
 -- ==========================================================================
 
 
 -- -- STEP 1: confirm which user these rows belong to ----------------------
--- Run this on its own first. The inserts below look you up by email; if
--- the address is wrong nothing will insert (every statement is guarded by
--- a join against it), so this is fail-safe rather than fail-dangerous.
+-- Run this on its own FIRST:
 --
 --   select id, email, created_at from auth.users order by created_at;
+--
+-- Every statement below owns its rows to the oldest row that returns.
+-- If more than one comes back, replace the me CTE in all six statements
+--   with me as (select '<paste-the-uuid>'::uuid as id)
+-- before running any of them. Getting this wrong writes a full copy of
+-- your finances under an account that cannot see them, and because RLS
+-- hides the result the app just looks empty.
+--
+-- Check afterwards that the rows landed where you can see them:
+--
+--   select user_id, count(*) from public.bill_payments group by user_id;
+--
+-- That user_id must match the account you sign into Tally with.
 
 
 -- -- STEP 2: the import ---------------------------------------------------
 
 -- Accounts (17). Skipped if a same-named account already exists.
-with me as (select id from auth.users where lower(email) = lower('jeff.smith@bayfoodbrokerage.com') limit 1)
+with me as (select id from auth.users order by created_at limit 1)
 insert into public.accounts (user_id, name, kind, category, sort_order)
 select me.id, v.name, v.kind, v.category, v.ord from me, (values
   ('Savings', 'asset', 'cash', 0),
@@ -86,27 +122,27 @@ select me.id, v.name, v.kind, v.category, v.ord from me, (values
                     where a.user_id = me.id and lower(a.name) = lower(v.name));
 
 -- Bills (24). amount_default comes from the sheet's "Guide" column.
-with me as (select id from auth.users where lower(email) = lower('jeff.smith@bayfoodbrokerage.com') limit 1)
+with me as (select id from auth.users order by created_at limit 1)
 insert into public.bills (user_id, name, category, amount_default, account_id, sort_order)
 select me.id, v.name, v.category, v.guide,
        (select a.id from public.accounts a
          where a.user_id = me.id and lower(a.name) = lower(v.link)),
        v.ord
   from me, (values
-  ('Mortgage', 'housing', 2388.00, 'House Balance', 0),
-  ('Electric', 'utilities', 500.00, null::text, 1),
-  ('Health Insurance', 'insurance', 0.00, null::text, 2),
-  ('BMW', 'auto', 523.80, null::text, 3),
+  ('Mortgage', 'housing', 2423.00, 'House Balance', 0),
+  ('Electric', 'utilities', null::numeric, null::text, 1),
+  ('Health Insurance', 'insurance', null::numeric, null::text, 2),
+  ('BMW', 'auto', null::numeric, null::text, 3),
   ('529 Funds', 'other', 300.00, null::text, 4),
   ('Life Insurance', 'insurance', 158.00, null::text, 5),
   ('Appliances', 'other', null::numeric, null::text, 6),
   ('Tires', 'auto', null::numeric, null::text, 7),
   ('Rent', 'housing', null::numeric, null::text, 8),
-  ('Treadmill', 'other', null::numeric, null::text, 9),
-  ('Chase', 'credit', 5714.74, null::text, 10),
+  ('Treadmill', 'other', 33.00, null::text, 9),
+  ('Chase', 'credit', null::numeric, null::text, 10),
   ('Citi - American Airlines', 'credit', null::numeric, null::text, 11),
   ('Savor', 'credit', null::numeric, null::text, 12),
-  ('Quicksilver', 'credit', 1598.60, null::text, 13),
+  ('Quicksilver', 'credit', null::numeric, null::text, 13),
   ('Capital One Venture', 'credit', null::numeric, null::text, 14),
   ('REI', 'credit', null::numeric, null::text, 15),
   ('Delta AMEX', 'credit', null::numeric, null::text, 16),
@@ -115,14 +151,14 @@ select me.id, v.name, v.category, v.guide,
   ('Water', 'utilities', null::numeric, null::text, 19),
   ('Frontier', 'utilities', null::numeric, null::text, 20),
   ('Medical Expenses', 'health', null::numeric, null::text, 21),
-  ('Car Insurance', 'insurance', null::numeric, null::text, 22),
+  ('Car Insurance', 'insurance', 243.00, null::text, 22),
   ('Verizon', 'utilities', null::numeric, null::text, 23)
 ) as v(name, category, guide, link, ord)
  where not exists (select 1 from public.bills b
                     where b.user_id = me.id and lower(b.name) = lower(v.name));
 
 -- Income sources (5).
-with me as (select id from auth.users where lower(email) = lower('jeff.smith@bayfoodbrokerage.com') limit 1)
+with me as (select id from auth.users order by created_at limit 1)
 insert into public.income_sources (user_id, name, amount_default, sort_order)
 select me.id, v.name, v.guide, v.ord from me, (values
   ('Payroll', 12083.00, 0),
@@ -135,7 +171,7 @@ select me.id, v.name, v.guide, v.ord from me, (values
                     where s.user_id = me.id and lower(s.name) = lower(v.name));
 
 -- Monthly balances (586).
-with me as (select id from auth.users where lower(email) = lower('jeff.smith@bayfoodbrokerage.com') limit 1),
+with me as (select id from auth.users order by created_at limit 1),
      d(acct, as_of, bal) as (values
   ('Savings', date '2021-07-01', 50637.33),
   ('Savings', date '2021-08-01', 47276.79),
@@ -731,7 +767,7 @@ select me.id, a.id, d.as_of, d.bal
 on conflict (account_id, as_of) do nothing;
 
 -- Bill payments (439).
-with me as (select id from auth.users where lower(email) = lower('jeff.smith@bayfoodbrokerage.com') limit 1),
+with me as (select id from auth.users order by created_at limit 1),
      d(bill, period, amt) as (values
   ('Mortgage', date '2023-09-01', 2466.00),
   ('Mortgage', date '2023-10-01', 2466.00),
@@ -1180,7 +1216,7 @@ select me.id, b.id, d.period, null, d.amt, d.amt, d.period
 on conflict (bill_id, period) do nothing;
 
 -- Income entries (100).
-with me as (select id from auth.users where lower(email) = lower('jeff.smith@bayfoodbrokerage.com') limit 1),
+with me as (select id from auth.users order by created_at limit 1),
      d(src, period, amt) as (values
   ('Payroll', date '2023-09-01', 12590.14),
   ('Payroll', date '2023-10-01', 12590.00),
@@ -1288,6 +1324,44 @@ select me.id, s.id, d.period, d.amt
   from d join me on true
   join public.income_sources s on s.user_id = me.id and lower(s.name) = lower(d.src)
 on conflict (source_id, period) do nothing;
+
+-- -- STEP 3: which bills prefill and which arrive blank ------------------
+-- The only statement here that updates rather than skips, so it is also
+-- the repair for an import run with an earlier version of this file --
+-- those bills carry the spreadsheet's Guide column, which is a stale
+-- budget figure rather than what anything actually costs. On a fresh
+-- import the values already match and this changes nothing.
+with me as (select id from auth.users order by created_at limit 1),
+     d(bill, amt) as (values
+  ('Mortgage', 2423.00::numeric),
+  ('Electric', null::numeric),
+  ('Health Insurance', null::numeric),
+  ('BMW', null::numeric),
+  ('529 Funds', 300.00::numeric),
+  ('Life Insurance', 158.00::numeric),
+  ('Appliances', null::numeric),
+  ('Tires', null::numeric),
+  ('Rent', null::numeric),
+  ('Treadmill', 33.00::numeric),
+  ('Chase', null::numeric),
+  ('Citi - American Airlines', null::numeric),
+  ('Savor', null::numeric),
+  ('Quicksilver', null::numeric),
+  ('Capital One Venture', null::numeric),
+  ('REI', null::numeric),
+  ('Delta AMEX', null::numeric),
+  ('Banana Republic', null::numeric),
+  ('Other cards', null::numeric),
+  ('Water', null::numeric),
+  ('Frontier', null::numeric),
+  ('Medical Expenses', null::numeric),
+  ('Car Insurance', 243.00::numeric),
+  ('Verizon', null::numeric)
+)
+update public.bills b set amount_default = d.amt
+  from d, me
+ where b.user_id = me.id and lower(b.name) = lower(d.bill)
+   and b.amount_default is distinct from d.amt;
 
 
 -- ==========================================================================
