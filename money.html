@@ -119,8 +119,6 @@
     .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
     label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:block;margin:10px 0 4px;}
-    .check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13.5px;font-weight:500;cursor:pointer;}
-    .check input{width:18px;height:18px;accent-color:var(--green);}
     .seg{display:flex;gap:6px;flex-wrap:wrap;}
     .seg-btn{font-family:var(--f-body);font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-warm);color:var(--muted);cursor:pointer;}
     .seg-btn.on{background:var(--green);color:#fff;border-color:var(--green);}
@@ -867,11 +865,18 @@
         [['bank','Bank'],['card','Credit card'],['cash','Cash']].map(function(p){
           return '<button type="button" class="seg-btn'+(f.pay_method===p[0]?' on':'')+'" onclick="setBillField(\'pay_method\',\''+p[0]+'\')">'+p[1]+'</button>';
         }).join('')+'</div>'+
+      '<label class="lbl">Autopay</label><div class="seg two">'+
+        '<button type="button" class="seg-btn'+(f.autopay?'':' on')+'" onclick="setBillField(\'autopay\',false)">I pay it</button>'+
+        '<button type="button" class="seg-btn'+(f.autopay?' on':'')+'" onclick="setBillField(\'autopay\',true)">Automatic</button></div>'+
+      (f.autopay
+        ? (f.varies
+            ? '<p class="asub" style="margin:8px 0 0">Because the amount varies there is no figure to claim, so this still waits for you to fill it in — it just won\'t be chased.</p>'
+            : '<p class="asub" style="margin:8px 0 0">Marks itself paid when the due date arrives, so it stays out of the way of the bills that need a decision.</p>')
+        : '')+
       (liabs.length?('<label class="lbl">Pays down</label><select id="bAcct" class="field full">'+
         '<option value="">— nothing (an expense) —</option>'+
         liabs.map(function(a){ return '<option value="'+esc(a.id)+'"'+(f.account_id===a.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+
         '</select><p class="asub" style="margin:6px 0 0">Link the mortgage, car loan or a card to its balance and the Net Worth tab shows the payment beside what\'s left.</p>'):'')+
-      '<label class="check"><input type="checkbox" id="bAuto"'+(f.autopay?' checked':'')+'> On autopay</label>'+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveBill()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireBill(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
             '<button class="btn btn-danger" onclick="deleteBill(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
@@ -889,7 +894,6 @@
     f.amount=((el('bAmt')||{}).value!=null)?el('bAmt').value:f.amount;
     if(el('bAcct')) f.account_id=el('bAcct').value;
     if(el('bSect')) f.section_id=el('bSect').value;
-    if(el('bAuto')) f.autopay=el('bAuto').checked;
   }
   async function saveBill(){
     stashBill(); var f=S.form;
