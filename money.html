@@ -382,8 +382,10 @@
 
   // ── BILLS TAB ─────────────────────────────────────────────────────────────
   function renderBills(){
-    if(!activeBills().length) return billsEmpty();
     var rows=monthRows(), t=monthTotals(rows);
+    // "No bills yet" only when there is genuinely nothing — retiring everything
+    // must not hide the months that still have history in them.
+    if(!activeBills().length && !rows.length) return billsEmpty();
     var isNow=S.period===thisMonth(), isPast=S.period<thisMonth();
 
     var h='<div class="month">'+
@@ -911,7 +913,11 @@
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveBill()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireBill(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
             '<button class="btn btn-danger" onclick="deleteBill(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
-      (f.id?'<p class="asub" style="margin-top:10px">Retiring keeps every payment you have recorded and stops it appearing in new months. Deleting removes its history too.</p>':'')+
+      (f.id?('<p class="asub" style="margin-top:10px">'+
+        (f.active
+          ? 'Retiring takes it out of this month and every month after, but keeps every payment you have already recorded — the history stays readable and the totals for past months don\'t move.'
+          : 'Reactivating puts it back, starting with the month you are looking at.')+
+        ' Deleting is the other thing: it removes the bill and its history together.</p>'):'')+
       '</div>';
   }
   function setBillField(k,v){ stashBill(); S.form[k]=v; render(); }
@@ -957,11 +963,44 @@
     }catch(e){ S.err=e.message; }
     S.busy=false; render();
   }
+  // Retiring stops a bill you no longer have without losing what it cost you.
+  //
+  // Flipping active alone wasn't enough: it kept the bill out of months not yet
+  // laid out, but left the row already sitting in this one, so retiring Rent
+  // today left Rent in this month's list until next month. So the unpaid rows
+  // from this month forward go too.
+  //
+  // What stays, and why the line is drawn there: a PAID row records money that
+  // actually moved and is never touched. An unpaid row in a PAST month is also
+  // kept — it may well mean you never paid that one, which is a fact. It is only
+  // the unpaid rows from now on that are pure placeholder, holding no
+  // information beyond an expectation that has just been withdrawn.
   async function retireBill(id){
     var b=billById(id); if(!b) return;
+    var retiring=b.active, now=thisMonth();
     S.busy=true;
-    try{ var u=await sb.from('bills').update({active:!b.active}).eq('id',id); if(u.error) throw u.error; S.form=null; await load(); }
-    catch(e){ S.err=e.message; }
+    try{
+      var u=await sb.from('bills').update({active:!b.active}).eq('id',id); if(u.error) throw u.error;
+      if(retiring){
+        var drop=S.payments.filter(function(p){
+          return p.bill_id===id && !p.paid_on && p.period>=now;
+        });
+        for(var i=0;i<drop.length;i++){
+          var d=await sb.from('bill_payments').delete().eq('id',drop[i].id); if(d.error) throw d.error;
+        }
+      } else {
+        // Bringing it back should put it in the month you are looking at, not
+        // leave you wondering why nothing happened.
+        var has=S.payments.some(function(p){ return p.bill_id===id && p.period===S.period; });
+        if(!has){
+          var ins=await sb.from('bill_payments').insert({
+            user_id:S.userId, bill_id:id, period:S.period,
+            due_on:dueDate(S.period, b.due_day), amount_due:b.amount_default });
+          if(ins.error) throw ins.error;
+        }
+      }
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
     S.busy=false; render();
   }
   async function deleteBill(id){
