@@ -76,6 +76,10 @@
     .secsub{display:flex;justify-content:space-between;align-items:baseline;padding:2px 4px 0;margin:-2px 0 4px;font-size:12.5px;color:var(--muted);}
     .secsub .v{font-family:var(--f-mono);font-weight:600;color:var(--ink);}
 
+    .splitrow{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0 4px 14px;font-size:12.5px;color:var(--muted);border-bottom:1px dashed var(--border);}
+    .splitrow .v{font-family:var(--f-mono);}
+    .splitrow .over{color:var(--danger);font-weight:600;}
+
     /* net worth */
     .hero{font-family:var(--f-mono);font-size:33px;font-weight:600;line-height:1.05;letter-spacing:-1px;}
     .hero.neg{color:var(--danger);}
@@ -166,7 +170,7 @@
     tab:'bills',
     period:null,            // 'YYYY-MM-01' — the month on screen
     bills:[], payments:[], accounts:[], balances:[],
-    income:[], incomeEntries:[], sections:[], acctSections:[],
+    income:[], incomeEntries:[], allocs:[], sections:[], acctSections:[],
     groupBy:'section',      // 'section' — the spreadsheet's blocks | 'due' — the pay run
     worthGroupBy:'section', // 'section' — nets to equity | 'kind' — assets vs debts
     sectKind:'bill',        // which manage screen is open
@@ -438,6 +442,37 @@
     }
     return null;
   }
+  function allocsFor(sourceId){ return S.allocs.filter(function(x){return x.source_id===sourceId;}); }
+
+  // The named slices, then whatever is left. The remainder is computed, never
+  // stored — a third number kept in step with two others is the one that ends up
+  // wrong. It only appears once the month's figure is in, since until then there
+  // is nothing to take the slices out of.
+  function splitRowsHTML(s, entry){
+    var al=allocsFor(s.id);
+    var rest=s.to_account_id?acctById(s.to_account_id):null;
+    if(!al.length && !rest) return '';
+    var taken=0;
+    var h=al.map(function(x){
+      taken+=Number(x.amount);
+      var a=acctById(x.account_id);
+      return '<div class="splitrow"><span>→ '+esc(a?a.name:'(deleted account)')+'</span>'+
+        '<span class="v">'+esc(money(x.amount))+'</span></div>';
+    }).join('');
+    // With nothing carved off there is no remainder worth naming — the "rest"
+    // would just repeat the figure on the line above it.
+    if(rest && entry && al.length){
+      var left=Number(entry.amount)-taken;
+      h+='<div class="splitrow"><span>→ '+esc(rest.name)+'</span>'+
+        '<span class="v'+(left<0?' over':'')+'">'+esc(money(left))+
+        (left<0?' over':' <span style="opacity:.65">rest</span>')+'</span></div>';
+    } else if(al.length && entry && taken>Number(entry.amount)){
+      h+='<div class="splitrow"><span class="over">Splits exceed what came in</span>'+
+        '<span class="v over">'+esc(money(Number(entry.amount)-taken))+'</span></div>';
+    }
+    return h;
+  }
+
   function renderIncomeCard(t){
     var srcs=activeIncome();
     if(!srcs.length){
@@ -454,7 +489,8 @@
       return '<div class="arow" onclick="openIncomeEntry(\''+esc(s.id)+'\')">'+
         '<div class="an" style="font-weight:500">'+esc(s.name)+'</div>'+
         '<div class="av"><div class="b'+(e?'':' ')+'" style="'+(e?'':'color:var(--muted);font-weight:400')+'">'+
-        esc(e?money(e.amount):'—')+'</div></div></div>';
+        esc(e?money(e.amount):'—')+'</div></div></div>'+
+        splitRowsHTML(s, e);
     }).join('');
     var surplus=inn-out;
     return '<div class="card" style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Income &amp; surplus</div>'+
@@ -749,6 +785,16 @@
     }
     describe(S.bills.filter(function(b){ return b.active && b.to_account_id===a.id; }), '+');
     describe(S.bills.filter(function(b){ return b.active && b.from_account_id===a.id; }), '−');
+    // Direct deposits landing here. A named slice has a figure; the account that
+    // takes the remainder does not, because the remainder is whatever is left.
+    S.allocs.forEach(function(x){
+      if(x.account_id!==a.id) return;
+      var s=srcById(x.source_id);
+      if(s && s.active) out.push('+'+money(x.amount)+'/mo from '+s.name);
+    });
+    S.income.forEach(function(s){
+      if(s.active && s.to_account_id===a.id) out.push('+ rest of '+s.name);
+    });
     return out;
   }
 
@@ -843,6 +889,7 @@
     if(f.type==='incomeEntry') return incomeEntryForm(f);
     if(f.type==='incomeSource') return incomeSourceForm(f);
     if(f.type==='section') return sectionForm(f);
+    if(f.type==='alloc') return allocForm(f);
     return '';
   }
 
@@ -927,7 +974,8 @@
         : '')+
       (activeAccounts().length?(
         '<label class="lbl">Paid from</label>'+acctSelect('bFrom', f.from_account_id, fromable())+
-        '<label class="lbl">Pays to</label>'+acctSelect('bTo', f.to_account_id, activeAccounts())+
+        // re-renders so the hint below can describe whichever account was picked
+        '<label class="lbl">Pays to</label>'+acctSelect('bTo', f.to_account_id, activeAccounts(), 'stashBill();render()')+
         '<p class="asub" style="margin:6px 0 0">'+payToHint(f)+'</p>'):'')+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveBill()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireBill(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
@@ -945,7 +993,7 @@
   function fromable(){
     return activeAccounts().filter(function(a){ return a.category!=='property' && a.category!=='vehicle'; });
   }
-  function acctSelect(id, sel, list){
+  function acctSelect(id, sel, list, onchange){
     var groups={}, order=[];
     list.forEach(function(a){
       var s=a.section_id?sectById(a.section_id,'account'):null;
@@ -953,7 +1001,7 @@
       if(!groups[key]){ groups[key]=[]; order.push(key); }
       groups[key].push(a);
     });
-    return '<select id="'+id+'" class="field full" onchange="stashBill();render()">'+
+    return '<select id="'+id+'" class="field full"'+(onchange?' onchange="'+onchange+'"':'')+'>'+
       '<option value="">— none —</option>'+
       order.map(function(k){
         return '<optgroup label="'+esc(k)+'">'+groups[k].map(function(a){
@@ -1267,30 +1315,105 @@
 
   function openIncomeSource(id){
     if(id){ var s=srcById(id); if(!s) return;
-      S.form={type:'incomeSource', id:id, name:s.name, amount:s.amount_default!=null?String(s.amount_default):'', active:s.active}; }
-    else S.form={type:'incomeSource', id:null, name:'', amount:'', active:true};
+      S.form={type:'incomeSource', id:id, name:s.name, amount:s.amount_default!=null?String(s.amount_default):'',
+              to_account_id:s.to_account_id||'', active:s.active}; }
+    else S.form={type:'incomeSource', id:null, name:'', amount:'', to_account_id:'', active:true};
     S.err=''; render();
   }
+  function stashIncomeSource(){
+    var f=S.form; if(!f || f.type!=='incomeSource') return;
+    if(el('sName')) f.name=el('sName').value;
+    if(el('sAmt'))  f.amount=el('sAmt').value;
+    if(el('sAcct')) f.to_account_id=el('sAcct').value;
+  }
+  // Splits need the source to exist before they can point at it, so a brand new
+  // source says so rather than showing an editor that cannot save.
+  function splitsEditorHTML(f){
+    if(!activeAccounts().length) return '';
+    if(!f.id) return '<p class="asub" style="margin:12px 0 0">Save it first and you can split it across accounts — direct deposit to savings, and so on.</p>';
+    var al=allocsFor(f.id);
+    var h='<label class="lbl">Splits</label>';
+    if(!al.length) h+='<p class="asub" style="margin:0 0 6px">Nothing carved off — all of it lands in the account above.</p>';
+    else h+=al.map(function(x){
+      var a=acctById(x.account_id);
+      return '<div class="arow" onclick="openAlloc(\''+esc(f.id)+'\',\''+esc(x.id)+'\')" style="padding:8px 0">'+
+        '<div class="an" style="font-weight:500;font-size:13.5px">→ '+esc(a?a.name:'(deleted account)')+'</div>'+
+        '<div class="av"><div class="b">'+esc(money(x.amount))+'</div></div></div>';
+    }).join('');
+    h+='<button class="link" style="padding:6px 0" onclick="openAlloc(\''+esc(f.id)+'\',null)">+ Add a split</button>';
+    return h;
+  }
+
+  function openAlloc(sourceId, allocId){
+    stashIncomeSource();
+    var a=allocId?S.allocs.filter(function(x){return x.id===allocId;})[0]:null;
+    var used={};
+    allocsFor(sourceId).forEach(function(x){ if(!a||x.id!==a.id) used[x.account_id]=true; });
+    S.form={type:'alloc', id:allocId, sourceId:sourceId,
+            account_id:a?a.account_id:'', amount:a?String(a.amount):'', used:used};
+    S.err=''; render();
+  }
+  function allocForm(f){
+    var s=srcById(f.sourceId);
+    // An account already carved off this source is not offered again — the
+    // unique constraint would reject it, and two slices to one place is the
+    // same arrangement entered twice.
+    var avail=activeAccounts().filter(function(a){ return !f.used[a.id] || a.id===f.account_id; });
+    return '<button class="back-link" onclick="openIncomeSource(\''+esc(f.sourceId)+'\')">‹ Back</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:4px">'+(f.id?'Edit split':'Add a split')+'</div>'+
+      '<div class="an" style="font-size:16px;margin-bottom:2px">'+esc(s?s.name:'')+'</div>'+
+      '<label class="lbl">Lands in</label>'+acctSelect('alAcct', f.account_id, avail)+
+      '<label class="lbl">Amount each month</label>'+moneyField('alAmt', f.amount)+
+      '<p class="asub" style="margin:6px 0 0">Taken off the top every month. Whatever is left goes to the account on the source.</p>'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveAlloc()">Save</button>'+
+      (f.id?'<button class="btn btn-danger" onclick="deleteAlloc()">Remove</button>':'')+'</div></div>';
+  }
+  async function saveAlloc(){
+    var f=S.form;
+    var acct=(el('alAcct')||{}).value||'', amt=numOrNull((el('alAmt')||{}).value);
+    if(!acct){ S.err='Pick the account it lands in.'; render(); return; }
+    if(amt==null||amt<0){ S.err='Enter how much goes there each month.'; render(); return; }
+    S.busy=true;
+    try{
+      if(f.id){ var u=await sb.from('income_allocations').update({account_id:acct, amount:amt}).eq('id',f.id); if(u.error) throw u.error; }
+      else{ var i=await sb.from('income_allocations').insert(
+              {user_id:S.userId, source_id:f.sourceId, account_id:acct, amount:amt}); if(i.error) throw i.error; }
+      await load(); openIncomeSource(f.sourceId);
+    }catch(e){ S.err=e.message; render(); }
+    S.busy=false;
+  }
+  async function deleteAlloc(){
+    var f=S.form; if(!f.id) return;
+    S.busy=true;
+    try{ var d=await sb.from('income_allocations').delete().eq('id',f.id); if(d.error) throw d.error;
+      await load(); openIncomeSource(f.sourceId); }
+    catch(e){ S.err=e.message; render(); }
+    S.busy=false;
+  }
+
   function incomeSourceForm(f){
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
       '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit source':'Add an income source')+'</div>'+
       '<label class="lbl">Name</label><input id="sName" class="field full" placeholder="Payroll" value="'+esc(f.name)+'">'+
       '<label class="lbl">Usual amount</label>'+moneyField('sAmt', f.amount, 'varies')+
       '<p class="asub" style="margin:6px 0 0">Leave blank for anything irregular — reimbursements, side work.</p>'+
+      (activeAccounts().length?(
+        '<label class="lbl">Rest lands in</label>'+acctSelect('sAcct', f.to_account_id, activeAccounts())):'')+
+      splitsEditorHTML(f)+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveIncomeSource()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireIncomeSource(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
             '<button class="btn btn-danger" onclick="deleteIncomeSource(\''+esc(f.id)+'\')">Delete</button>':'')+'</div></div>';
   }
   async function saveIncomeSource(){
-    var f=S.form;
-    var name=((el('sName')||{}).value||'').trim();
-    var amt=numOrNull((el('sAmt')||{}).value);
+    stashIncomeSource();
+    var f=S.form, name=(f.name||'').trim(), amt=numOrNull(f.amount);
     if(!name){ S.err='Give the source a name.'; render(); return; }
     if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
+    var row={name:name, amount_default:amt, to_account_id:f.to_account_id||null};
     S.busy=true;
     try{
-      if(f.id){ var u=await sb.from('income_sources').update({name:name, amount_default:amt}).eq('id',f.id); if(u.error) throw u.error; }
-      else{ var i=await sb.from('income_sources').insert({user_id:S.userId, name:name, amount_default:amt}); if(i.error) throw i.error; }
+      if(f.id){ var u=await sb.from('income_sources').update(row).eq('id',f.id); if(u.error) throw u.error; }
+      else{ row.user_id=S.userId; var i=await sb.from('income_sources').insert(row); if(i.error) throw i.error; }
       S.form=null; await load();
     }catch(e){ S.err=e.message; }
     S.busy=false; render();
@@ -1426,13 +1549,14 @@
       sb.from('income_sources').select('*').order('sort_order'),
       sb.from('income_entries').select('*').order('period',{ascending:false}),
       sb.from('bill_sections').select('*').order('sort_order'),
-      sb.from('account_sections').select('*').order('sort_order')
+      sb.from('account_sections').select('*').order('sort_order'),
+      sb.from('income_allocations').select('*')
     ]);
     for(var i=0;i<r.length;i++) if(r[i].error) throw r[i].error;
     S.bills=r[0].data||[]; S.payments=r[1].data||[];
     S.accounts=r[2].data||[]; S.balances=r[3].data||[];
     S.income=r[4].data||[]; S.incomeEntries=r[5].data||[];
-    S.sections=r[6].data||[]; S.acctSections=r[7].data||[];
+    S.sections=r[6].data||[]; S.acctSections=r[7].data||[]; S.allocs=r[8].data||[];
   }
 
   (async function(){
