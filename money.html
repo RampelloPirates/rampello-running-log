@@ -160,8 +160,10 @@
     tab:'bills',
     period:null,            // 'YYYY-MM-01' — the month on screen
     bills:[], payments:[], accounts:[], balances:[],
-    income:[], incomeEntries:[], sections:[],
+    income:[], incomeEntries:[], sections:[], acctSections:[],
     groupBy:'section',      // 'section' — the spreadsheet's blocks | 'due' — the pay run
+    worthGroupBy:'section', // 'section' — nets to equity | 'kind' — assets vs debts
+    sectKind:'bill',        // which manage screen is open
     view:null,              // null | 'bills' | 'accounts' | 'income' | 'sections'
     form:null,              // whatever form is open, if any
     err:'', busy:false,
@@ -645,17 +647,65 @@
     }
     h+='<button class="btn btn-primary full" style="margin-top:12px" onclick="openBalances()">Update balances for '+esc(monthLabel(thisMonth()))+'</button></div>';
 
-    var assets=activeAccounts().filter(function(a){return a.kind==='asset';});
-    var liabs =activeAccounts().filter(function(a){return a.kind==='liability';});
-    if(assets.length) h+='<div class="kicker grp">Assets</div><div class="card">'+assets.map(arowHTML).join('')+
-      '<div class="subtot"><span>Total assets</span><span class="v">'+esc(money(cur?cur.assets:0))+'</span></div></div>';
-    if(liabs.length) h+='<div class="kicker grp">Debts</div><div class="card">'+liabs.map(arowHTML).join('')+
-      '<div class="subtot"><span>Total debts</span><span class="v">'+esc(money(cur?cur.debts:0))+'</span></div></div>';
+    if(S.acctSections.length)
+      h+='<div class="seg two" style="margin:16px 0 2px">'+
+        '<button type="button" class="seg-btn'+(S.worthGroupBy==='section'?' on':'')+'" onclick="setWorthGroupBy(\'section\')">By section</button>'+
+        '<button type="button" class="seg-btn'+(S.worthGroupBy==='kind'?' on':'')+'" onclick="setWorthGroupBy(\'kind\')">Assets &amp; debts</button></div>';
 
+    h += (S.worthGroupBy==='section' && S.acctSections.length) ? worthBySectionHTML() : worthByKindHTML(cur);
     h+='<button class="link" onclick="go(\'accounts\')">Manage accounts ›</button>';
     return h;
   }
-  function arowHTML(a){
+  function setWorthGroupBy(g){ S.worthGroupBy=g; S.err=''; render(); }
+
+  function worthByKindHTML(cur){
+    var assets=activeAccounts().filter(function(a){return a.kind==='asset';});
+    var liabs =activeAccounts().filter(function(a){return a.kind==='liability';});
+    var h='';
+    if(assets.length) h+='<div class="kicker grp">Assets</div><div class="card">'+assets.map(function(a){return arowHTML(a);}).join('')+
+      '<div class="subtot"><span>Total assets</span><span class="v">'+esc(money(cur?cur.assets:0))+'</span></div></div>';
+    if(liabs.length) h+='<div class="kicker grp">Debts</div><div class="card">'+liabs.map(function(a){return arowHTML(a);}).join('')+
+      '<div class="subtot"><span>Total debts</span><span class="v">'+esc(money(cur?cur.debts:0))+'</span></div></div>';
+    return h;
+  }
+
+  // A section is allowed to hold both sides, and subtotals to the net. That is
+  // the whole point: a house and the mortgage against it are one holding worth
+  // one number, and splitting them across Assets and Debts made that number
+  // impossible to see.
+  function worthBySectionHTML(){
+    var bucket={}, loose=[];
+    S.acctSections.forEach(function(s){ bucket[s.id]=[]; });
+    activeAccounts().forEach(function(a){
+      if(a.section_id && bucket[a.section_id]) bucket[a.section_id].push(a); else loose.push(a);
+    });
+    var h='';
+    S.acctSections.forEach(function(s){
+      if(bucket[s.id].length) h+=worthSectionBlock(s.name, bucket[s.id]);
+    });
+    if(loose.length) h+=worthSectionBlock('Unsectioned', loose);
+    return h;
+  }
+  function worthSectionBlock(name, list){
+    var net=0, anyAsset=false, anyLiab=false;
+    list.forEach(function(a){
+      var b=latestBalance(a.id), v=b?Number(b.balance):0;
+      if(a.kind==='asset'){ net+=v; anyAsset=true; } else { net-=v; anyLiab=true; }
+    });
+    var mixed=anyAsset&&anyLiab;
+    // A debts-only section nets negative, but "Total owed −$308,563" reads as a
+    // double negative. Show the magnitude and let the label carry the sign.
+    var label = mixed ? 'Equity' : (anyLiab ? 'Total owed' : 'Total');
+    var shown = (!mixed && anyLiab) ? -net : net;
+    return '<div class="kicker grp">'+esc(name)+'</div><div class="card">'+
+      // Inside a mixed section the debt is shown negative, so the subtotal
+      // visibly adds up rather than requiring you to know the convention.
+      list.map(function(a){ return arowHTML(a, mixed); }).join('')+
+      '<div class="subtot"><span>'+esc(label)+'</span><span class="v"'+
+        (mixed&&net<0?' style="color:var(--danger)"':'')+'>'+esc(money(shown))+'</span></div></div>';
+  }
+
+  function arowHTML(a, signed){
     var b=latestBalance(a.id);
     var prevB=null;
     if(b){ S.balances.forEach(function(x){ if(x.account_id===a.id && x.as_of<b.as_of && (!prevB||x.as_of>prevB.as_of)) prevB=x; }); }
@@ -673,10 +723,11 @@
     // repeating it says nothing. Only name the bill when it differs.
     if(bill && bill.amount_default!=null) sub.push(money(bill.amount_default)+'/mo');
     else if(bill && bill.name.toLowerCase()!==a.name.toLowerCase()) sub.push(bill.name);
+    var shownBal = b ? (signed && a.kind==='liability' ? money(-Number(b.balance)) : money(b.balance)) : '—';
     return '<div class="arow" onclick="openAccount(\''+esc(a.id)+'\')">'+
       '<div style="min-width:0"><div class="an">'+esc(a.name)+'</div>'+
       (sub.length?'<div class="asub">'+esc(sub.join(' · '))+'</div>':'')+'</div>'+
-      '<div class="av"><div class="b">'+esc(b?money(b.balance):'—')+'</div>'+
+      '<div class="av"><div class="b">'+esc(shownBal)+'</div>'+
       (d!=null&&d!==0?'<div class="d '+(good?'up':'down')+'">'+(d>0?'▲':'▼')+' '+esc(money(Math.abs(d)))+'</div>':
         (d===0?'<div class="d flat">no change</div>':''))+'</div></div>';
   }
@@ -700,7 +751,7 @@
     if(!list.length) h+='<p class="empty">No bills yet.</p>';
     else h+=list.map(function(b){
       var cat=BILL_CATS[b.category]||BILL_CATS.other;
-      var sec=b.section_id?sectById(b.section_id):null;
+      var sec=b.section_id?sectById(b.section_id,'bill'):null;
       var sub=[sec?sec.name:cat.label];
       if(b.due_day) sub.push('due the '+ordinal(b.due_day));
       if(b.pay_method==='card') sub.push('on a card');
@@ -713,7 +764,7 @@
         '<div class="av"><div class="b">'+esc(b.amount_default!=null?money(b.amount_default):'varies')+'</div></div></div>';
     }).join('');
     h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openBill(null)">+ Add a bill</button>'+
-       '<button class="link full" style="text-align:left" onclick="go(\'sections\')">Manage sections ›</button></div>';
+       '<button class="link full" style="text-align:left" onclick="goSections(\'bill\')">Manage sections ›</button></div>';
     var gone=S.bills.filter(function(b){return !b.active;});
     if(gone.length) h+='<div class="card tight"><div class="kicker" style="margin-bottom:6px">Retired</div>'+
       gone.map(function(b){ return '<div class="arow" onclick="openBill(\''+esc(b.id)+'\')"><div class="an" style="color:var(--muted)">'+esc(b.name)+'</div>'+
@@ -731,7 +782,8 @@
         '<div><div class="an">'+esc(a.name)+'</div><div class="asub">'+esc((a.kind==='asset'?'Asset':'Debt')+(cat?' · '+cat:''))+'</div></div>'+
         '<div class="av"><div class="b">'+esc(latestBalance(a.id)?money(latestBalance(a.id).balance):'—')+'</div></div></div>';
     }).join('');
-    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openAccount(null)">+ Add an account</button></div>';
+    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openAccount(null)">+ Add an account</button>'+
+       '<button class="link full" style="text-align:left" onclick="goSections(\'account\')">Manage sections ›</button></div>';
     return h;
   }
   function ordinal(n){ var s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
@@ -889,10 +941,12 @@
 
   function openAccount(id){
     if(id){ var a=acctById(id); if(!a) return;
-      S.form={type:'account', id:id, name:a.name, kind:a.kind, category:a.category, active:a.active, balance:''};
+      S.form={type:'account', id:id, name:a.name, kind:a.kind, category:a.category,
+              section_id:a.section_id||'', active:a.active, balance:''};
       var b=latestBalance(id); if(b) S.form.balance=String(b.balance); S.form.balanceMonth=b?b.as_of:null;
     }
-    else S.form={type:'account', id:null, name:'', kind:'asset', category:'cash', active:true, balance:'', balanceMonth:null};
+    else S.form={type:'account', id:null, name:'', kind:'asset', category:'cash',
+                 section_id:(S.acctSections[0]?S.acctSections[0].id:''), active:true, balance:'', balanceMonth:null};
     S.err=''; render();
   }
   function accountForm(f){
@@ -907,6 +961,10 @@
       '<label class="lbl">Category</label><div class="seg">'+
         Object.keys(cats).map(function(k){ return '<button type="button" class="seg-btn'+(f.category===k?' on':'')+'" onclick="setAcctField(\'category\',\''+k+'\')">'+esc(cats[k])+'</button>'; }).join('')+
       '</div>'+
+      (S.acctSections.length?('<label class="lbl">Section</label><select id="aSect" class="field full">'+
+        '<option value="">— none —</option>'+
+        S.acctSections.map(function(s){ return '<option value="'+esc(s.id)+'"'+(f.section_id===s.id?' selected':'')+'>'+esc(s.name)+'</option>'; }).join('')+
+        '</select>'):'')+
       '<label class="lbl">Balance for '+esc(monthLabel(thisMonth()))+'</label>'+
       '<input id="aBal" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.balance)+'">'+
       '<p class="asub" style="margin:6px 0 0">Enter what you owe as a positive number — Tally subtracts debts for you.</p>'+
@@ -920,6 +978,7 @@
   function stashAcct(){ var f=S.form;
     if(el('aName')) f.name=el('aName').value;
     if(el('aBal'))  f.balance=el('aBal').value;
+    if(el('aSect')) f.section_id=el('aSect').value;
   }
   function setAcctField(k,v){ stashAcct(); S.form[k]=v; render(); }
   function setAcctKind(k){
@@ -939,9 +998,11 @@
     S.busy=true;
     try{
       var id=f.id;
-      if(id){ var u=await sb.from('accounts').update({name:name, kind:f.kind, category:f.category}).eq('id',id); if(u.error) throw u.error; }
+      var arow={name:name, kind:f.kind, category:f.category, section_id:f.section_id||null};
+      if(id){ var u=await sb.from('accounts').update(arow).eq('id',id); if(u.error) throw u.error; }
       else{
-        var ins=await sb.from('accounts').insert({user_id:S.userId, name:name, kind:f.kind, category:f.category}).select('id').single();
+        arow.user_id=S.userId;
+        var ins=await sb.from('accounts').insert(arow).select('id').single();
         if(ins.error) throw ins.error; id=ins.data.id;
       }
       if(bal!=null){
@@ -1124,80 +1185,102 @@
   }
 
   // ── sections ──────────────────────────────────────────────────────────────
-  function sectById(id){ for(var i=0;i<S.sections.length;i++) if(S.sections[i].id===id) return S.sections[i]; return null; }
+  // Bills and accounts each have their own sections table, but the screen that
+  // manages them is the same screen. One parameterised set of functions rather
+  // than two near-identical copies that drift apart the first time one is fixed.
+  var SECT = {
+    bill: { table:'bill_sections', noun:'bill', back:'bills',
+            list:function(){ return S.sections; },
+            members:function(id){ return S.bills.filter(function(b){return b.active && b.section_id===id;}); },
+            placeholder:'Cash Expenses' },
+    account: { table:'account_sections', noun:'account', back:'accounts',
+            list:function(){ return S.acctSections; },
+            members:function(id){ return S.accounts.filter(function(a){return a.active && a.section_id===id;}); },
+            placeholder:'Real Estate' }
+  };
+  function sectCfg(){ return SECT[S.sectKind] || SECT.bill; }
+  function sectById(id, kind){
+    var list=(SECT[kind||S.sectKind]||SECT.bill).list();
+    for(var i=0;i<list.length;i++) if(list[i].id===id) return list[i];
+    return null;
+  }
+  function goSections(kind){ S.sectKind=kind; S.view='sections'; S.err=''; render(); }
 
   function renderSectionsManage(){
-    var h='<button class="back-link" onclick="go(\'bills\')">‹ Back</button><div class="card">'+
-      '<div class="kicker" style="margin-bottom:10px">Sections</div>';
-    if(!S.sections.length) h+='<p class="empty">No sections yet. Add one and bills can be grouped by it.</p>';
-    else h+=S.sections.map(function(s,i){
-      var n=S.bills.filter(function(b){return b.active && b.section_id===s.id;}).length;
+    var C=sectCfg(), list=C.list();
+    var h='<button class="back-link" onclick="go(\''+C.back+'\')">‹ Back</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">'+esc(C.noun==='bill'?'Bill sections':'Net worth sections')+'</div>';
+    if(!list.length) h+='<p class="empty">No sections yet. Add one and '+esc(C.noun)+'s can be grouped by it.</p>';
+    else h+=list.map(function(s,i){
+      var n=C.members(s.id).length;
       return '<div class="arow">'+
         '<div style="min-width:0;flex:1;cursor:pointer" onclick="openSection(\''+esc(s.id)+'\')">'+
           '<div class="an">'+esc(s.name)+'</div>'+
-          '<div class="asub">'+n+' bill'+(n===1?'':'s')+'</div></div>'+
+          '<div class="asub">'+n+' '+esc(C.noun)+(n===1?'':'s')+'</div></div>'+
         '<button class="mnav" style="width:32px;height:32px;font-size:13px" onclick="moveSection(\''+esc(s.id)+'\',-1)"'+(i===0?' disabled':'')+' aria-label="Move up">▲</button>'+
-        '<button class="mnav" style="width:32px;height:32px;font-size:13px;margin-left:6px" onclick="moveSection(\''+esc(s.id)+'\',1)"'+(i===S.sections.length-1?' disabled':'')+' aria-label="Move down">▼</button>'+
+        '<button class="mnav" style="width:32px;height:32px;font-size:13px;margin-left:6px" onclick="moveSection(\''+esc(s.id)+'\',1)"'+(i===list.length-1?' disabled':'')+' aria-label="Move down">▼</button>'+
       '</div>';
     }).join('');
     h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openSection(null)">+ Add a section</button></div>';
-    var loose=S.bills.filter(function(b){return b.active && !b.section_id;}).length;
-    if(loose) h+='<div class="card tight"><p class="asub" style="margin:0">'+loose+' bill'+(loose===1?' has':'s have')+
-      ' no section, and '+(loose===1?'appears':'appear')+' under "Unsectioned" at the bottom of the month.</p></div>';
+    var loose=(C.noun==='bill'?S.bills:S.accounts).filter(function(x){return x.active && !x.section_id;}).length;
+    if(loose) h+='<div class="card tight"><p class="asub" style="margin:0">'+loose+' '+esc(C.noun)+(loose===1?' has':'s have')+
+      ' no section, and '+(loose===1?'appears':'appear')+' under "Unsectioned" at the bottom.</p></div>';
     return h;
   }
   function openSection(id){
-    if(id){ var s=sectById(id); if(!s) return; S.form={type:'section', id:id, name:s.name}; }
-    else S.form={type:'section', id:null, name:''};
+    if(id){ var s=sectById(id); if(!s) return; S.form={type:'section', id:id, name:s.name, kind:S.sectKind}; }
+    else S.form={type:'section', id:null, name:'', kind:S.sectKind};
     S.err=''; render();
   }
   function sectionForm(f){
-    var n=f.id?S.bills.filter(function(b){return b.section_id===f.id;}).length:0;
+    var C=SECT[f.kind]||SECT.bill;
+    var n=f.id?C.members(f.id).length:0;
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
       '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Rename section':'Add a section')+'</div>'+
-      '<label class="lbl">Name</label><input id="secName" class="field full" placeholder="Cash Expenses" value="'+esc(f.name)+'">'+
+      '<label class="lbl">Name</label><input id="secName" class="field full" placeholder="'+esc(C.placeholder)+'" value="'+esc(f.name)+'">'+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveSection()">Save</button>'+
       (f.id?'<button class="btn btn-danger" onclick="deleteSection(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
-      (f.id&&n?'<p class="asub" style="margin-top:10px">Deleting only removes the grouping. All '+n+' bill'+(n===1?'':'s')+
-        ' and every payment stay exactly as they are — they just move to "Unsectioned".</p>':'')+
+      (f.id&&n?'<p class="asub" style="margin-top:10px">Deleting only removes the grouping. All '+n+' '+esc(C.noun)+(n===1?'':'s')+
+        ' and their history stay exactly as they are — they just move to "Unsectioned".</p>':'')+
       '</div>';
   }
   async function saveSection(){
-    var f=S.form, name=((el('secName')||{}).value||'').trim();
+    var f=S.form, C=SECT[f.kind]||SECT.bill;
+    var name=((el('secName')||{}).value||'').trim();
     if(!name){ S.err='Give the section a name.'; render(); return; }
     S.busy=true;
     try{
-      if(f.id){ var u=await sb.from('bill_sections').update({name:name}).eq('id',f.id); if(u.error) throw u.error; }
+      if(f.id){ var u=await sb.from(C.table).update({name:name}).eq('id',f.id); if(u.error) throw u.error; }
       else{
-        var next=S.sections.length?Math.max.apply(null,S.sections.map(function(s){return s.sort_order;}))+1:0;
-        var i=await sb.from('bill_sections').insert({user_id:S.userId, name:name, sort_order:next}); if(i.error) throw i.error;
+        var cur=C.list();
+        var next=cur.length?Math.max.apply(null,cur.map(function(s){return s.sort_order;}))+1:0;
+        var i=await sb.from(C.table).insert({user_id:S.userId, name:name, sort_order:next}); if(i.error) throw i.error;
       }
       S.form=null; await load();
     }catch(e){ S.err=e.message; }
     S.busy=false; render();
   }
   async function deleteSection(id){
-    var s=sectById(id);
-    var n=S.bills.filter(function(b){return b.section_id===id;}).length;
-    if(!confirm('Delete the section "'+(s?s.name:'')+'"?\n\n'+n+' bill'+(n===1?'':'s')+
-      ' and all their payments are kept — they move to "Unsectioned".')) return;
+    var C=sectCfg(), s=sectById(id), n=C.members(id).length;
+    if(!confirm('Delete the section "'+(s?s.name:'')+'"?\n\n'+n+' '+C.noun+(n===1?'':'s')+
+      ' and all their history are kept — they move to "Unsectioned".')) return;
     S.busy=true;
-    try{ var d=await sb.from('bill_sections').delete().eq('id',id); if(d.error) throw d.error; S.form=null; await load(); }
+    try{ var d=await sb.from(C.table).delete().eq('id',id); if(d.error) throw d.error; S.form=null; await load(); }
     catch(e){ S.err=e.message; }
     S.busy=false; render();
   }
   // Swap sort_order with the neighbour rather than renumbering everything, so a
   // reorder is two writes whatever the list length.
   async function moveSection(id, dir){
-    var i=-1;
-    for(var k=0;k<S.sections.length;k++) if(S.sections[k].id===id) i=k;
+    var C=sectCfg(), list=C.list(), i=-1;
+    for(var k=0;k<list.length;k++) if(list[k].id===id) i=k;
     var j=i+dir;
-    if(i<0 || j<0 || j>=S.sections.length || S.busy) return;
-    var a=S.sections[i], b=S.sections[j];
+    if(i<0 || j<0 || j>=list.length || S.busy) return;
+    var a=list[i], b=list[j];
     S.busy=true;
     try{
-      var u1=await sb.from('bill_sections').update({sort_order:b.sort_order}).eq('id',a.id); if(u1.error) throw u1.error;
-      var u2=await sb.from('bill_sections').update({sort_order:a.sort_order}).eq('id',b.id); if(u2.error) throw u2.error;
+      var u1=await sb.from(C.table).update({sort_order:b.sort_order}).eq('id',a.id); if(u1.error) throw u1.error;
+      var u2=await sb.from(C.table).update({sort_order:a.sort_order}).eq('id',b.id); if(u2.error) throw u2.error;
       await load();
     }catch(e){ S.err=e.message; }
     S.busy=false; render();
@@ -1214,13 +1297,14 @@
       sb.from('account_balances').select('*').order('as_of',{ascending:false}),
       sb.from('income_sources').select('*').order('sort_order'),
       sb.from('income_entries').select('*').order('period',{ascending:false}),
-      sb.from('bill_sections').select('*').order('sort_order')
+      sb.from('bill_sections').select('*').order('sort_order'),
+      sb.from('account_sections').select('*').order('sort_order')
     ]);
     for(var i=0;i<r.length;i++) if(r[i].error) throw r[i].error;
     S.bills=r[0].data||[]; S.payments=r[1].data||[];
     S.accounts=r[2].data||[]; S.balances=r[3].data||[];
     S.income=r[4].data||[]; S.incomeEntries=r[5].data||[];
-    S.sections=r[6].data||[];
+    S.sections=r[6].data||[]; S.acctSections=r[7].data||[];
   }
 
   (async function(){
