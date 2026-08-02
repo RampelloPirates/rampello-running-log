@@ -68,6 +68,13 @@
     .tag{font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:1.5px 6px;white-space:nowrap;}
     .tag.auto{color:#2f5468;background:var(--blue-tint);}
     .tag.late{color:#8a3229;background:var(--danger-tint);}
+    .tag.card{color:#5c4a72;background:#ECE4EF;}
+    .tag.cash{color:#4a5a3f;background:var(--green-tint);}
+
+    .sechead{display:flex;align-items:baseline;justify-content:space-between;margin:20px 2px 8px;}
+    .secn{font-family:var(--f-mono);font-size:11px;color:var(--muted);}
+    .secsub{display:flex;justify-content:space-between;align-items:baseline;padding:2px 4px 0;margin:-2px 0 4px;font-size:12.5px;color:var(--muted);}
+    .secsub .v{font-family:var(--f-mono);font-weight:600;color:var(--ink);}
 
     /* net worth */
     .hero{font-family:var(--f-mono);font-size:33px;font-weight:600;line-height:1.05;letter-spacing:-1px;}
@@ -153,8 +160,9 @@
     tab:'bills',
     period:null,            // 'YYYY-MM-01' — the month on screen
     bills:[], payments:[], accounts:[], balances:[],
-    income:[], incomeEntries:[],
-    view:null,              // null | 'bills' | 'accounts' | 'income'  (manage screens)
+    income:[], incomeEntries:[], sections:[],
+    groupBy:'section',      // 'section' — the spreadsheet's blocks | 'due' — the pay run
+    view:null,              // null | 'bills' | 'accounts' | 'income' | 'sections'
     form:null,              // whatever form is open, if any
     err:'', busy:false,
     _nw:null                // chart points, kept for the hover handler
@@ -335,6 +343,7 @@
     else if(S.view==='bills') body=renderBillsManage();
     else if(S.view==='accounts') body=renderAccountsManage();
     else if(S.view==='income') body=renderIncomeManage();
+    else if(S.view==='sections') body=renderSectionsManage();
     else body=renderTabs()+(S.tab==='bills'?renderBills():renderWorth());
     app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
   }
@@ -372,20 +381,16 @@
       '<div class="bar"><i style="width:'+pct+'%"></i></div>'+
       '<div class="sum-note">'+esc(money(t.paid))+' paid so far this month</div></div>';
 
-    var today=todayISO(), soon=plusDays(today,7);
-    var over=[], week=[], later=[], done=[];
-    rows.forEach(function(r){
-      if(r.p.paid_on){ done.push(r); return; }
-      if(!r.p.due_on){ later.push(r); return; }
-      if(r.p.due_on<today) over.push(r);
-      else if(r.p.due_on<=soon) week.push(r);
-      else later.push(r);
-    });
+    // Two ways to read the same month, because they answer different questions.
+    // Sections are how the household thinks about its money and what the old
+    // spreadsheet showed; due date is what you want on the evening you sit down
+    // to pay things. Neither is a subset of the other, so both are kept.
+    if(S.sections.length)
+      h+='<div class="seg two" style="margin:16px 0 2px">'+
+        '<button type="button" class="seg-btn'+(S.groupBy==='section'?' on':'')+'" onclick="setGroupBy(\'section\')">By section</button>'+
+        '<button type="button" class="seg-btn'+(S.groupBy==='due'?' on':'')+'" onclick="setGroupBy(\'due\')">By due date</button></div>';
 
-    if(over.length)  h+='<div class="kicker grp over">'+(isPast?'Unpaid':'Overdue')+'</div>'+over.map(prowHTML).join('');
-    if(week.length)  h+='<div class="kicker grp">'+(isNow?'Due this week':'Due')+'</div>'+week.map(prowHTML).join('');
-    if(later.length) h+='<div class="kicker grp">Later</div>'+later.map(prowHTML).join('');
-    if(done.length)  h+='<div class="kicker grp">Paid</div>'+done.map(prowHTML).join('');
+    h += (S.groupBy==='section' && S.sections.length) ? bySectionHTML(rows) : byDueHTML(rows, isNow, isPast);
 
     h+='<div style="display:flex;gap:14px;justify-content:space-between"><button class="link" onclick="go(\'bills\')">Manage bills ›</button>'+
        (isPast||rows.length===activeBills().length?'':'<button class="link" onclick="fillMonth()">+ Add missing bills</button>')+'</div>';
@@ -434,6 +439,60 @@
       (missing?'<p class="asub" style="margin-top:8px">'+missing+' source'+(missing===1?'':'s')+' not filled in yet — the surplus is short by whatever '+(missing===1?'it brings':'those bring')+' in.</p>':'')+
       '<button class="link" onclick="go(\'income\')">Manage income ›</button></div>';
   }
+  function setGroupBy(g){ S.groupBy=g; S.err=''; render(); }
+
+  function byDueHTML(rows, isNow, isPast){
+    var today=todayISO(), soon=plusDays(today,7);
+    var over=[], week=[], later=[], done=[];
+    rows.forEach(function(r){
+      if(r.p.paid_on){ done.push(r); return; }
+      if(!r.p.due_on){ later.push(r); return; }
+      if(r.p.due_on<today) over.push(r);
+      else if(r.p.due_on<=soon) week.push(r);
+      else later.push(r);
+    });
+    var h='';
+    if(over.length)  h+='<div class="kicker grp over">'+(isPast?'Unpaid':'Overdue')+'</div>'+over.map(prowHTML).join('');
+    if(week.length)  h+='<div class="kicker grp">'+(isNow?'Due this week':'Due')+'</div>'+week.map(prowHTML).join('');
+    if(later.length) h+='<div class="kicker grp">Later</div>'+later.map(prowHTML).join('');
+    if(done.length)  h+='<div class="kicker grp">Paid</div>'+done.map(prowHTML).join('');
+    return h;
+  }
+
+  // Sections keep their own subtotals, which is most of why the spreadsheet had
+  // them: "what does the credit card side come to this month" is a question the
+  // overall total can't answer.
+  function bySectionHTML(rows){
+    var bucket={}, loose=[];
+    S.sections.forEach(function(s){ bucket[s.id]=[]; });
+    rows.forEach(function(r){
+      var sid=r.b.section_id;
+      if(sid && bucket[sid]) bucket[sid].push(r); else loose.push(r);
+    });
+    var h='';
+    S.sections.forEach(function(s){
+      if(bucket[s.id].length) h+=sectionBlock(s.name, bucket[s.id]);
+    });
+    if(loose.length) h+=sectionBlock('Unsectioned', loose);
+    return h;
+  }
+  function sectionBlock(name, list){
+    var due=0, paid=0, nPaid=0, unknown=0;
+    list.forEach(function(r){
+      if(r.p.paid_on){ nPaid++; paid+=Number(r.p.amount_paid||0); }
+      else if(r.p.amount_due!=null) due+=Number(r.p.amount_due);
+      else unknown++;
+    });
+    // A section whose amounts are all still unknown has a total of nothing, not
+    // a total of zero — "$0" would read as "nothing owed here".
+    var known=paid+due, total=(known===0 && unknown) ? '—' : money(known);
+    return '<div class="sechead"><span class="kicker">'+esc(name)+'</span>'+
+        '<span class="secn">'+nPaid+'/'+list.length+' paid</span></div>'+
+      list.map(prowHTML).join('')+
+      '<div class="secsub"><span>'+esc(name)+(unknown?' (+'+unknown+' TBD)':'')+'</span>'+
+        '<span class="v">'+esc(total)+'</span></div>';
+  }
+
   function prowHTML(r){
     var p=r.p, b=r.b, paid=!!p.paid_on;
     var late=!paid && p.due_on && p.due_on<todayISO();
@@ -446,6 +505,8 @@
     return '<div class="prow'+(paid?' done':'')+(late?' overdue':'')+'">'+
       '<button class="pbody" onclick="openPay(\''+esc(p.id)+'\')">'+
         '<div class="pname">'+esc(cat.icon)+' '+esc(b.name)+
+          (b.pay_method==='card'?' <span class="tag card">Card</span>':'')+
+          (b.pay_method==='cash'?' <span class="tag cash">Cash</span>':'')+
           (b.autopay&&!paid?' <span class="tag auto">Auto</span>':'')+
           (late?' <span class="tag late">Late</span>':'')+'</div>'+
         (meta.length?'<div class="pmeta">'+esc(meta.join(' · '))+'</div>':'')+
@@ -464,7 +525,7 @@
   async function stepMonth(n){
     S.period=addMonths(S.period,n); S.err='';
     render();                       // move immediately; the fill catches up
-    if(await maybeAutoFill()) render();
+    if(await syncMonth()) render();
   }
 
   // A month lays itself out the first time you look at it. The rule is narrow
@@ -484,6 +545,38 @@
     for(var i=0;i<S.payments.length;i++) if(S.payments[i].period===S.period) return false;
     await fillMonth();
     return true;
+  }
+
+  // An autopay bill has already left the account by the time its date comes
+  // round. Asking you to tick it is asking you to confirm something you didn't
+  // do, and the ones that need a decision get lost among the ones that don't.
+  //
+  // Only ever on or after the due date, and only when there's a figure to claim
+  // — a varying bill on autopay still has to be looked up, so it stays open.
+  async function autopayTick(){
+    var today=todayISO(), pending=[];
+    S.payments.forEach(function(p){
+      if(p.paid_on || !p.due_on || p.due_on>today || p.amount_due==null) return;
+      var b=billById(p.bill_id);
+      if(b && b.autopay && b.active) pending.push(p);
+    });
+    if(!pending.length) return false;
+    try{
+      for(var i=0;i<pending.length;i++){
+        var u=await sb.from('bill_payments')
+          .update({paid_on:pending[i].due_on, amount_paid:pending[i].amount_due})
+          .eq('id',pending[i].id);
+        if(u.error) throw u.error;
+      }
+      await load();
+      return true;
+    }catch(e){ S.err=e.message; return false; }
+  }
+
+  async function syncMonth(){
+    var changed=await maybeAutoFill();
+    if(await autopayTick()) changed=true;
+    return changed;
   }
 
   async function fillMonth(){
@@ -607,8 +700,11 @@
     if(!list.length) h+='<p class="empty">No bills yet.</p>';
     else h+=list.map(function(b){
       var cat=BILL_CATS[b.category]||BILL_CATS.other;
-      var sub=[cat.label];
+      var sec=b.section_id?sectById(b.section_id):null;
+      var sub=[sec?sec.name:cat.label];
       if(b.due_day) sub.push('due the '+ordinal(b.due_day));
+      if(b.pay_method==='card') sub.push('on a card');
+      else if(b.pay_method==='cash') sub.push('cash');
       if(b.autopay) sub.push('autopay');
       var a=b.account_id?acctById(b.account_id):null; if(a) sub.push('→ '+a.name);
       return '<div class="arow" onclick="openBill(\''+esc(b.id)+'\')">'+
@@ -616,7 +712,8 @@
         '<div class="asub">'+esc(sub.join(' · '))+'</div></div>'+
         '<div class="av"><div class="b">'+esc(b.amount_default!=null?money(b.amount_default):'varies')+'</div></div></div>';
     }).join('');
-    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openBill(null)">+ Add a bill</button></div>';
+    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openBill(null)">+ Add a bill</button>'+
+       '<button class="link full" style="text-align:left" onclick="go(\'sections\')">Manage sections ›</button></div>';
     var gone=S.bills.filter(function(b){return !b.active;});
     if(gone.length) h+='<div class="card tight"><div class="kicker" style="margin-bottom:6px">Retired</div>'+
       gone.map(function(b){ return '<div class="arow" onclick="openBill(\''+esc(b.id)+'\')"><div class="an" style="color:var(--muted)">'+esc(b.name)+'</div>'+
@@ -648,6 +745,7 @@
     if(f.type==='balances') return balancesForm(f);
     if(f.type==='incomeEntry') return incomeEntryForm(f);
     if(f.type==='incomeSource') return incomeSourceForm(f);
+    if(f.type==='section') return sectionForm(f);
     return '';
   }
 
@@ -682,10 +780,15 @@
     if(id){ var b=billById(id); if(!b) return;
       S.form={type:'bill', id:id, name:b.name, category:b.category, due_day:b.due_day||'',
               amount:b.amount_default!=null?String(b.amount_default):'', varies:b.amount_default==null,
-              autopay:!!b.autopay, account_id:b.account_id||'', active:b.active, notes:b.notes||''}; }
+              autopay:!!b.autopay, account_id:b.account_id||'', section_id:b.section_id||'',
+              pay_method:b.pay_method||'bank', active:b.active, notes:b.notes||''}; }
     // A new bill defaults to a fixed amount: that's the mortgage, the insurance,
     // the subscriptions — most of what anyone sets up by hand.
-    else S.form={type:'bill', id:null, name:'', category:'other', due_day:'', amount:'', varies:false, autopay:false, account_id:'', active:true, notes:''};
+    // A new bill lands in the first section rather than none, so it can't be
+    // added and then vanish into an "Unsectioned" block at the bottom.
+    else S.form={type:'bill', id:null, name:'', category:'other', due_day:'', amount:'', varies:false,
+                 autopay:false, account_id:'', section_id:(S.sections[0]?S.sections[0].id:''),
+                 pay_method:'bank', active:true, notes:''};
     S.err=''; render();
   }
   function billForm(f){
@@ -704,6 +807,14 @@
         ? '<p class="asub" style="margin:8px 0 0">Arrives blank each month and you fill in what it actually came to — power, water, credit cards.</p>'
         : '<input id="bAmt" class="field full" style="margin-top:8px" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
           '<p class="asub" style="margin:6px 0 0">Every month starts prefilled with this, and you can still change it on the day.</p>')+
+      '<label class="lbl">Section</label><select id="bSect" class="field full">'+
+        '<option value="">— none —</option>'+
+        S.sections.map(function(s){ return '<option value="'+esc(s.id)+'"'+(f.section_id===s.id?' selected':'')+'>'+esc(s.name)+'</option>'; }).join('')+
+      '</select>'+
+      '<label class="lbl">Paid by</label><div class="seg">'+
+        [['bank','Bank'],['card','Credit card'],['cash','Cash']].map(function(p){
+          return '<button type="button" class="seg-btn'+(f.pay_method===p[0]?' on':'')+'" onclick="setBillField(\'pay_method\',\''+p[0]+'\')">'+p[1]+'</button>';
+        }).join('')+'</div>'+
       (liabs.length?('<label class="lbl">Pays down</label><select id="bAcct" class="field full">'+
         '<option value="">— nothing (an expense) —</option>'+
         liabs.map(function(a){ return '<option value="'+esc(a.id)+'"'+(f.account_id===a.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+
@@ -725,6 +836,7 @@
     f.due_day=((el('bDay')||{}).value!=null)?el('bDay').value:f.due_day;
     f.amount=((el('bAmt')||{}).value!=null)?el('bAmt').value:f.amount;
     if(el('bAcct')) f.account_id=el('bAcct').value;
+    if(el('bSect')) f.section_id=el('bSect').value;
     if(el('bAuto')) f.autopay=el('bAuto').checked;
   }
   async function saveBill(){
@@ -740,7 +852,8 @@
     if(!f.varies && amt==null){ S.err='Enter the amount, or switch it to Varies.'; render(); return; }
     if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
     var row={ name:name, category:f.category, due_day:day, amount_default:amt,
-              autopay:!!f.autopay, account_id:f.account_id||null };
+              autopay:!!f.autopay, account_id:f.account_id||null,
+              section_id:f.section_id||null, pay_method:f.pay_method||'bank' };
     S.busy=true;
     try{
       if(f.id){ var u=await sb.from('bills').update(row).eq('id',f.id); if(u.error) throw u.error; }
@@ -1010,6 +1123,86 @@
     S.busy=false; render();
   }
 
+  // ── sections ──────────────────────────────────────────────────────────────
+  function sectById(id){ for(var i=0;i<S.sections.length;i++) if(S.sections[i].id===id) return S.sections[i]; return null; }
+
+  function renderSectionsManage(){
+    var h='<button class="back-link" onclick="go(\'bills\')">‹ Back</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">Sections</div>';
+    if(!S.sections.length) h+='<p class="empty">No sections yet. Add one and bills can be grouped by it.</p>';
+    else h+=S.sections.map(function(s,i){
+      var n=S.bills.filter(function(b){return b.active && b.section_id===s.id;}).length;
+      return '<div class="arow">'+
+        '<div style="min-width:0;flex:1;cursor:pointer" onclick="openSection(\''+esc(s.id)+'\')">'+
+          '<div class="an">'+esc(s.name)+'</div>'+
+          '<div class="asub">'+n+' bill'+(n===1?'':'s')+'</div></div>'+
+        '<button class="mnav" style="width:32px;height:32px;font-size:13px" onclick="moveSection(\''+esc(s.id)+'\',-1)"'+(i===0?' disabled':'')+' aria-label="Move up">▲</button>'+
+        '<button class="mnav" style="width:32px;height:32px;font-size:13px;margin-left:6px" onclick="moveSection(\''+esc(s.id)+'\',1)"'+(i===S.sections.length-1?' disabled':'')+' aria-label="Move down">▼</button>'+
+      '</div>';
+    }).join('');
+    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openSection(null)">+ Add a section</button></div>';
+    var loose=S.bills.filter(function(b){return b.active && !b.section_id;}).length;
+    if(loose) h+='<div class="card tight"><p class="asub" style="margin:0">'+loose+' bill'+(loose===1?' has':'s have')+
+      ' no section, and '+(loose===1?'appears':'appear')+' under "Unsectioned" at the bottom of the month.</p></div>';
+    return h;
+  }
+  function openSection(id){
+    if(id){ var s=sectById(id); if(!s) return; S.form={type:'section', id:id, name:s.name}; }
+    else S.form={type:'section', id:null, name:''};
+    S.err=''; render();
+  }
+  function sectionForm(f){
+    var n=f.id?S.bills.filter(function(b){return b.section_id===f.id;}).length:0;
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Rename section':'Add a section')+'</div>'+
+      '<label class="lbl">Name</label><input id="secName" class="field full" placeholder="Cash Expenses" value="'+esc(f.name)+'">'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveSection()">Save</button>'+
+      (f.id?'<button class="btn btn-danger" onclick="deleteSection(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
+      (f.id&&n?'<p class="asub" style="margin-top:10px">Deleting only removes the grouping. All '+n+' bill'+(n===1?'':'s')+
+        ' and every payment stay exactly as they are — they just move to "Unsectioned".</p>':'')+
+      '</div>';
+  }
+  async function saveSection(){
+    var f=S.form, name=((el('secName')||{}).value||'').trim();
+    if(!name){ S.err='Give the section a name.'; render(); return; }
+    S.busy=true;
+    try{
+      if(f.id){ var u=await sb.from('bill_sections').update({name:name}).eq('id',f.id); if(u.error) throw u.error; }
+      else{
+        var next=S.sections.length?Math.max.apply(null,S.sections.map(function(s){return s.sort_order;}))+1:0;
+        var i=await sb.from('bill_sections').insert({user_id:S.userId, name:name, sort_order:next}); if(i.error) throw i.error;
+      }
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function deleteSection(id){
+    var s=sectById(id);
+    var n=S.bills.filter(function(b){return b.section_id===id;}).length;
+    if(!confirm('Delete the section "'+(s?s.name:'')+'"?\n\n'+n+' bill'+(n===1?'':'s')+
+      ' and all their payments are kept — they move to "Unsectioned".')) return;
+    S.busy=true;
+    try{ var d=await sb.from('bill_sections').delete().eq('id',id); if(d.error) throw d.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  // Swap sort_order with the neighbour rather than renumbering everything, so a
+  // reorder is two writes whatever the list length.
+  async function moveSection(id, dir){
+    var i=-1;
+    for(var k=0;k<S.sections.length;k++) if(S.sections[k].id===id) i=k;
+    var j=i+dir;
+    if(i<0 || j<0 || j>=S.sections.length || S.busy) return;
+    var a=S.sections[i], b=S.sections[j];
+    S.busy=true;
+    try{
+      var u1=await sb.from('bill_sections').update({sort_order:b.sort_order}).eq('id',a.id); if(u1.error) throw u1.error;
+      var u2=await sb.from('bill_sections').update({sort_order:a.sort_order}).eq('id',b.id); if(u2.error) throw u2.error;
+      await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
   function closeForm(){ S.form=null; S.err=''; render(); }
 
   // ── load ──────────────────────────────────────────────────────────────────
@@ -1020,19 +1213,21 @@
       sb.from('accounts').select('*').order('sort_order'),
       sb.from('account_balances').select('*').order('as_of',{ascending:false}),
       sb.from('income_sources').select('*').order('sort_order'),
-      sb.from('income_entries').select('*').order('period',{ascending:false})
+      sb.from('income_entries').select('*').order('period',{ascending:false}),
+      sb.from('bill_sections').select('*').order('sort_order')
     ]);
     for(var i=0;i<r.length;i++) if(r[i].error) throw r[i].error;
     S.bills=r[0].data||[]; S.payments=r[1].data||[];
     S.accounts=r[2].data||[]; S.balances=r[3].data||[];
     S.income=r[4].data||[]; S.incomeEntries=r[5].data||[];
+    S.sections=r[6].data||[];
   }
 
   (async function(){
     var profile=await requireUser(); if(!profile) return;
     S.userId=profile.user.id;
     S.period=thisMonth();
-    try{ await load(); await maybeAutoFill(); }
+    try{ await load(); await syncMonth(); }
     catch(e){
       el('app').innerHTML='<header><a href="home.html" class="home-back">‹ Home</a></header>'+
         '<div class="card"><p class="empty">Couldn\'t load your money data.<br><br><code>'+esc(e.message)+'</code>'+
