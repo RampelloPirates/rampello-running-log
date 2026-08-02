@@ -56,6 +56,7 @@
     .feature .chev { margin-left: auto; color: var(--silver); font-size: 1.4rem; align-self: center; }
     .feature:hover .chev { color: var(--green); }
     .feature.family .icon { background: #F0EAD8; }
+    .feature.money .icon { background: #E7EDE0; }
     .feature.gym .icon { background: #E3E7F0; }
     .feature.recipes .icon { background: #F1E6D2; }
     .feature.supplements .icon { background: #E5EDEA; }
@@ -89,10 +90,14 @@
          the things you read rather than enter (labs, oura), with the recap —
          which is a report ABOUT all of the above — last.
 
-         Family sits above all of it because it isn't part of that sequence at
-         all: everything below this is your own health, and Family is the one
-         section the whole household shares. Keeping it visibly separate is the
-         point — see the privacy note at the top of 34_household.sql.
+         Family and Money sit above all of it because they aren't part of that
+         sequence at all: everything below them is your own health. Family is
+         the one section the whole household shares — keeping it visibly
+         separate is the point, see the privacy note at the top of
+         34_household.sql. Money is the opposite of shared but equally not
+         health, and it earns the position because it's a monthly ritual: if it
+         sat below the daily cards you'd only find it when you went looking,
+         which is how the spreadsheet got forgotten in the first place.
 
          Unlike Crate, Family IS listed here. Crate is nobody's business but
          yours, so it only ever opens from its own icon; Family is a section
@@ -105,6 +110,15 @@
         <span class="copy">
           <span class="title">Family</span>
           <span class="desc">Shared calendar, chores &amp; lists</span>
+        </span>
+        <span class="chev">›</span>
+      </a>
+
+      <a class="feature money" href="money.html">
+        <span class="icon">💵</span>
+        <span class="copy">
+          <span class="title">Money</span>
+          <span class="desc">The monthly bill run &amp; net worth</span>
         </span>
         <span class="chev">›</span>
       </a>

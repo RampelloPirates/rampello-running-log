@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Money — Tally</title>
+  <meta name="theme-color" content="#3A5A40">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Tally">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--paper:#F4F1E9;--surface:#FFFFFF;--surface-warm:#FBF9F3;--ink:#1E241C;--muted:#71776B;--green:#3A5A40;--green-deep:#2C4530;--amber:#BE722A;--amber-soft:#F1E6D2;--border:#E2DCCF;--green-tint:#EBF0E8;--danger:#A8443A;--danger-tint:#F3E2E0;--blue:#3E6B8A;--blue-tint:#E4EDF2;
+      --f-display:'Space Grotesk',system-ui,sans-serif;--f-body:'Inter',system-ui,sans-serif;--f-mono:'JetBrains Mono',ui-monospace,monospace;}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;font-family:var(--f-body);background:var(--paper);color:var(--ink);min-height:100vh;}
+    input:focus,select:focus,button:focus-visible{outline:2px solid var(--green);outline-offset:1px;}
+    .wrap{max-width:560px;margin:0 auto;padding:0 16px 56px;}
+    header{padding:22px 0 8px;}
+    .home-back{display:inline-block;font-size:13px;color:var(--muted);text-decoration:none;font-weight:600;margin-bottom:8px;}
+    .home-back:hover{color:var(--green);}
+    .logo{font-family:var(--f-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.3px;color:var(--green-deep);}
+    .logo span{color:var(--amber);}
+    .logo small{display:block;font-family:var(--f-body);font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.5px;margin-top:2px;}
+    .kicker{font-family:var(--f-mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:14px;}
+    .card.tight{padding:12px 14px;}
+
+    /* tabs */
+    .tabs{display:flex;gap:6px;margin:6px 0 14px;}
+    .tab{flex:1;font-family:var(--f-body);font-size:13.5px;font-weight:600;padding:10px 4px;border-radius:10px;border:1px solid var(--border);background:var(--surface-warm);color:var(--muted);cursor:pointer;}
+    .tab.on{background:var(--green);color:#fff;border-color:var(--green);}
+
+    /* month stepper */
+    .month{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+    .month .mlabel{font-family:var(--f-display);font-size:17px;font-weight:600;color:var(--green-deep);flex:1;text-align:center;}
+    .mnav{background:var(--surface);border:1px solid var(--border);border-radius:10px;color:var(--green);font-size:15px;font-weight:700;width:38px;height:38px;cursor:pointer;line-height:1;}
+    .mnav:disabled{color:var(--border);cursor:default;}
+
+    /* progress */
+    .sum-top{display:flex;align-items:baseline;gap:8px;}
+    .sum-left{font-family:var(--f-mono);font-size:23px;font-weight:600;}
+    .sum-of{font-size:12.5px;color:var(--muted);margin-left:auto;font-family:var(--f-mono);}
+    .bar{height:7px;border-radius:99px;background:#ECEAE2;margin-top:10px;overflow:hidden;}
+    .bar > i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .2s;}
+    .sum-note{font-size:12px;color:var(--muted);margin-top:8px;}
+
+    /* bill rows */
+    .grp{margin:16px 2px 7px;}
+    .grp.over{color:var(--danger);}
+    .prow{display:flex;align-items:center;gap:11px;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:11px 12px;margin-bottom:8px;}
+    .prow.done{background:var(--surface-warm);border-style:dashed;}
+    .prow.overdue{border-color:#E4C3BE;}
+    .pbody{flex:1;min-width:0;text-align:left;background:none;border:none;padding:0;font-family:inherit;color:inherit;cursor:pointer;}
+    .pname{font-weight:600;font-size:14.5px;display:flex;align-items:center;gap:6px;}
+    .prow.done .pname{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--border);}
+    .pmeta{font-size:11.5px;color:var(--muted);font-family:var(--f-mono);margin-top:3px;}
+    .pamt{font-family:var(--f-mono);font-weight:600;font-size:15px;white-space:nowrap;}
+    .pamt.none{color:var(--muted);font-weight:400;}
+    .tick{width:34px;height:34px;flex:0 0 34px;border-radius:50%;border:2px solid var(--border);background:var(--surface);color:transparent;font-size:15px;font-weight:700;cursor:pointer;line-height:1;padding:0;}
+    .tick.on{background:var(--green);border-color:var(--green);color:#fff;}
+    .tick:hover{border-color:var(--green);}
+    .tag{font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:99px;padding:1.5px 6px;white-space:nowrap;}
+    .tag.auto{color:#2f5468;background:var(--blue-tint);}
+    .tag.late{color:#8a3229;background:var(--danger-tint);}
+
+    /* net worth */
+    .hero{font-family:var(--f-mono);font-size:33px;font-weight:600;line-height:1.05;letter-spacing:-1px;}
+    .hero.neg{color:var(--danger);}
+    .delta{font-size:12.5px;font-weight:600;margin-top:5px;}
+    .delta.up{color:var(--green);}
+    .delta.down{color:var(--danger);}
+    .delta.flat{color:var(--muted);}
+    .split{display:flex;gap:10px;margin-top:13px;}
+    .split > div{flex:1;background:var(--surface-warm);border:1px solid var(--border);border-radius:11px;padding:9px 11px;}
+    .split .k{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:700;}
+    .split .v{font-family:var(--f-mono);font-size:16px;font-weight:600;margin-top:3px;}
+
+    .chartwrap{position:relative;margin:4px 0 2px;}
+    .chart{width:100%;height:auto;display:block;}
+    .tip{position:absolute;top:0;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:11px;font-family:var(--f-mono);padding:5px 8px;border-radius:7px;pointer-events:none;white-space:nowrap;z-index:2;}
+    .tip b{display:block;font-size:12.5px;font-weight:600;}
+
+    .arow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px dashed var(--border);cursor:pointer;}
+    .arow:last-child{border-bottom:none;}
+    .arow:hover .an{color:var(--green);}
+    .an{font-weight:600;font-size:14px;}
+    .asub{font-size:11.5px;color:var(--muted);margin-top:2px;}
+    .av{margin-left:auto;text-align:right;}
+    .av .b{font-family:var(--f-mono);font-weight:600;font-size:14.5px;}
+    .av .d{font-size:11px;font-family:var(--f-mono);margin-top:2px;}
+    .av .d.up{color:var(--green);}
+    .av .d.down{color:var(--danger);}
+    .av .d.flat{color:var(--muted);}
+    .subtot{display:flex;justify-content:space-between;padding-top:11px;margin-top:5px;border-top:1px solid var(--border);font-size:13px;font-weight:600;}
+    .subtot .v{font-family:var(--f-mono);}
+
+    /* forms */
+    .btn{font-family:var(--f-body);font-weight:600;font-size:14px;border-radius:10px;cursor:pointer;border:1px solid transparent;padding:11px 16px;}
+    .btn-primary{background:var(--green);color:#fff;}
+    .btn-ghost{background:transparent;color:var(--green);border:1px solid var(--border);}
+    .btn-danger{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+    .btn:disabled{opacity:.5;cursor:default;}
+    .btn-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+    .link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:10px 0;}
+    .back-link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;margin-bottom:4px;}
+    .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+    label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:block;margin:10px 0 4px;}
+    .check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13.5px;font-weight:500;cursor:pointer;}
+    .check input{width:18px;height:18px;accent-color:var(--green);}
+    .seg{display:flex;gap:6px;flex-wrap:wrap;}
+    .seg-btn{font-family:var(--f-body);font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:9px;border:1px solid var(--border);background:var(--surface-warm);color:var(--muted);cursor:pointer;}
+    .seg-btn.on{background:var(--green);color:#fff;border-color:var(--green);}
+    .balrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border);}
+    .balrow:last-of-type{border-bottom:none;}
+    .balrow .n{flex:1;font-size:13.5px;font-weight:500;}
+    .balrow input{width:118px;text-align:right;font-family:var(--f-mono);}
+    .full{width:100%;}
+    .err{color:var(--danger);font-size:13px;margin:8px 0 0;}
+    .empty{color:var(--muted);font-size:13.5px;line-height:1.55;}
+    .loading{padding:48px;text-align:center;color:var(--muted);}
+    .foot{font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:18px;text-align:center;}
+  </style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="loading">Loading…</div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="auth.js"></script>
+  <script>
+  // ==========================================================================
+  // Money — the monthly bill run, and net worth. Tables in sql/57_money.sql.
+  //
+  // Two tabs because the old spreadsheet had two, and they answer different
+  // questions: Bills is "what do I still owe this month", Net Worth is "where
+  // did the year go". They share the `accounts` table — a mortgage is a bill
+  // you pay and a balance you owe, and bills.account_id is what ties the two
+  // views of it together.
+  //
+  // Nothing here reads or stores a credential. See the header of 57_money.sql.
+  // ==========================================================================
+
+  var S = {
+    loaded:false, userId:null,
+    tab:'bills',
+    period:null,            // 'YYYY-MM-01' — the month on screen
+    bills:[], payments:[], accounts:[], balances:[],
+    income:[], incomeEntries:[],
+    view:null,              // null | 'bills' | 'accounts' | 'income'  (manage screens)
+    form:null,              // whatever form is open, if any
+    err:'', busy:false,
+    _nw:null                // chart points, kept for the hover handler
+  };
+
+  var BILL_CATS = {
+    housing:{label:'Housing', icon:'🏠'}, auto:{label:'Auto', icon:'🚗'},
+    utilities:{label:'Utilities', icon:'💡'}, insurance:{label:'Insurance', icon:'🛡️'},
+    credit:{label:'Credit card', icon:'💳'}, subscription:{label:'Subscription', icon:'🔁'},
+    health:{label:'Health', icon:'🏥'}, other:{label:'Other', icon:'📄'}
+  };
+  var ASSET_CATS = {
+    cash:'Cash', investment:'Investment', retirement:'Retirement',
+    property:'Property', vehicle:'Vehicle', other:'Other'
+  };
+  var LIAB_CATS = {
+    credit_card:'Credit card', loan:'Loan', mortgage:'Mortgage', other:'Other'
+  };
+
+  // ── small helpers ─────────────────────────────────────────────────────────
+  function el(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function todayISO(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function thisMonth(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01'; }
+  function addMonths(p,n){ var a=p.split('-').map(Number); var d=new Date(a[0],a[1]-1+n,1); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01'; }
+  function monthLabel(p){ var a=p.split('-').map(Number); return new Date(a[0],a[1]-1,1).toLocaleDateString(undefined,{month:'long',year:'numeric'}); }
+  function shortMonth(p){ var a=p.split('-').map(Number); return new Date(a[0],a[1]-1,1).toLocaleDateString(undefined,{month:'short',year:'2-digit'}); }
+  function dayLabel(iso){ if(!iso) return ''; var a=iso.split('-').map(Number); return new Date(a[0],a[1]-1,a[2]).toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
+  function plusDays(iso,n){ var a=iso.split('-').map(Number); var d=new Date(a[0],a[1]-1,a[2]+n); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+
+  // A bill due on the 31st is due on the 30th in September. Clamping happens
+  // here rather than in the stored due_day, so the bill still knows it is a
+  // 31st bill in the months that have one.
+  function dueDate(period, day){
+    if(!day) return null;
+    var a=period.split('-').map(Number);
+    var last=new Date(a[0], a[1], 0).getDate();
+    return a[0]+'-'+pad(a[1])+'-'+pad(Math.min(day,last));
+  }
+
+  function money(n, opts){
+    if(n==null||n==='') return '—';
+    var v=Number(n); if(isNaN(v)) return '—';
+    var cents=(opts&&opts.cents) || Math.round(v*100)%100!==0;
+    return (v<0?'-$':'$')+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:cents?2:0,maximumFractionDigits:cents?2:0});
+  }
+  function numOrNull(s){ s=String(s==null?'':s).replace(/[$,\s]/g,'').trim(); if(!s) return null; var n=Number(s); return isNaN(n)?null:n; }
+
+  function billById(id){ for(var i=0;i<S.bills.length;i++) if(S.bills[i].id===id) return S.bills[i]; return null; }
+  function acctById(id){ for(var i=0;i<S.accounts.length;i++) if(S.accounts[i].id===id) return S.accounts[i]; return null; }
+  function payById(id){ for(var i=0;i<S.payments.length;i++) if(S.payments[i].id===id) return S.payments[i]; return null; }
+  function activeBills(){ return S.bills.filter(function(b){return b.active;}); }
+  function activeAccounts(){ return S.accounts.filter(function(a){return a.active;}); }
+
+  // ── month view data ───────────────────────────────────────────────────────
+  function monthRows(){
+    return S.payments.filter(function(p){ return p.period===S.period; })
+      .map(function(p){ return { p:p, b:billById(p.bill_id) }; })
+      .filter(function(r){ return r.b; })
+      .sort(function(x,y){
+        var a=x.p.due_on||'9999-99-99', b=y.p.due_on||'9999-99-99';
+        if(a!==b) return a<b?-1:1;
+        return (x.b.name||'').localeCompare(y.b.name||'');
+      });
+  }
+  function monthTotals(rows){
+    var due=0, paid=0, nPaid=0, unknown=0;
+    rows.forEach(function(r){
+      if(r.p.paid_on){ nPaid++; paid+=Number(r.p.amount_paid||0); }
+      else if(r.p.amount_due!=null) due+=Number(r.p.amount_due);
+      else unknown++;
+    });
+    return { due:due, paid:paid, nPaid:nPaid, n:rows.length, unknown:unknown };
+  }
+
+  // ── net worth data ────────────────────────────────────────────────────────
+  // One point per month that has any balance at all. Accounts with no reading
+  // in a given month carry their last known balance forward — otherwise net
+  // worth would drop by the size of your 401k in any month you did not happen
+  // to update it, which reads as a crash rather than a gap.
+  function netWorthSeries(){
+    var months={};
+    S.balances.forEach(function(b){ months[b.as_of]=true; });
+    var keys=Object.keys(months).sort();
+    if(!keys.length) return [];
+    var carried={}, out=[];
+    keys.forEach(function(m){
+      S.balances.forEach(function(b){ if(b.as_of===m) carried[b.account_id]=Number(b.balance); });
+      var assets=0, debts=0;
+      Object.keys(carried).forEach(function(aid){
+        var a=acctById(aid); if(!a) return;
+        if(a.kind==='asset') assets+=carried[aid]; else debts+=carried[aid];
+      });
+      out.push({ month:m, assets:assets, debts:debts, net:assets-debts });
+    });
+    return out;
+  }
+  function latestBalance(accountId, onOrBefore){
+    var best=null;
+    S.balances.forEach(function(b){
+      if(b.account_id!==accountId) return;
+      if(onOrBefore && b.as_of>onOrBefore) return;
+      if(!best || b.as_of>best.as_of) best=b;
+    });
+    return best;
+  }
+
+  // ── the chart ─────────────────────────────────────────────────────────────
+  // One series, so no legend — the heading names it. Endpoints are labelled
+  // directly and nothing else is, per the usual rule against a number on every
+  // point. Hover/tap gives the rest.
+  function nwChart(series){
+    if(series.length<2) return '';
+    var W=520,H=150,padT=16,padB=24,padL=8,padR=8;
+    var vals=series.map(function(s){return s.net;});
+    var lo=Math.min.apply(null,vals), hi=Math.max.apply(null,vals);
+    if(lo>0) lo=Math.min(lo, lo-(hi-lo)*0.25);   // don't imply a zero baseline that isn't there
+    if(lo===hi){ lo-=1; hi+=1; }
+    var sp=(hi-lo)||1; var ymin=lo-sp*0.12, ymax=hi+sp*0.12;
+    var x=function(i){ return padL+(W-padL-padR)*i/(series.length-1); };
+    var y=function(v){ return padT+(H-padT-padB)*(1-(v-ymin)/(ymax-ymin)); };
+
+    var pts=series.map(function(s,i){ return {cx:x(i), cy:y(s.net), m:s.month, net:s.net, assets:s.assets, debts:s.debts}; });
+    S._nw={ pts:pts, W:W };
+
+    var svg='<svg class="chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" '+
+      'onmousemove="nwHover(event)" onmouseleave="nwLeave()" ontouchstart="nwHover(event)" ontouchmove="nwHover(event)" ontouchend="nwLeave()">';
+    // zero line, but only when the series actually crosses it
+    if(ymin<0 && ymax>0) svg+='<line x1="0" y1="'+y(0).toFixed(1)+'" x2="'+W+'" y2="'+y(0).toFixed(1)+'" stroke="#D8CFBE" stroke-dasharray="4 4" stroke-width="1"/>';
+    var d=pts.map(function(p,i){ return (i?'L':'M')+p.cx.toFixed(1)+' '+p.cy.toFixed(1); }).join(' ');
+    svg+='<path d="'+d+'" fill="none" stroke="#3A5A40" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    svg+='<g id="nwCross"></g>';
+    pts.forEach(function(p,i){
+      var end=(i===0||i===pts.length-1);
+      svg+='<circle cx="'+p.cx.toFixed(1)+'" cy="'+p.cy.toFixed(1)+'" r="'+(end?4:2.5)+'" fill="#3A5A40" stroke="#fff" stroke-width="1.5"/>';
+    });
+    [0,pts.length-1].forEach(function(i){
+      var p=pts[i], anchor=i?'end':'start', lx=i?W-6:6;
+      svg+='<text x="'+lx+'" y="'+(H-7)+'" font-size="10" fill="#71776B" font-family="monospace" text-anchor="'+anchor+'">'+esc(shortMonth(p.m))+'</text>';
+    });
+    svg+='</svg>';
+    return '<div class="chartwrap" id="nwWrap">'+svg+'<div class="tip" id="nwTip" style="display:none"></div></div>';
+  }
+  function nwHover(e){
+    if(!S._nw) return;
+    var svg=e.currentTarget, rect=svg.getBoundingClientRect();
+    var clientX=(e.touches&&e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    if(clientX==null) return;
+    var frac=Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+    var pts=S._nw.pts, W=S._nw.W;
+    var best=0, bd=Infinity;
+    pts.forEach(function(p,i){ var d=Math.abs(p.cx/W-frac); if(d<bd){bd=d;best=i;} });
+    var p=pts[best];
+    var cross=el('nwCross');
+    if(cross) cross.innerHTML='<line x1="'+p.cx.toFixed(1)+'" y1="0" x2="'+p.cx.toFixed(1)+'" y2="150" stroke="#C9C2B2" stroke-width="1"/>'+
+      '<circle cx="'+p.cx.toFixed(1)+'" cy="'+p.cy.toFixed(1)+'" r="5" fill="#3A5A40" stroke="#fff" stroke-width="2"/>';
+    var tip=el('nwTip'), wrap=el('nwWrap');
+    if(tip&&wrap){
+      tip.innerHTML='<b>'+esc(money(p.net))+'</b>'+esc(shortMonth(p.m))+' · '+esc(money(p.assets))+' − '+esc(money(p.debts));
+      tip.style.display='block';
+      var leftPct=(p.cx/W)*100;
+      tip.style.left=Math.max(16,Math.min(84,leftPct))+'%';
+    }
+  }
+  function nwLeave(){
+    var c=el('nwCross'); if(c) c.innerHTML='';
+    var t=el('nwTip'); if(t) t.style.display='none';
+  }
+
+  // ── render root ───────────────────────────────────────────────────────────
+  function render(){
+    var app=el('app');
+    if(!S.loaded){ app.innerHTML='<div class="loading">Loading…</div>'; return; }
+    var head='<header><a href="home.html" class="home-back">‹ Home</a><h1 class="logo">Tally<span>.</span><small>Money</small></h1></header>';
+    var body;
+    if(S.form) body=renderForm();
+    else if(S.view==='bills') body=renderBillsManage();
+    else if(S.view==='accounts') body=renderAccountsManage();
+    else if(S.view==='income') body=renderIncomeManage();
+    else body=renderTabs()+(S.tab==='bills'?renderBills():renderWorth());
+    app.innerHTML=head+body+(S.err?'<p class="err">'+esc(S.err)+'</p>':'');
+  }
+  function renderTabs(){
+    return '<div class="tabs">'+
+      '<button class="tab'+(S.tab==='bills'?' on':'')+'" onclick="setTab(\'bills\')">Bills</button>'+
+      '<button class="tab'+(S.tab==='worth'?' on':'')+'" onclick="setTab(\'worth\')">Net Worth</button></div>';
+  }
+  function setTab(t){ S.tab=t; S.err=''; render(); }
+
+  // ── BILLS TAB ─────────────────────────────────────────────────────────────
+  function renderBills(){
+    if(!activeBills().length) return billsEmpty();
+    var rows=monthRows(), t=monthTotals(rows);
+    var isNow=S.period===thisMonth(), isPast=S.period<thisMonth();
+
+    var h='<div class="month">'+
+      '<button class="mnav" onclick="stepMonth(-1)" aria-label="Previous month">‹</button>'+
+      '<div class="mlabel">'+esc(monthLabel(S.period))+'</div>'+
+      '<button class="mnav" onclick="stepMonth(1)" aria-label="Next month">›</button></div>';
+
+    if(!rows.length){
+      h+='<div class="card"><p class="empty">Nothing set up for '+esc(monthLabel(S.period))+' yet.</p>'+
+        '<button class="btn btn-primary full" style="margin-top:12px" onclick="fillMonth()">Add this month\'s bills</button></div>';
+      h+='<button class="link" onclick="go(\'bills\')">Manage bills ›</button>';
+      return h;
+    }
+
+    var pct=t.n?Math.round(t.nPaid/t.n*100):0;
+    h+='<div class="card"><div class="sum-top">'+
+      '<span class="sum-left">'+esc(money(t.due))+'</span>'+
+      '<span style="font-size:12.5px;color:var(--muted)">left'+(t.unknown?' + '+t.unknown+' TBD':'')+'</span>'+
+      '<span class="sum-of">'+t.nPaid+' of '+t.n+' paid</span></div>'+
+      '<div class="bar"><i style="width:'+pct+'%"></i></div>'+
+      '<div class="sum-note">'+esc(money(t.paid))+' paid so far this month</div></div>';
+
+    var today=todayISO(), soon=plusDays(today,7);
+    var over=[], week=[], later=[], done=[];
+    rows.forEach(function(r){
+      if(r.p.paid_on){ done.push(r); return; }
+      if(!r.p.due_on){ later.push(r); return; }
+      if(r.p.due_on<today) over.push(r);
+      else if(r.p.due_on<=soon) week.push(r);
+      else later.push(r);
+    });
+
+    if(over.length)  h+='<div class="kicker grp over">'+(isPast?'Unpaid':'Overdue')+'</div>'+over.map(prowHTML).join('');
+    if(week.length)  h+='<div class="kicker grp">'+(isNow?'Due this week':'Due')+'</div>'+week.map(prowHTML).join('');
+    if(later.length) h+='<div class="kicker grp">Later</div>'+later.map(prowHTML).join('');
+    if(done.length)  h+='<div class="kicker grp">Paid</div>'+done.map(prowHTML).join('');
+
+    h+='<div style="display:flex;gap:14px;justify-content:space-between"><button class="link" onclick="go(\'bills\')">Manage bills ›</button>'+
+       (isPast||rows.length===activeBills().length?'':'<button class="link" onclick="fillMonth()">+ Add missing bills</button>')+'</div>';
+    h+=renderIncomeCard(t);
+    return h;
+  }
+
+  // ── income & surplus ──────────────────────────────────────────────────────
+  // The bottom block of the old spreadsheet. It sits under the checklist rather
+  // than above it because paying the bills is the daily job and this is the
+  // once-a-month one.
+  function activeIncome(){ return S.income.filter(function(s){return s.active;}); }
+  function incomeFor(sourceId, period){
+    for(var i=0;i<S.incomeEntries.length;i++){
+      var e=S.incomeEntries[i];
+      if(e.source_id===sourceId && e.period===period) return e;
+    }
+    return null;
+  }
+  function renderIncomeCard(t){
+    var srcs=activeIncome();
+    if(!srcs.length){
+      return '<div class="card tight" style="margin-top:14px"><div class="kicker" style="margin-bottom:6px">Income &amp; surplus</div>'+
+        '<p class="empty" style="font-size:12.5px">Add what comes in each month and this shows your surplus the way the spreadsheet did.</p>'+
+        '<button class="link" onclick="openIncomeSource(null)">+ Add an income source</button></div>';
+    }
+    // Money out is what actually left plus what is still expected — so a month
+    // in progress reads as a forecast, not as a surplus you haven't earned.
+    var out=t.paid+t.due, inn=0, missing=0;
+    var rows=srcs.map(function(s){
+      var e=incomeFor(s.id,S.period);
+      if(e) inn+=Number(e.amount); else missing++;
+      return '<div class="arow" onclick="openIncomeEntry(\''+esc(s.id)+'\')">'+
+        '<div class="an" style="font-weight:500">'+esc(s.name)+'</div>'+
+        '<div class="av"><div class="b'+(e?'':' ')+'" style="'+(e?'':'color:var(--muted);font-weight:400')+'">'+
+        esc(e?money(e.amount):'—')+'</div></div></div>';
+    }).join('');
+    var surplus=inn-out;
+    return '<div class="card" style="margin-top:14px"><div class="kicker" style="margin-bottom:4px">Income &amp; surplus</div>'+
+      rows+
+      '<div class="subtot"><span>Money in</span><span class="v">'+esc(money(inn))+'</span></div>'+
+      '<div class="subtot" style="border-top:none;padding-top:4px;margin-top:0"><span style="font-weight:500;color:var(--muted)">Money out</span>'+
+        '<span class="v" style="font-weight:500;color:var(--muted)">'+esc(money(out))+'</span></div>'+
+      '<div class="subtot" style="font-size:15px"><span>'+(surplus<0?'Deficit':'Surplus')+'</span>'+
+        '<span class="v" style="color:'+(surplus<0?'var(--danger)':'var(--green)')+'">'+(surplus>0?'+':'')+esc(money(surplus))+'</span></div>'+
+      (missing?'<p class="asub" style="margin-top:8px">'+missing+' source'+(missing===1?'':'s')+' not filled in yet — the surplus is short by whatever '+(missing===1?'it brings':'those bring')+' in.</p>':'')+
+      '<button class="link" onclick="go(\'income\')">Manage income ›</button></div>';
+  }
+  function prowHTML(r){
+    var p=r.p, b=r.b, paid=!!p.paid_on;
+    var late=!paid && p.due_on && p.due_on<todayISO();
+    var amt = paid ? p.amount_paid : p.amount_due;
+    var cat=BILL_CATS[b.category]||BILL_CATS.other;
+    var meta=[];
+    if(p.due_on) meta.push(paid?('paid '+dayLabel(p.paid_on)):('due '+dayLabel(p.due_on)));
+    else if(paid) meta.push('paid '+dayLabel(p.paid_on));
+    if(b.account_id){ var a=acctById(b.account_id); if(a) meta.push(a.name); }
+    return '<div class="prow'+(paid?' done':'')+(late?' overdue':'')+'">'+
+      '<button class="pbody" onclick="openPay(\''+esc(p.id)+'\')">'+
+        '<div class="pname">'+esc(cat.icon)+' '+esc(b.name)+
+          (b.autopay&&!paid?' <span class="tag auto">Auto</span>':'')+
+          (late?' <span class="tag late">Late</span>':'')+'</div>'+
+        (meta.length?'<div class="pmeta">'+esc(meta.join(' · '))+'</div>':'')+
+      '</button>'+
+      '<span class="pamt'+(amt==null?' none':'')+'">'+esc(money(amt))+'</span>'+
+      '<button class="tick'+(paid?' on':'')+'" onclick="togglePaid(\''+esc(p.id)+'\')" '+
+        'aria-label="'+(paid?'Mark unpaid':'Mark paid')+'" aria-pressed="'+paid+'">✓</button>'+
+    '</div>';
+  }
+  function billsEmpty(){
+    return '<div class="card"><p class="empty">No bills yet.<br><br>Add the ones you pay every month — mortgage, car, power, credit cards. '+
+      'Each month Tally lays them out as a checklist so you can see what is still outstanding.<br><br>'+
+      '<b>Names and amounts only.</b> Don\'t put account numbers or logins in here.</p>'+
+      '<button class="btn btn-primary full" style="margin-top:12px" onclick="openBill(null)">+ Add a bill</button></div>';
+  }
+  function stepMonth(n){ S.period=addMonths(S.period,n); S.err=''; render(); }
+
+  // Generate this month's payment rows from the active bills. Explicit rather
+  // than automatic on every load: a bill you deleted from a month because it
+  // genuinely wasn't due would otherwise come back the next time you looked.
+  async function fillMonth(){
+    if(S.busy) return; S.busy=true;
+    var have={}; S.payments.forEach(function(p){ if(p.period===S.period) have[p.bill_id]=true; });
+    var rows=activeBills().filter(function(b){ return !have[b.id]; }).map(function(b){
+      return { user_id:S.userId, bill_id:b.id, period:S.period,
+               due_on:dueDate(S.period,b.due_day), amount_due:b.amount_default,
+               amount_paid:null, paid_on:null };
+    });
+    if(!rows.length){ S.busy=false; return; }
+    try{
+      var r=await sb.from('bill_payments').insert(rows); if(r.error) throw r.error;
+      await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  async function togglePaid(id){
+    var p=payById(id); if(!p||S.busy) return;
+    if(p.paid_on){
+      S.busy=true;
+      try{ var u=await sb.from('bill_payments').update({paid_on:null, amount_paid:null}).eq('id',id); if(u.error) throw u.error; await load(); }
+      catch(e){ S.err=e.message; }
+      S.busy=false; render(); return;
+    }
+    // A bill whose amount varies has nothing to mark paid *with* — open the
+    // panel and ask for the figure instead of recording a zero.
+    var amt = p.amount_due!=null ? p.amount_due : null;
+    if(amt==null){ openPay(id); return; }
+    S.busy=true;
+    try{
+      var d=todayISO(); if(d<S.period) d=S.period;   // marking a future month paid dates it to that month
+      var u2=await sb.from('bill_payments').update({paid_on:d, amount_paid:amt}).eq('id',id); if(u2.error) throw u2.error;
+      await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  function openPay(id){
+    var p=payById(id); if(!p) return; var b=billById(p.bill_id);
+    S.form={ type:'pay', id:id, name:b?b.name:'Bill',
+             amount: p.paid_on ? (p.amount_paid!=null?String(p.amount_paid):'') : (p.amount_due!=null?String(p.amount_due):''),
+             paid_on: p.paid_on||todayISO(), wasPaid:!!p.paid_on, notes:p.notes||'' };
+    S.err=''; render();
+  }
+
+  // ── NET WORTH TAB ─────────────────────────────────────────────────────────
+  function renderWorth(){
+    if(!activeAccounts().length) return worthEmpty();
+    var series=netWorthSeries();
+    var cur=series.length?series[series.length-1]:null;
+    var prev=series.length>1?series[series.length-2]:null;
+
+    var h='<div class="card">';
+    if(cur){
+      var d=prev?(cur.net-prev.net):null;
+      h+='<div class="kicker">Net worth · '+esc(shortMonth(cur.month))+'</div>'+
+         '<div class="hero'+(cur.net<0?' neg':'')+'">'+esc(money(cur.net))+'</div>';
+      if(d!=null) h+='<div class="delta '+(d>0?'up':d<0?'down':'flat')+'">'+(d>0?'▲ ':d<0?'▼ ':'')+esc(money(Math.abs(d)))+' vs '+esc(shortMonth(prev.month))+'</div>';
+      h+='<div class="split"><div><div class="k">Assets</div><div class="v">'+esc(money(cur.assets))+'</div></div>'+
+         '<div><div class="k">Debts</div><div class="v">'+esc(money(cur.debts))+'</div></div></div>';
+      h+=nwChart(series);
+    } else {
+      h+='<p class="empty">No balances recorded yet. Enter this month\'s numbers to start the series.</p>';
+    }
+    h+='<button class="btn btn-primary full" style="margin-top:12px" onclick="openBalances()">Update balances for '+esc(monthLabel(thisMonth()))+'</button></div>';
+
+    var assets=activeAccounts().filter(function(a){return a.kind==='asset';});
+    var liabs =activeAccounts().filter(function(a){return a.kind==='liability';});
+    if(assets.length) h+='<div class="kicker grp">Assets</div><div class="card">'+assets.map(arowHTML).join('')+
+      '<div class="subtot"><span>Total assets</span><span class="v">'+esc(money(cur?cur.assets:0))+'</span></div></div>';
+    if(liabs.length) h+='<div class="kicker grp">Debts</div><div class="card">'+liabs.map(arowHTML).join('')+
+      '<div class="subtot"><span>Total debts</span><span class="v">'+esc(money(cur?cur.debts:0))+'</span></div></div>';
+
+    h+='<button class="link" onclick="go(\'accounts\')">Manage accounts ›</button>';
+    return h;
+  }
+  function arowHTML(a){
+    var b=latestBalance(a.id);
+    var prevB=null;
+    if(b){ S.balances.forEach(function(x){ if(x.account_id===a.id && x.as_of<b.as_of && (!prevB||x.as_of>prevB.as_of)) prevB=x; }); }
+    var d=(b&&prevB)?(Number(b.balance)-Number(prevB.balance)):null;
+    // For a debt, going down is the good direction — so the arrow tracks the
+    // number but the colour tracks what it means for you.
+    var good = d==null?null:(a.kind==='asset' ? d>0 : d<0);
+    var sub=[];
+    var cat=(a.kind==='asset'?ASSET_CATS:LIAB_CATS)[a.category]; if(cat) sub.push(cat);
+    if(b) sub.push('as of '+shortMonth(b.as_of));
+    // If a bill pays this account down, say so — that link is the reason the
+    // two tabs are one page.
+    var bill=S.bills.filter(function(x){return x.active && x.account_id===a.id;})[0];
+    // A card and its bill usually share a name ("Amex" pays down "Amex"), and
+    // repeating it says nothing. Only name the bill when it differs.
+    if(bill && bill.amount_default!=null) sub.push(money(bill.amount_default)+'/mo');
+    else if(bill && bill.name.toLowerCase()!==a.name.toLowerCase()) sub.push(bill.name);
+    return '<div class="arow" onclick="openAccount(\''+esc(a.id)+'\')">'+
+      '<div style="min-width:0"><div class="an">'+esc(a.name)+'</div>'+
+      (sub.length?'<div class="asub">'+esc(sub.join(' · '))+'</div>':'')+'</div>'+
+      '<div class="av"><div class="b">'+esc(b?money(b.balance):'—')+'</div>'+
+      (d!=null&&d!==0?'<div class="d '+(good?'up':'down')+'">'+(d>0?'▲':'▼')+' '+esc(money(Math.abs(d)))+'</div>':
+        (d===0?'<div class="d flat">no change</div>':''))+'</div></div>';
+  }
+  function worthEmpty(){
+    return '<div class="card"><p class="empty">No accounts yet.<br><br>Add what you own (checking, brokerage, retirement, the house) and what you owe '+
+      '(mortgage, car loan, credit cards). Once a month you enter the balances and Tally keeps the series.<br><br>'+
+      '<b>Names and balances only.</b> No account numbers.</p>'+
+      '<button class="btn btn-primary full" style="margin-top:12px" onclick="openAccount(null)">+ Add an account</button></div>';
+  }
+
+  // ── manage screens ────────────────────────────────────────────────────────
+  function go(v){ S.view=v; S.err=''; render(); }
+  function back(){ S.view=null; S.form=null; S.err=''; render(); }
+
+  function renderBillsManage(){
+    var list=S.bills.filter(function(b){return b.active;}).sort(function(a,b){
+      return (a.due_day||99)-(b.due_day||99) || (a.name||'').localeCompare(b.name||'');
+    });
+    var h='<button class="back-link" onclick="back()">‹ Back</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">Your bills</div>';
+    if(!list.length) h+='<p class="empty">No bills yet.</p>';
+    else h+=list.map(function(b){
+      var cat=BILL_CATS[b.category]||BILL_CATS.other;
+      var sub=[cat.label];
+      if(b.due_day) sub.push('due the '+ordinal(b.due_day));
+      if(b.autopay) sub.push('autopay');
+      var a=b.account_id?acctById(b.account_id):null; if(a) sub.push('→ '+a.name);
+      return '<div class="arow" onclick="openBill(\''+esc(b.id)+'\')">'+
+        '<div style="min-width:0"><div class="an">'+esc(cat.icon)+' '+esc(b.name)+'</div>'+
+        '<div class="asub">'+esc(sub.join(' · '))+'</div></div>'+
+        '<div class="av"><div class="b">'+esc(b.amount_default!=null?money(b.amount_default):'varies')+'</div></div></div>';
+    }).join('');
+    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openBill(null)">+ Add a bill</button></div>';
+    var gone=S.bills.filter(function(b){return !b.active;});
+    if(gone.length) h+='<div class="card tight"><div class="kicker" style="margin-bottom:6px">Retired</div>'+
+      gone.map(function(b){ return '<div class="arow" onclick="openBill(\''+esc(b.id)+'\')"><div class="an" style="color:var(--muted)">'+esc(b.name)+'</div>'+
+        '<div class="av"><div class="d flat">history kept</div></div></div>'; }).join('')+'</div>';
+    return h;
+  }
+  function renderAccountsManage(){
+    var h='<button class="back-link" onclick="back()">‹ Back</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">Your accounts</div>';
+    var list=activeAccounts();
+    if(!list.length) h+='<p class="empty">No accounts yet.</p>';
+    else h+=list.map(function(a){
+      var cat=(a.kind==='asset'?ASSET_CATS:LIAB_CATS)[a.category]||'';
+      return '<div class="arow" onclick="openAccount(\''+esc(a.id)+'\')">'+
+        '<div><div class="an">'+esc(a.name)+'</div><div class="asub">'+esc((a.kind==='asset'?'Asset':'Debt')+(cat?' · '+cat:''))+'</div></div>'+
+        '<div class="av"><div class="b">'+esc(latestBalance(a.id)?money(latestBalance(a.id).balance):'—')+'</div></div></div>';
+    }).join('');
+    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openAccount(null)">+ Add an account</button></div>';
+    return h;
+  }
+  function ordinal(n){ var s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
+
+  // ── forms ─────────────────────────────────────────────────────────────────
+  function renderForm(){
+    var f=S.form;
+    if(f.type==='pay') return payForm(f);
+    if(f.type==='bill') return billForm(f);
+    if(f.type==='account') return accountForm(f);
+    if(f.type==='balances') return balancesForm(f);
+    if(f.type==='incomeEntry') return incomeEntryForm(f);
+    if(f.type==='incomeSource') return incomeSourceForm(f);
+    return '';
+  }
+
+  function payForm(f){
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:4px">'+esc(monthLabel(S.period))+'</div>'+
+      '<div class="an" style="font-size:17px;margin-bottom:2px">'+esc(f.name)+'</div>'+
+      '<label class="lbl">Amount</label><input id="fAmt" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
+      '<label class="lbl">Date paid</label><input id="fPaid" type="date" class="field full" value="'+esc(f.paid_on)+'">'+
+      '<label class="lbl">Note <span style="font-weight:400">(optional)</span></label><input id="fNote" class="field full" value="'+esc(f.notes)+'">'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="savePay(true)">'+(f.wasPaid?'Save':'Mark paid')+'</button>'+
+      '<button class="btn btn-ghost" onclick="savePay(false)">Save without paying</button></div>'+
+      (f.wasPaid?'<button class="link" style="color:var(--danger)" onclick="savePay(null)">Undo payment</button>':'')+
+      '</div>';
+  }
+  async function savePay(markPaid){
+    var f=S.form, amt=numOrNull((el('fAmt')||{}).value), date=(el('fPaid')||{}).value, note=((el('fNote')||{}).value||'').trim();
+    if(markPaid===true && amt==null){ S.err='Enter the amount you paid.'; render(); return; }
+    if(markPaid===true && !date){ S.err='Pick the date you paid it.'; render(); return; }
+    var patch = markPaid===null
+      ? { paid_on:null, amount_paid:null, notes:note||null }
+      : markPaid
+        ? { paid_on:date, amount_paid:amt, amount_due:amt, notes:note||null }
+        : { amount_due:amt, notes:note||null };
+    S.busy=true;
+    try{ var u=await sb.from('bill_payments').update(patch).eq('id',f.id); if(u.error) throw u.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  function openBill(id){
+    if(id){ var b=billById(id); if(!b) return;
+      S.form={type:'bill', id:id, name:b.name, category:b.category, due_day:b.due_day||'',
+              amount:b.amount_default!=null?String(b.amount_default):'', autopay:!!b.autopay,
+              account_id:b.account_id||'', active:b.active, notes:b.notes||''}; }
+    else S.form={type:'bill', id:null, name:'', category:'other', due_day:'', amount:'', autopay:false, account_id:'', active:true, notes:''};
+    S.err=''; render();
+  }
+  function billForm(f){
+    var liabs=activeAccounts().filter(function(a){return a.kind==='liability';});
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit bill':'Add a bill')+'</div>'+
+      '<label class="lbl">Name</label><input id="bName" class="field full" placeholder="Mortgage" value="'+esc(f.name)+'">'+
+      '<label class="lbl">Category</label><div class="seg">'+
+        Object.keys(BILL_CATS).map(function(k){ return '<button type="button" class="seg-btn'+(f.category===k?' on':'')+'" onclick="setBillField(\'category\',\''+k+'\')">'+BILL_CATS[k].icon+' '+BILL_CATS[k].label+'</button>'; }).join('')+
+      '</div>'+
+      '<div class="grid2"><div><label class="lbl">Due day</label><input id="bDay" class="field full" inputmode="numeric" placeholder="1" value="'+esc(f.due_day)+'"></div>'+
+      '<div><label class="lbl">Usual amount</label><input id="bAmt" class="field full" inputmode="decimal" placeholder="varies" value="'+esc(f.amount)+'"></div></div>'+
+      '<p class="asub" style="margin:6px 0 0">Leave the amount blank for bills that change every month — power, water, credit cards.</p>'+
+      (liabs.length?('<label class="lbl">Pays down</label><select id="bAcct" class="field full">'+
+        '<option value="">— nothing (an expense) —</option>'+
+        liabs.map(function(a){ return '<option value="'+esc(a.id)+'"'+(f.account_id===a.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+
+        '</select><p class="asub" style="margin:6px 0 0">Link the mortgage, car loan or a card to its balance and the Net Worth tab shows the payment beside what\'s left.</p>'):'')+
+      '<label class="check"><input type="checkbox" id="bAuto"'+(f.autopay?' checked':'')+'> On autopay</label>'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveBill()">Save</button>'+
+      (f.id?'<button class="btn btn-ghost" onclick="retireBill(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
+            '<button class="btn btn-danger" onclick="deleteBill(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
+      (f.id?'<p class="asub" style="margin-top:10px">Retiring keeps every payment you have recorded and stops it appearing in new months. Deleting removes its history too.</p>':'')+
+      '</div>';
+  }
+  function setBillField(k,v){ stashBill(); S.form[k]=v; render(); }
+  function stashBill(){
+    var f=S.form;
+    f.name=((el('bName')||{}).value!=null)?el('bName').value:f.name;
+    f.due_day=((el('bDay')||{}).value!=null)?el('bDay').value:f.due_day;
+    f.amount=((el('bAmt')||{}).value!=null)?el('bAmt').value:f.amount;
+    if(el('bAcct')) f.account_id=el('bAcct').value;
+    if(el('bAuto')) f.autopay=el('bAuto').checked;
+  }
+  async function saveBill(){
+    stashBill(); var f=S.form;
+    var name=(f.name||'').trim();
+    if(!name){ S.err='Give the bill a name.'; render(); return; }
+    var day=f.due_day===''?null:parseInt(f.due_day,10);
+    if(day!=null && (isNaN(day)||day<1||day>31)){ S.err='Due day has to be between 1 and 31.'; render(); return; }
+    var amt=numOrNull(f.amount);
+    if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
+    var row={ name:name, category:f.category, due_day:day, amount_default:amt,
+              autopay:!!f.autopay, account_id:f.account_id||null };
+    S.busy=true;
+    try{
+      if(f.id){ var u=await sb.from('bills').update(row).eq('id',f.id); if(u.error) throw u.error; }
+      else{
+        row.user_id=S.userId;
+        var ins=await sb.from('bills').insert(row).select('id').single(); if(ins.error) throw ins.error;
+        // A new bill should show up in the month you are looking at, not next
+        // month — otherwise you add it and nothing happens.
+        var pr={ user_id:S.userId, bill_id:ins.data.id, period:S.period,
+                 due_on:dueDate(S.period,day), amount_due:amt };
+        var p=await sb.from('bill_payments').insert(pr); if(p.error) throw p.error;
+      }
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function retireBill(id){
+    var b=billById(id); if(!b) return;
+    S.busy=true;
+    try{ var u=await sb.from('bills').update({active:!b.active}).eq('id',id); if(u.error) throw u.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function deleteBill(id){
+    var b=billById(id);
+    var n=S.payments.filter(function(p){return p.bill_id===id;}).length;
+    if(!confirm('Delete "'+(b?b.name:'this bill')+'" and its '+n+' recorded payment'+(n===1?'':'s')+'?\n\nTo keep the history, use Retire instead.')) return;
+    S.busy=true;
+    try{ var d=await sb.from('bills').delete().eq('id',id); if(d.error) throw d.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  function openAccount(id){
+    if(id){ var a=acctById(id); if(!a) return;
+      S.form={type:'account', id:id, name:a.name, kind:a.kind, category:a.category, active:a.active, balance:''};
+      var b=latestBalance(id); if(b) S.form.balance=String(b.balance); S.form.balanceMonth=b?b.as_of:null;
+    }
+    else S.form={type:'account', id:null, name:'', kind:'asset', category:'cash', active:true, balance:'', balanceMonth:null};
+    S.err=''; render();
+  }
+  function accountForm(f){
+    var cats=f.kind==='asset'?ASSET_CATS:LIAB_CATS;
+    var hist=f.id?S.balances.filter(function(b){return b.account_id===f.id;}).sort(function(a,b){return a.as_of<b.as_of?1:-1;}):[];
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit account':'Add an account')+'</div>'+
+      '<label class="lbl">Name</label><input id="aName" class="field full" placeholder="Checking" value="'+esc(f.name)+'">'+
+      '<label class="lbl">Type</label><div class="seg">'+
+        '<button type="button" class="seg-btn'+(f.kind==='asset'?' on':'')+'" onclick="setAcctKind(\'asset\')">Asset — I own it</button>'+
+        '<button type="button" class="seg-btn'+(f.kind==='liability'?' on':'')+'" onclick="setAcctKind(\'liability\')">Debt — I owe it</button></div>'+
+      '<label class="lbl">Category</label><div class="seg">'+
+        Object.keys(cats).map(function(k){ return '<button type="button" class="seg-btn'+(f.category===k?' on':'')+'" onclick="setAcctField(\'category\',\''+k+'\')">'+esc(cats[k])+'</button>'; }).join('')+
+      '</div>'+
+      '<label class="lbl">Balance for '+esc(monthLabel(thisMonth()))+'</label>'+
+      '<input id="aBal" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.balance)+'">'+
+      '<p class="asub" style="margin:6px 0 0">Enter what you owe as a positive number — Tally subtracts debts for you.</p>'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveAccount()">Save</button>'+
+      (f.id?'<button class="btn btn-danger" onclick="deleteAccount(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
+      (hist.length?('<div class="kicker" style="margin:18px 0 4px">History</div>'+hist.slice(0,18).map(function(b){
+        return '<div class="arow" style="cursor:default"><span style="font-size:13px">'+esc(monthLabel(b.as_of))+'</span>'+
+          '<div class="av"><div class="b">'+esc(money(b.balance))+'</div></div></div>'; }).join('')):'')+
+      '</div>';
+  }
+  function stashAcct(){ var f=S.form;
+    if(el('aName')) f.name=el('aName').value;
+    if(el('aBal'))  f.balance=el('aBal').value;
+  }
+  function setAcctField(k,v){ stashAcct(); S.form[k]=v; render(); }
+  function setAcctKind(k){
+    stashAcct(); S.form.kind=k;
+    // Categories are constrained to the kind in the database, so a leftover
+    // asset category on a liability would be rejected on save. Reset it.
+    var cats=k==='asset'?ASSET_CATS:LIAB_CATS;
+    if(!cats[S.form.category]) S.form.category=Object.keys(cats)[0];
+    render();
+  }
+  async function saveAccount(){
+    stashAcct(); var f=S.form;
+    var name=(f.name||'').trim();
+    if(!name){ S.err='Give the account a name.'; render(); return; }
+    var bal=numOrNull(f.balance);
+    if(bal!=null && bal<0){ S.err='Enter the balance as a positive number — debts are subtracted automatically.'; render(); return; }
+    S.busy=true;
+    try{
+      var id=f.id;
+      if(id){ var u=await sb.from('accounts').update({name:name, kind:f.kind, category:f.category}).eq('id',id); if(u.error) throw u.error; }
+      else{
+        var ins=await sb.from('accounts').insert({user_id:S.userId, name:name, kind:f.kind, category:f.category}).select('id').single();
+        if(ins.error) throw ins.error; id=ins.data.id;
+      }
+      if(bal!=null){
+        var up=await sb.from('account_balances').upsert(
+          {user_id:S.userId, account_id:id, as_of:thisMonth(), balance:bal},
+          {onConflict:'account_id,as_of'});
+        if(up.error) throw up.error;
+      }
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function deleteAccount(id){
+    var a=acctById(id);
+    var n=S.balances.filter(function(b){return b.account_id===id;}).length;
+    var linked=S.bills.filter(function(b){return b.account_id===id;}).map(function(b){return b.name;});
+    var msg='Delete "'+(a?a.name:'this account')+'" and its '+n+' monthly balance'+(n===1?'':'s')+'?';
+    if(linked.length) msg+='\n\n'+linked.join(', ')+(linked.length===1?' is':' are')+' linked to it. The bill'+(linked.length===1?'':'s')+' and every payment will be kept — they just stop pointing at a balance.';
+    if(!confirm(msg)) return;
+    S.busy=true;
+    try{ var d=await sb.from('accounts').delete().eq('id',id); if(d.error) throw d.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  // The monthly ritual: every active account, prefilled with what it said last
+  // time. Most of them barely move, and retyping an unchanged 401k balance is
+  // exactly the friction that stops people keeping the series up.
+  function openBalances(){
+    var m=thisMonth(), vals={};
+    activeAccounts().forEach(function(a){
+      var here=S.balances.filter(function(b){return b.account_id===a.id && b.as_of===m;})[0];
+      var prev=latestBalance(a.id, m);
+      vals[a.id]= here ? String(here.balance) : (prev?String(prev.balance):'');
+    });
+    S.form={type:'balances', month:m, vals:vals}; S.err=''; render();
+  }
+  function balancesForm(f){
+    var assets=activeAccounts().filter(function(a){return a.kind==='asset';});
+    var liabs =activeAccounts().filter(function(a){return a.kind==='liability';});
+    function block(list,title){
+      if(!list.length) return '';
+      return '<div class="kicker" style="margin:14px 0 2px">'+title+'</div>'+list.map(function(a){
+        return '<div class="balrow"><span class="n">'+esc(a.name)+'</span>'+
+          '<input class="field" id="bal_'+esc(a.id)+'" inputmode="decimal" placeholder="—" value="'+esc(f.vals[a.id]||'')+'"></div>';
+      }).join('');
+    }
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:2px">Balances</div>'+
+      '<div class="an" style="font-size:17px">'+esc(monthLabel(f.month))+'</div>'+
+      '<p class="asub" style="margin:6px 0 0">Prefilled with last month\'s figures. Change what moved, leave the rest.</p>'+
+      block(assets,'Assets')+block(liabs,'Debts')+
+      '<div class="btn-row"><button class="btn btn-primary full" onclick="saveBalances()">Save '+esc(monthLabel(f.month))+'</button></div></div>';
+  }
+  async function saveBalances(){
+    var f=S.form, rows=[], bad=null;
+    activeAccounts().forEach(function(a){
+      var input=el('bal_'+a.id); if(!input) return;
+      var v=numOrNull(input.value);
+      if(v==null) return;                       // blank means "no reading", not zero
+      if(v<0){ bad=a.name; return; }
+      rows.push({user_id:S.userId, account_id:a.id, as_of:f.month, balance:v});
+    });
+    if(bad){ S.err='"'+bad+'" is negative — enter debts as positive numbers.'; render(); return; }
+    if(!rows.length){ S.form=null; render(); return; }
+    S.busy=true;
+    try{
+      var up=await sb.from('account_balances').upsert(rows,{onConflict:'account_id,as_of'});
+      if(up.error) throw up.error;
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  // ── income forms ──────────────────────────────────────────────────────────
+  function srcById(id){ for(var i=0;i<S.income.length;i++) if(S.income[i].id===id) return S.income[i]; return null; }
+
+  function openIncomeEntry(sourceId){
+    var s=srcById(sourceId); if(!s) return;
+    var e=incomeFor(sourceId,S.period);
+    S.form={ type:'incomeEntry', sourceId:sourceId, entryId:e?e.id:null, name:s.name,
+             amount: e ? String(e.amount) : (s.amount_default!=null?String(s.amount_default):'') };
+    S.err=''; render();
+  }
+  function incomeEntryForm(f){
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:4px">'+esc(monthLabel(S.period))+'</div>'+
+      '<div class="an" style="font-size:17px;margin-bottom:2px">'+esc(f.name)+'</div>'+
+      '<label class="lbl">Amount received</label><input id="iAmt" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveIncomeEntry()">Save</button>'+
+      (f.entryId?'<button class="btn btn-danger" onclick="clearIncomeEntry()">Clear</button>':'')+'</div></div>';
+  }
+  async function saveIncomeEntry(){
+    var f=S.form, amt=numOrNull((el('iAmt')||{}).value);
+    if(amt==null){ S.err='Enter an amount, or use Clear to leave the month blank.'; render(); return; }
+    if(amt<0){ S.err='Income can\'t be negative.'; render(); return; }
+    S.busy=true;
+    try{
+      var up=await sb.from('income_entries').upsert(
+        {user_id:S.userId, source_id:f.sourceId, period:S.period, amount:amt},
+        {onConflict:'source_id,period'});
+      if(up.error) throw up.error;
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function clearIncomeEntry(){
+    var f=S.form; if(!f.entryId){ S.form=null; render(); return; }
+    S.busy=true;
+    try{ var d=await sb.from('income_entries').delete().eq('id',f.entryId); if(d.error) throw d.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  function renderIncomeManage(){
+    var list=activeIncome();
+    var h='<button class="back-link" onclick="back()">‹ Back</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">Income sources</div>';
+    if(!list.length) h+='<p class="empty">No income sources yet.</p>';
+    else h+=list.map(function(s){
+      var n=S.incomeEntries.filter(function(e){return e.source_id===s.id;}).length;
+      return '<div class="arow" onclick="openIncomeSource(\''+esc(s.id)+'\')">'+
+        '<div><div class="an">'+esc(s.name)+'</div><div class="asub">'+n+' month'+(n===1?'':'s')+' recorded</div></div>'+
+        '<div class="av"><div class="b">'+esc(s.amount_default!=null?money(s.amount_default):'varies')+'</div></div></div>';
+    }).join('');
+    h+='<button class="btn btn-primary full" style="margin-top:14px" onclick="openIncomeSource(null)">+ Add a source</button></div>';
+    var gone=S.income.filter(function(s){return !s.active;});
+    if(gone.length) h+='<div class="card tight"><div class="kicker" style="margin-bottom:6px">Retired</div>'+
+      gone.map(function(s){ return '<div class="arow" onclick="openIncomeSource(\''+esc(s.id)+'\')">'+
+        '<div class="an" style="color:var(--muted)">'+esc(s.name)+'</div>'+
+        '<div class="av"><div class="d flat">history kept</div></div></div>'; }).join('')+'</div>';
+    return h;
+  }
+
+  function openIncomeSource(id){
+    if(id){ var s=srcById(id); if(!s) return;
+      S.form={type:'incomeSource', id:id, name:s.name, amount:s.amount_default!=null?String(s.amount_default):'', active:s.active}; }
+    else S.form={type:'incomeSource', id:null, name:'', amount:'', active:true};
+    S.err=''; render();
+  }
+  function incomeSourceForm(f){
+    return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
+      '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit source':'Add an income source')+'</div>'+
+      '<label class="lbl">Name</label><input id="sName" class="field full" placeholder="Payroll" value="'+esc(f.name)+'">'+
+      '<label class="lbl">Usual amount</label><input id="sAmt" class="field full" inputmode="decimal" placeholder="varies" value="'+esc(f.amount)+'">'+
+      '<p class="asub" style="margin:6px 0 0">Leave blank for anything irregular — reimbursements, side work.</p>'+
+      '<div class="btn-row"><button class="btn btn-primary" onclick="saveIncomeSource()">Save</button>'+
+      (f.id?'<button class="btn btn-ghost" onclick="retireIncomeSource(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
+            '<button class="btn btn-danger" onclick="deleteIncomeSource(\''+esc(f.id)+'\')">Delete</button>':'')+'</div></div>';
+  }
+  async function saveIncomeSource(){
+    var f=S.form;
+    var name=((el('sName')||{}).value||'').trim();
+    var amt=numOrNull((el('sAmt')||{}).value);
+    if(!name){ S.err='Give the source a name.'; render(); return; }
+    if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
+    S.busy=true;
+    try{
+      if(f.id){ var u=await sb.from('income_sources').update({name:name, amount_default:amt}).eq('id',f.id); if(u.error) throw u.error; }
+      else{ var i=await sb.from('income_sources').insert({user_id:S.userId, name:name, amount_default:amt}); if(i.error) throw i.error; }
+      S.form=null; await load();
+    }catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function retireIncomeSource(id){
+    var s=srcById(id); if(!s) return;
+    S.busy=true;
+    try{ var u=await sb.from('income_sources').update({active:!s.active}).eq('id',id); if(u.error) throw u.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+  async function deleteIncomeSource(id){
+    var s=srcById(id);
+    var n=S.incomeEntries.filter(function(e){return e.source_id===id;}).length;
+    if(!confirm('Delete "'+(s?s.name:'this source')+'" and its '+n+' recorded month'+(n===1?'':'s')+'?\n\nTo keep the history, use Retire instead.')) return;
+    S.busy=true;
+    try{ var d=await sb.from('income_sources').delete().eq('id',id); if(d.error) throw d.error; S.form=null; await load(); }
+    catch(e){ S.err=e.message; }
+    S.busy=false; render();
+  }
+
+  function closeForm(){ S.form=null; S.err=''; render(); }
+
+  // ── load ──────────────────────────────────────────────────────────────────
+  async function load(){
+    var r=await Promise.all([
+      sb.from('bills').select('*'),
+      sb.from('bill_payments').select('*').order('period',{ascending:false}),
+      sb.from('accounts').select('*').order('sort_order'),
+      sb.from('account_balances').select('*').order('as_of',{ascending:false}),
+      sb.from('income_sources').select('*').order('sort_order'),
+      sb.from('income_entries').select('*').order('period',{ascending:false})
+    ]);
+    for(var i=0;i<r.length;i++) if(r[i].error) throw r[i].error;
+    S.bills=r[0].data||[]; S.payments=r[1].data||[];
+    S.accounts=r[2].data||[]; S.balances=r[3].data||[];
+    S.income=r[4].data||[]; S.incomeEntries=r[5].data||[];
+  }
+
+  (async function(){
+    var profile=await requireUser(); if(!profile) return;
+    S.userId=profile.user.id;
+    S.period=thisMonth();
+    try{ await load(); }
+    catch(e){
+      el('app').innerHTML='<header><a href="home.html" class="home-back">‹ Home</a></header>'+
+        '<div class="card"><p class="empty">Couldn\'t load your money data.<br><br><code>'+esc(e.message)+'</code>'+
+        '<br><br>If this says a table is missing, run <code>sql/57_money.sql</code> in the Supabase SQL editor.</p></div>';
+      return;
+    }
+    S.loaded=true; render();
+  })();
+  </script>
+</body>
+</html>
