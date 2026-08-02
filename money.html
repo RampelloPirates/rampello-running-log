@@ -155,7 +155,7 @@
   // Two tabs because the old spreadsheet had two, and they answer different
   // questions: Bills is "what do I still owe this month", Net Worth is "where
   // did the year go". They share the `accounts` table — a mortgage is a bill
-  // you pay and a balance you owe, and bills.account_id is what ties the two
+  // you pay and a balance you owe, and bills.to_account_id is what ties the two
   // views of it together.
   //
   // Nothing here reads or stores a credential. See the header of 57_money.sql.
@@ -529,7 +529,8 @@
     var meta=[];
     if(p.due_on) meta.push(paid?('paid '+dayLabel(p.paid_on)):('due '+dayLabel(p.due_on)));
     else if(paid) meta.push('paid '+dayLabel(p.paid_on));
-    if(b.account_id){ var a=acctById(b.account_id); if(a) meta.push(a.name); }
+    if(b.from_account_id){ var af=acctById(b.from_account_id); if(af) meta.push('from '+af.name); }
+    if(b.to_account_id){ var at=acctById(b.to_account_id); if(at) meta.push('→ '+at.name); }
     return '<div class="prow'+(paid?' done':'')+(late?' overdue':'')+'">'+
       '<button class="pbody" onclick="openPay(\''+esc(p.id)+'\')">'+
         '<div class="pname">'+esc(cat.icon)+' '+esc(b.name)+
@@ -731,6 +732,26 @@
         (mixed&&net<0?' style="color:var(--danger)"':'')+'>'+esc(money(shown))+'</span></div></div>';
   }
 
+  // Monthly money attached to an account, from the links on bills and income.
+  // Only bills with a fixed amount contribute a figure — a varying one has no
+  // "/mo" to state, so it is named instead of guessed at.
+  function accountFlows(a){
+    var out=[];
+    function describe(list, prefix){
+      var fixed=0, varying=[];
+      list.forEach(function(b){
+        if(b.amount_default!=null) fixed+=Number(b.amount_default); else varying.push(b.name);
+      });
+      if(fixed) out.push(prefix+money(fixed)+'/mo');
+      // A card and its bill usually share a name ("Amex" pays down "Amex") and
+      // repeating it says nothing.
+      varying.forEach(function(n){ if(n.toLowerCase()!==a.name.toLowerCase()) out.push(prefix+n); });
+    }
+    describe(S.bills.filter(function(b){ return b.active && b.to_account_id===a.id; }), '+');
+    describe(S.bills.filter(function(b){ return b.active && b.from_account_id===a.id; }), '−');
+    return out;
+  }
+
   function arowHTML(a, signed){
     var b=latestBalance(a.id);
     var prevB=null;
@@ -742,13 +763,10 @@
     var sub=[];
     var cat=(a.kind==='asset'?ASSET_CATS:LIAB_CATS)[a.category]; if(cat) sub.push(cat);
     if(b) sub.push('as of '+shortMonth(b.as_of));
-    // If a bill pays this account down, say so — that link is the reason the
-    // two tabs are one page.
-    var bill=S.bills.filter(function(x){return x.active && x.account_id===a.id;})[0];
-    // A card and its bill usually share a name ("Amex" pays down "Amex"), and
-    // repeating it says nothing. Only name the bill when it differs.
-    if(bill && bill.amount_default!=null) sub.push(money(bill.amount_default)+'/mo');
-    else if(bill && bill.name.toLowerCase()!==a.name.toLowerCase()) sub.push(bill.name);
+    // What flows in and out of this account each month. This is the reason the
+    // two tabs are one page: "why is this balance moving" is answerable from
+    // the bills, and answering it beside the balance is the whole point.
+    accountFlows(a).forEach(function(t){ sub.push(t); });
     var shownBal = b ? (signed && a.kind==='liability' ? money(-Number(b.balance)) : money(b.balance)) : '—';
     return '<div class="arow" onclick="openAccount(\''+esc(a.id)+'\')">'+
       '<div style="min-width:0"><div class="an">'+esc(a.name)+'</div>'+
@@ -783,7 +801,8 @@
       if(b.pay_method==='card') sub.push('on a card');
       else if(b.pay_method==='cash') sub.push('cash');
       if(b.autopay) sub.push('autopay');
-      var a=b.account_id?acctById(b.account_id):null; if(a) sub.push('→ '+a.name);
+      var af=b.from_account_id?acctById(b.from_account_id):null; if(af) sub.push('from '+af.name);
+      var at=b.to_account_id?acctById(b.to_account_id):null;     if(at) sub.push('→ '+at.name);
       return '<div class="arow" onclick="openBill(\''+esc(b.id)+'\')">'+
         '<div style="min-width:0"><div class="an">'+esc(cat.icon)+' '+esc(b.name)+'</div>'+
         '<div class="asub">'+esc(sub.join(' · '))+'</div></div>'+
@@ -863,8 +882,8 @@
     if(id){ var b=billById(id); if(!b) return;
       S.form={type:'bill', id:id, name:b.name, category:b.category, due_day:b.due_day||'',
               amount:b.amount_default!=null?String(b.amount_default):'', varies:b.amount_default==null,
-              autopay:!!b.autopay, account_id:b.account_id||'', section_id:b.section_id||'',
-              pay_method:b.pay_method||'bank', active:b.active, notes:b.notes||''}; }
+              autopay:!!b.autopay, from_account_id:b.from_account_id||'', to_account_id:b.to_account_id||'',
+              section_id:b.section_id||'', pay_method:b.pay_method||'bank', active:b.active, notes:b.notes||''}; }
     // A new bill defaults to a fixed amount: that's the mortgage, the insurance,
     // the subscriptions — most of what anyone sets up by hand.
     // A new bill lands in the first section rather than none, so it can't be
@@ -906,10 +925,10 @@
             ? '<p class="asub" style="margin:8px 0 0">Because the amount varies there is no figure to claim, so this still waits for you to fill it in — it just won\'t be chased.</p>'
             : '<p class="asub" style="margin:8px 0 0">Marks itself paid when the due date arrives, so it stays out of the way of the bills that need a decision.</p>')
         : '')+
-      (liabs.length?('<label class="lbl">Pays down</label><select id="bAcct" class="field full">'+
-        '<option value="">— nothing (an expense) —</option>'+
-        liabs.map(function(a){ return '<option value="'+esc(a.id)+'"'+(f.account_id===a.id?' selected':'')+'>'+esc(a.name)+'</option>'; }).join('')+
-        '</select><p class="asub" style="margin:6px 0 0">Link the mortgage, car loan or a card to its balance and the Net Worth tab shows the payment beside what\'s left.</p>'):'')+
+      (activeAccounts().length?(
+        '<label class="lbl">Paid from</label>'+acctSelect('bFrom', f.from_account_id, fromable())+
+        '<label class="lbl">Pays to</label>'+acctSelect('bTo', f.to_account_id, activeAccounts())+
+        '<p class="asub" style="margin:6px 0 0">'+payToHint(f)+'</p>'):'')+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveBill()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireBill(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
             '<button class="btn btn-danger" onclick="deleteBill(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
@@ -920,6 +939,38 @@
         ' Deleting is the other thing: it removes the bill and its history together.</p>'):'')+
       '</div>';
   }
+  // A house is not somewhere money comes from. Everything else is fair game —
+  // over-filtering a picker is more annoying than a nonsense option nobody
+  // picks, but these two are nonsense every time.
+  function fromable(){
+    return activeAccounts().filter(function(a){ return a.category!=='property' && a.category!=='vehicle'; });
+  }
+  function acctSelect(id, sel, list){
+    var groups={}, order=[];
+    list.forEach(function(a){
+      var s=a.section_id?sectById(a.section_id,'account'):null;
+      var key=s?s.name:'Other accounts';
+      if(!groups[key]){ groups[key]=[]; order.push(key); }
+      groups[key].push(a);
+    });
+    return '<select id="'+id+'" class="field full" onchange="stashBill();render()">'+
+      '<option value="">— none —</option>'+
+      order.map(function(k){
+        return '<optgroup label="'+esc(k)+'">'+groups[k].map(function(a){
+          return '<option value="'+esc(a.id)+'"'+(sel===a.id?' selected':'')+'>'+esc(a.name)+'</option>';
+        }).join('')+'</optgroup>';
+      }).join('')+'</select>';
+  }
+  // The same link means opposite things depending on what it points at, and
+  // which one it is worth saying out loud.
+  function payToHint(f){
+    var t=f.to_account_id?acctById(f.to_account_id):null;
+    if(!t) return 'Most bills are simply an expense and point at neither. Set these where the money visibly lands somewhere you track — the mortgage, a car loan, a savings or investment account.';
+    return t.kind==='asset'
+      ? 'Money into '+esc(t.name)+', so its balance goes up. Nothing is added for you — the balance you type each month already includes it.'
+      : 'Money against '+esc(t.name)+', so what you owe goes down. Nothing is subtracted for you — the balance you type each month already includes it.';
+  }
+
   function setBillField(k,v){ stashBill(); S.form[k]=v; render(); }
   // The typed figure is kept when switching to Varies, so flipping back and
   // forth to read the hint doesn't cost you what you already entered.
@@ -929,7 +980,8 @@
     f.name=((el('bName')||{}).value!=null)?el('bName').value:f.name;
     f.due_day=((el('bDay')||{}).value!=null)?el('bDay').value:f.due_day;
     f.amount=((el('bAmt')||{}).value!=null)?el('bAmt').value:f.amount;
-    if(el('bAcct')) f.account_id=el('bAcct').value;
+    if(el('bFrom')) f.from_account_id=el('bFrom').value;
+    if(el('bTo'))   f.to_account_id=el('bTo').value;
     if(el('bSect')) f.section_id=el('bSect').value;
   }
   async function saveBill(){
@@ -945,7 +997,7 @@
     if(!f.varies && amt==null){ S.err='Enter the amount, or switch it to Varies.'; render(); return; }
     if(amt!=null && amt<0){ S.err='Amount can\'t be negative.'; render(); return; }
     var row={ name:name, category:f.category, due_day:day, amount_default:amt,
-              autopay:!!f.autopay, account_id:f.account_id||null,
+              autopay:!!f.autopay, from_account_id:f.from_account_id||null, to_account_id:f.to_account_id||null,
               section_id:f.section_id||null, pay_method:f.pay_method||'bank' };
     S.busy=true;
     try{
@@ -1092,7 +1144,7 @@
   async function deleteAccount(id){
     var a=acctById(id);
     var n=S.balances.filter(function(b){return b.account_id===id;}).length;
-    var linked=S.bills.filter(function(b){return b.account_id===id;}).map(function(b){return b.name;});
+    var linked=S.bills.filter(function(b){return b.from_account_id===id || b.to_account_id===id;}).map(function(b){return b.name;});
     var msg='Delete "'+(a?a.name:'this account')+'" and its '+n+' monthly balance'+(n===1?'':'s')+'?';
     if(linked.length) msg+='\n\n'+linked.join(', ')+(linked.length===1?' is':' are')+' linked to it. The bill'+(linked.length===1?'':'s')+' and every payment will be kept — they just stop pointing at a balance.';
     if(!confirm(msg)) return;
