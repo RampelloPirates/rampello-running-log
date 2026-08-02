@@ -117,6 +117,14 @@
     .link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:10px 0;}
     .back-link{background:none;border:none;color:var(--green);font-weight:600;font-size:13px;cursor:pointer;padding:6px 0;margin-bottom:4px;}
     .field{font-family:var(--f-body);font-size:14px;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface-warm);width:100%;}
+    /* iOS gives date inputs their own intrinsic width and centres the text, so
+       they end up wider than every other field and misaligned with them. */
+    input[type=date]{-webkit-appearance:none;appearance:none;text-align:left;min-width:0;max-width:100%;}
+    /* Money inputs: a fixed $ sitting in the field, so the glyph never has to be
+       typed, parsed, or accidentally deleted. numOrNull strips it either way. */
+    .minput{position:relative;}
+    .minput > span{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-family:var(--f-mono);font-size:14px;pointer-events:none;}
+    .minput > input{padding-left:23px;font-family:var(--f-mono);}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
     label.lbl{font-size:12px;color:var(--muted);font-weight:600;display:block;margin:10px 0 4px;}
     .seg{display:flex;gap:6px;flex-wrap:wrap;}
@@ -127,7 +135,7 @@
     .balrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--border);}
     .balrow:last-of-type{border-bottom:none;}
     .balrow .n{flex:1;font-size:13.5px;font-weight:500;}
-    .balrow input{width:118px;text-align:right;font-family:var(--f-mono);}
+    .balrow input{text-align:right;font-family:var(--f-mono);}
     .full{width:100%;}
     .err{color:var(--danger);font-size:13px;margin:8px 0 0;}
     .empty{color:var(--muted);font-size:13.5px;line-height:1.55;}
@@ -211,6 +219,24 @@
     return (v<0?'-$':'$')+Math.abs(v).toLocaleString(undefined,{minimumFractionDigits:cents?2:0,maximumFractionDigits:cents?2:0});
   }
   function numOrNull(s){ s=String(s==null?'':s).replace(/[$,\s]/g,'').trim(); if(!s) return null; var n=Number(s); return isNaN(n)?null:n; }
+
+  // A money field renders as "$ [ 2,423.00 ]". The $ is furniture rather than
+  // content, and the digits are tidied on blur rather than as you type — live
+  // reformatting fights the cursor, and on a phone that means the caret jumping
+  // mid-number. Anything unparseable is left exactly as typed so you can see
+  // what you did instead of having it silently blanked.
+  function moneyField(id, value, placeholder, extra){
+    return '<div class="minput"><span>$</span>'+
+      '<input id="'+id+'" class="field full" inputmode="decimal" onblur="fmtMoneyInput(this)"'+
+      ' placeholder="'+esc(placeholder||'0.00')+'" value="'+esc(fmtMoneyStr(value))+'"'+(extra||'')+'></div>';
+  }
+  function fmtMoneyStr(v){
+    if(v==null||v==='') return '';
+    var n=Number(String(v).replace(/[$,\s]/g,''));
+    if(isNaN(n)) return String(v);
+    return n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  function fmtMoneyInput(inp){ if(inp) inp.value=fmtMoneyStr(inp.value); }
 
   function billById(id){ for(var i=0;i<S.bills.length;i++) if(S.bills[i].id===id) return S.bills[i]; return null; }
   function acctById(id){ for(var i=0;i<S.accounts.length;i++) if(S.accounts[i].id===id) return S.accounts[i]; return null; }
@@ -618,7 +644,7 @@
 
   function openPay(id){
     var p=payById(id); if(!p) return; var b=billById(p.bill_id);
-    S.form={ type:'pay', id:id, name:b?b.name:'Bill',
+    S.form={ type:'pay', id:id, billId:p.bill_id, name:b?b.name:'Bill',
              amount: p.paid_on ? (p.amount_paid!=null?String(p.amount_paid):'') : (p.amount_due!=null?String(p.amount_due):''),
              paid_on: p.paid_on||todayISO(), wasPaid:!!p.paid_on, notes:p.notes||'' };
     S.err=''; render();
@@ -803,7 +829,12 @@
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
       '<div class="kicker" style="margin-bottom:4px">'+esc(monthLabel(S.period))+'</div>'+
       '<div class="an" style="font-size:17px;margin-bottom:2px">'+esc(f.name)+'</div>'+
-      '<label class="lbl">Amount</label><input id="fAmt" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
+      // This panel is one month of one bill. Everything that describes the bill
+      // itself — due day, autopay, section, whether it prefills — lives on the
+      // bill, and tapping a row in the month view is the obvious way to go
+      // looking for it, so there has to be a door.
+      '<button class="link" style="padding:0 0 4px" onclick="openBill(\''+esc(f.billId)+'\')">Bill settings — due day, autopay, section ›</button>'+
+      '<label class="lbl">Amount</label>'+moneyField('fAmt', f.amount)+
       '<label class="lbl">Date paid</label><input id="fPaid" type="date" class="field full" value="'+esc(f.paid_on)+'">'+
       '<label class="lbl">Note <span style="font-weight:400">(optional)</span></label><input id="fNote" class="field full" value="'+esc(f.notes)+'">'+
       '<div class="btn-row"><button class="btn btn-primary" onclick="savePay(true)">'+(f.wasPaid?'Save':'Mark paid')+'</button>'+
@@ -855,7 +886,7 @@
         '<button type="button" class="seg-btn'+(f.varies?' on':'')+'" onclick="setBillVaries(true)">Varies</button></div>'+
       (f.varies
         ? '<p class="asub" style="margin:8px 0 0">Arrives blank each month and you fill in what it actually came to — power, water, credit cards.</p>'
-        : '<input id="bAmt" class="field full" style="margin-top:8px" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
+        : '<div style="margin-top:8px">'+moneyField('bAmt', f.amount)+'</div>'+
           '<p class="asub" style="margin:6px 0 0">Every month starts prefilled with this, and you can still change it on the day.</p>')+
       '<label class="lbl">Section</label><select id="bSect" class="field full">'+
         '<option value="">— none —</option>'+
@@ -970,7 +1001,7 @@
         S.acctSections.map(function(s){ return '<option value="'+esc(s.id)+'"'+(f.section_id===s.id?' selected':'')+'>'+esc(s.name)+'</option>'; }).join('')+
         '</select>'):'')+
       '<label class="lbl">Balance for '+esc(monthLabel(thisMonth()))+'</label>'+
-      '<input id="aBal" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.balance)+'">'+
+      moneyField('aBal', f.balance)+
       '<p class="asub" style="margin:6px 0 0">Enter what you owe as a positive number — Tally subtracts debts for you.</p>'+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveAccount()">Save</button>'+
       (f.id?'<button class="btn btn-danger" onclick="deleteAccount(\''+esc(f.id)+'\')">Delete</button>':'')+'</div>'+
@@ -1051,7 +1082,9 @@
       if(!list.length) return '';
       return '<div class="kicker" style="margin:14px 0 2px">'+title+'</div>'+list.map(function(a){
         return '<div class="balrow"><span class="n">'+esc(a.name)+'</span>'+
-          '<input class="field" id="bal_'+esc(a.id)+'" inputmode="decimal" placeholder="—" value="'+esc(f.vals[a.id]||'')+'"></div>';
+          '<div class="minput" style="width:130px"><span>$</span>'+
+          '<input class="field full" id="bal_'+esc(a.id)+'" inputmode="decimal" onblur="fmtMoneyInput(this)"'+
+          ' placeholder="—" value="'+esc(fmtMoneyStr(f.vals[a.id]||''))+'"></div></div>';
       }).join('');
     }
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
@@ -1095,7 +1128,7 @@
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
       '<div class="kicker" style="margin-bottom:4px">'+esc(monthLabel(S.period))+'</div>'+
       '<div class="an" style="font-size:17px;margin-bottom:2px">'+esc(f.name)+'</div>'+
-      '<label class="lbl">Amount received</label><input id="iAmt" class="field full" inputmode="decimal" placeholder="0.00" value="'+esc(f.amount)+'">'+
+      '<label class="lbl">Amount received</label>'+moneyField('iAmt', f.amount)+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveIncomeEntry()">Save</button>'+
       (f.entryId?'<button class="btn btn-danger" onclick="clearIncomeEntry()">Clear</button>':'')+'</div></div>';
   }
@@ -1151,7 +1184,7 @@
     return '<button class="back-link" onclick="closeForm()">‹ Cancel</button><div class="card">'+
       '<div class="kicker" style="margin-bottom:10px">'+(f.id?'Edit source':'Add an income source')+'</div>'+
       '<label class="lbl">Name</label><input id="sName" class="field full" placeholder="Payroll" value="'+esc(f.name)+'">'+
-      '<label class="lbl">Usual amount</label><input id="sAmt" class="field full" inputmode="decimal" placeholder="varies" value="'+esc(f.amount)+'">'+
+      '<label class="lbl">Usual amount</label>'+moneyField('sAmt', f.amount, 'varies')+
       '<p class="asub" style="margin:6px 0 0">Leave blank for anything irregular — reimbursements, side work.</p>'+
       '<div class="btn-row"><button class="btn btn-primary" onclick="saveIncomeSource()">Save</button>'+
       (f.id?'<button class="btn btn-ghost" onclick="retireIncomeSource(\''+esc(f.id)+'\')">'+(f.active?'Retire':'Reactivate')+'</button>'+
