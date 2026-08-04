@@ -263,6 +263,22 @@
     .imp-when input[type=time]{flex:1;min-width:0}
     .imp-month{font-weight:700;font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#71776B;margin:14px 0 2px;padding-top:6px;border-top:2px solid #E2DCCF}
     .imp-raw{font-size:11.5px;color:var(--muted,#71776B);font-style:italic}
+    /* Week: seven columns, which is why it wants landscape. Each column
+       scrolls on its own so a busy Tuesday can't push the grid taller. */
+    .wgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;align-items:start}
+    .wcol{background:#fff;border:1px solid #E2DCCF;border-radius:10px;padding:5px;min-height:96px;
+          max-height:calc(100vh - 190px);overflow-y:auto}
+    .wcol.today{border-color:#3A5A40;box-shadow:0 0 0 1px #3A5A40 inset}
+    .whead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px;
+           position:sticky;top:-5px;background:#fff;padding:2px 0}
+    .whead span{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#71776B;font-weight:700}
+    .whead b{font-size:15px}
+    .wcol.today .whead b{color:#3A5A40}
+    .wev{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;margin-bottom:4px;
+         background:#FBF9F3;border:1px solid #E2DCCF;border-left:3px solid #3A5A40;border-radius:7px;padding:4px 6px}
+    .wt{display:block;font-size:10px;color:#71776B;font-family:ui-monospace,monospace}
+    .wn{display:block;font-size:11.5px;line-height:1.3;font-weight:600;word-break:break-word}
+    .wnone{text-align:center;color:#C9C2B2;font-size:13px;padding:6px 0}
   </style>
 </head>
 <body>
@@ -315,6 +331,15 @@
         <div class="viewtoggle">
           <button class="pick on" id="v-agenda">Agenda</button>
           <button class="pick" id="v-month">Month</button>
+          <button class="pick" id="v-cweek">Week</button>
+        </div>
+        <div id="week-wrap" style="display:none">
+          <div class="monthnav">
+            <button class="navbtn" id="wk-prev" aria-label="Previous week">‹</button>
+            <h3 id="wk-label"></h3>
+            <button class="navbtn" id="wk-next" aria-label="Next week">›</button>
+          </div>
+          <div class="wgrid" id="wk-grid"></div>
         </div>
         <div class="filterbar"><button class="pick" data-mine="1">Mine only</button>
           <button class="pick" id="cal-import">📷 From a photo</button></div>
@@ -694,13 +719,88 @@
   }
 
   function renderCalendar() {
-    const month = CAL_VIEW === 'month';
-    $('month-wrap').style.display = month ? 'block' : 'none';
-    $('cal-body').style.display   = month ? 'none' : 'block';
-    $('v-agenda').classList.toggle('on', !month);
-    $('v-month').classList.toggle('on', month);
-    if (month) renderMonth(); else renderAgenda();
+    const v = CAL_VIEW;
+    $('month-wrap').style.display = v === 'month' ? 'block' : 'none';
+    $('week-wrap').style.display  = v === 'week'  ? 'block' : 'none';
+    $('cal-body').style.display   = v === 'agenda' ? 'block' : 'none';
+    $('v-agenda').classList.toggle('on', v === 'agenda');
+    $('v-month').classList.toggle('on', v === 'month');
+    $('v-cweek').classList.toggle('on', v === 'week');
+    if (v === 'month') renderMonth();
+    else if (v === 'week') renderCalWeek();
+    else renderAgenda();
   }
+
+  // ── Week ──────────────────────────────────────────────────────────────────
+  //
+  // Seven columns side by side, which needs width — so this is the landscape
+  // view. A phone held sideways has room for the week and no room for the
+  // agenda's stacked rows, and a week is the span you actually plan against:
+  // the month grid tells you a day is busy, this tells you with what.
+  //
+  // WK_CURSOR, not W_CURSOR, and #v-cweek, not #v-week — the meal planner owns
+  // both of those already. Two declarations of one name do not collide loudly
+  // in this file, as the importer found out the hard way.
+  let WK_CURSOR = null;              // Sunday of the week on screen
+  let PRE_LANDSCAPE = null;          // view to restore when turned upright
+
+  function renderCalWeek() {
+    if (!WK_CURSOR) WK_CURSOR = startOfWeek(new Date());
+    const end = addDays(WK_CURSOR, 6);
+    const opt = { month: 'short', day: 'numeric' };
+    $('wk-label').textContent = WK_CURSOR.toLocaleDateString(undefined, opt) +
+      ' – ' + end.toLocaleDateString(undefined, opt);
+
+    const byDay = expandRange(WK_CURSOR, end, eventsForView());
+    let html = '';
+    for (let d = new Date(WK_CURSOR); d <= end; d = addDays(d, 1)) {
+      const k = ymd(d), occ = byDay[k] || [];
+      html += '<div class="wcol' + (k === todayYmd() ? ' today' : '') + '">' +
+        '<div class="whead"><span>' + d.toLocaleDateString(undefined, { weekday: 'short' }) +
+        '</span><b>' + d.getDate() + '</b></div>' +
+        (occ.length
+          ? occ.map(o => weekChip(o.ev)).join('')
+          : '<div class="wnone">·</div>') +
+        '</div>';
+    }
+    $('wk-grid').innerHTML = html;
+  }
+
+  // data-edit-event rather than a handler of its own: the delegated click
+  // listener already opens the right sheet for it, everywhere else in the page.
+  function weekChip(ev) {
+    return '<button class="wev" data-edit-event="' + esc(ev.id) + '" ' +
+      'style="border-left-color:' + esc(eventColor(ev)) + '">' +
+      (ev.all_day ? '' : '<span class="wt">' + esc(shortTime(ev.starts_at)) + '</span>') +
+      '<span class="wn">' + esc(ev.title) + '</span></button>';
+  }
+
+  async function gotoCalWeek(delta) {
+    if (!WK_CURSOR) WK_CURSOR = startOfWeek(new Date());
+    if (delta) WK_CURSOR = addDays(WK_CURSOR, delta * 7);
+    try { await ensureRange(ymd(addDays(WK_CURSOR, -7)), ymd(addDays(WK_CURSOR, 13))); }
+    catch (e) { fail(e, 'load that week'); }
+    renderCalendar();
+  }
+
+  // Turning the phone sideways is the gesture; there is no setting for it.
+  // Held below iPad height so a tablet in landscape keeps the agenda, which
+  // has the room for it either way.
+  function landscapePhone() {
+    return window.matchMedia('(orientation: landscape) and (max-height: 560px)').matches;
+  }
+  function syncOrientation() {
+    if (TAB !== 'calendar') return;
+    if (landscapePhone() && CAL_VIEW !== 'week') {
+      PRE_LANDSCAPE = CAL_VIEW; CAL_VIEW = 'week'; renderCalendar();
+    } else if (!landscapePhone() && CAL_VIEW === 'week' && PRE_LANDSCAPE) {
+      // Only reverts a view this put you in. Choosing Week by hand and then
+      // rotating twice should not silently take it away again.
+      CAL_VIEW = PRE_LANDSCAPE; PRE_LANDSCAPE = null; renderCalendar();
+    }
+  }
+  window.addEventListener('resize', syncOrientation);
+  window.addEventListener('orientationchange', syncOrientation);
 
   // Agenda: what's coming, densely. Days with nothing on them are skipped —
   // this view answers "what's next", not "what does the month look like".
@@ -3190,7 +3290,10 @@
     renderCalendar();
   }
 
-  $('v-agenda').addEventListener('click', () => { CAL_VIEW = 'agenda'; renderCalendar(); });
+  $('v-agenda').addEventListener('click', () => { CAL_VIEW = 'agenda'; PRE_LANDSCAPE = null; renderCalendar(); });
+  $('v-cweek').addEventListener('click', () => { CAL_VIEW = 'week'; PRE_LANDSCAPE = null; gotoCalWeek(0); });
+  $('wk-prev').addEventListener('click', () => gotoCalWeek(-1));
+  $('wk-next').addEventListener('click', () => gotoCalWeek(1));
   $('v-month').addEventListener('click', () => {
     CAL_VIEW = 'month';
     if (!M_CURSOR) {
