@@ -119,6 +119,7 @@
     .bar span { display: block; height: 100%; border-radius: 99px; }
     .allownote { font-size: 0.76rem; color: var(--muted); margin: 0.5rem 0 0; line-height: 1.4; }
     .allowsplit { font-size: 0.74rem; color: var(--muted); margin-top: 0.25rem; }
+    .allowsplit .miss { color: var(--amber); font-weight: 600; }
     .stepper { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
     .stepbtn { width: 30px; height: 30px; border-radius: 8px; border: 2px solid var(--silver); background: var(--paper); font-size: 1rem; line-height: 1; cursor: pointer; color: var(--green); padding: 0; }
     .stepbtn:disabled { opacity: .35; cursor: default; }
@@ -166,6 +167,21 @@
     .check { flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--silver); background: var(--paper); cursor: pointer; font-size: 0.9rem; line-height: 1; color: transparent; padding: 0; }
     .check.on { background: var(--green); border-color: var(--green); color: #fff; }
     .row.done .t { text-decoration: line-through; color: var(--muted); }
+
+    /* Weekly review, day by day. The day heading carries its own count, since
+       "Thursday" on its own doesn't say whether Thursday went well. */
+    .rvday { display: flex; align-items: baseline; gap: 0.5rem; margin-top: 1rem; }
+    .rvday .n { margin-left: auto; font-size: 0.74rem; text-transform: none; letter-spacing: 0; color: var(--green); }
+    .rvday .n.miss { color: var(--amber); font-weight: 700; }
+    .row.miss { border-color: var(--amber); background: #FDF8F1; }
+    /* Who got the credit, as buttons. Three states, because the row has to say
+       both whose job it was and who actually did it — filled is credited,
+       outlined in their own colour is assigned but not credited, and plain grey
+       is neither, which is what standing in for someone looks like before you
+       tap it. */
+    .rvwho { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.4rem; }
+    .rvwho button { font-family: var(--f-body); font-size: 0.72rem; font-weight: 600; line-height: 1.3; cursor: pointer; padding: 0.2rem 0.6rem; border-radius: 99px; border: 1.5px solid var(--silver); background: var(--paper); color: var(--muted); }
+    .rvwho button.on { color: #fff; }
 
     .empty { text-align: center; color: var(--muted); font-size: 0.9rem; padding: 2rem 1rem; background: var(--surface-warm); border: 1px dashed var(--silver); border-radius: 14px; }
 
@@ -637,6 +653,15 @@
     MEALS = data || [];
   }
 
+  // How far back COMPLETIONS reaches. Far enough to cover the pay week, which
+  // may start before yesterday — the allowance total needs every tick since
+  // Monday. Named because the weekly review has to know the same bound: a
+  // correction it makes inside this window can be folded into the page's copy
+  // instead of costing a full reload.
+  function completionsFrom() {
+    return minYmd(ymd(addDays(new Date(), -1)), ymd(startOfPayWeek(new Date())));
+  }
+
   async function loadAll() {
     const hid = HH.id;
     const from = ymd(addDays(new Date(), -1));
@@ -645,10 +670,8 @@
       sb.from('household_members').select('*').eq('household_id', hid)
         .eq('active', true).order('sort_order'),
       sb.from('chores').select('*').eq('household_id', hid).eq('active', true).order('sort_order'),
-      // Far enough back to cover the pay week, which may start before
-      // yesterday — the allowance total needs every tick since Monday.
       sb.from('chore_completions').select('*').eq('household_id', hid)
-        .gte('due_on', minYmd(from, ymd(startOfPayWeek(new Date())))),
+        .gte('due_on', completionsFrom()),
       sb.from('lists').select('*').eq('household_id', hid).order('sort_order'),
       sb.from('recipes').select('*').eq('household_id', hid).order('title'),
       sb.from('point_buckets').select('*').eq('household_id', hid).order('sort_order'),
@@ -2627,6 +2650,7 @@
   // week you're paying is by definition not the week the app is showing.
   let RV_WEEK = null;
   let RV_ROWS = [];
+  let RV_MISSED_ONLY = true;
 
   async function reviewSheet(delta) {
     if (!RV_WEEK) RV_WEEK = addDays(startOfPayWeek(new Date()), -7);   // last week
@@ -2639,7 +2663,161 @@
       if (error) throw error;
       RV_ROWS = data || [];
     } catch (e) { fail(e, 'load that week'); return; }
+    // When the week being reviewed is one the page itself has loaded, keep the
+    // two copies in step: a tick corrected in here is the same tick the chores
+    // tab is showing behind the sheet, and a stale total behind a corrected one
+    // is how you end up paying twice.
+    if (from >= completionsFrom()) {
+      COMPLETIONS = COMPLETIONS.filter(x => x.due_on < from || x.due_on > to).concat(RV_ROWS);
+      renderChores();
+    }
     renderReview();
+  }
+
+  // ── What wasn't ticked ───────────────────────────────────────────────────
+  // The settle-up is only as good as the ticking, and the ticking is the part
+  // that gets forgotten — so the week is also shown day by day, with the
+  // missed rows tappable. Correcting one re-totals the week in place.
+  //
+  // Days after today are not misses, they're days that haven't happened yet.
+  // Without that cut, reviewing the current week on a Wednesday would report
+  // Thursday through Sunday as failures every single time.
+  function reviewDays() {
+    const today = todayYmd();
+    const out = [];
+    for (let i = 0; i < 7; i++) {
+      const day = ymd(addDays(RV_WEEK, i));
+      if (day > today) break;
+      // choresDueOn refuses any day before a chore's start date, so work added
+      // since doesn't appear as something last week's kids failed to do.
+      const due = choresDueOn(CHORES, day);
+      if (due.length) out.push({ day: day, due: due });
+    }
+    return out;
+  }
+  function rvDone(choreId, day) {
+    return RV_ROWS.filter(x => x.chore_id === choreId && x.due_on === day);
+  }
+  function rvMissed(d) {
+    return d.due.filter(c => !rvDone(c.id, d.day).length);
+  }
+  // Missed for one kid: due to them, and nobody ticked it. Unassigned work is
+  // nobody's in particular, so it isn't counted against anyone — it shows up
+  // in the day list on its own terms.
+  function rvMissedFor(mid, days) {
+    return days.reduce((n, d) => n + rvMissed(d).filter(c =>
+      (c.assignee_ids || []).indexOf(mid) !== -1).length, 0);
+  }
+
+  function memberNames(ids) {
+    return ids.map(id => { const m = memberById(id); return m ? m.display_name : 'someone'; })
+      .join(' & ');
+  }
+
+  function rvRowHtml(c, day) {
+    const done = rvDone(c.id, day);
+    const col = choreColor(c);
+    const credited = done.map(x => x.member_id);
+    const assigned = c.assignee_ids || [];
+    const bits = [];
+    if (kindOf(c) !== 'chore') bits.push(labelOf(KINDS, kindOf(c)));
+    const slot = SLOTS.filter(s => s.key === slotOf(c))[0];
+    if (slot && slot.key) bits.push(slot.label);
+    // What the tick is worth in total — the amount the week's number moves by
+    // if you fix it. Already-ticked rows report what was actually banked,
+    // since re-pricing since then must not rewrite it.
+    const pts = done.length
+      ? done.reduce((n, x) => n + (x.points_earned || 0), 0)
+      : creditFor(c).reduce((n, mid) => n + effPoints(c, mid), 0);
+    if (pts) bits.push(pts + ' pts');
+    // Whose turn it was, when that isn't who got paid for it. Said in words as
+    // well as in the chips, because this is the line you read back to them and
+    // "why has Porter got Camille's points" is the question it answers.
+    const stoodIn = assigned.filter(id => credited.indexOf(id) === -1);
+    if (credited.length && stoodIn.length) bits.push('in place of ' + esc(memberNames(stoodIn)));
+
+    // Everyone who could hold this one: the kids, whoever it's assigned to
+    // (which can be an adult), and anyone already credited — so a name can be
+    // taken off without it vanishing from the row.
+    // Each chip toggles that person alone. Covering for a sibling is two taps,
+    // one on and one off, and neither disturbs anybody else's credit. It's also
+    // the only sane answer for an unassigned chore: on the chores tab the
+    // tapper gets it, but here the tapper is a parent, and crediting them would
+    // quietly pay the points to someone who isn't on an allowance.
+    const who = MEMBERS.filter(m => m.role === 'kid' ||
+      assigned.indexOf(m.id) !== -1 || credited.indexOf(m.id) !== -1);
+    const chips = who.map(m => {
+      const on = credited.indexOf(m.id) !== -1;
+      const mine = assigned.indexOf(m.id) !== -1;
+      const mc = esc(m.color);
+      const style = on ? 'background:' + mc + ';border-color:' + mc
+                  : mine ? 'border-color:' + mc + ';color:' + mc : '';
+      return '<button class="' + (on ? 'on' : (mine ? 'assigned' : '')) + '"' +
+        (style ? ' style="' + style + '"' : '') +
+        ' data-rv-tick="' + c.id + '" data-rv-day="' + day + '" data-rv-mid="' + m.id + '"' +
+        ' aria-label="' + (on ? 'Take the credit back from ' : 'Credit ') + esc(m.display_name) +
+        '">' + esc(m.display_name) + '</button>';
+    }).join('');
+
+    return '<div class="row' + (done.length ? ' done' : ' miss') + '">' +
+      '<button class="check' + (done.length ? ' on' : '') + '" style="' +
+      (done.length ? 'background:' + col + ';border-color:' + col : 'border-color:' + col) +
+      '" data-rv-tick="' + c.id + '" data-rv-day="' + day + '" aria-label="Toggle">✓</button>' +
+      '<span class="body"><span class="t">' + esc(c.title) + '</span>' +
+      (bits.length ? '<div class="meta">' + bits.join(' · ') + '</div>' : '') +
+      (chips ? '<div class="rvwho">' + chips + '</div>' : '') +
+      '</span></div>';
+  }
+
+  // Writes the completion the tick should have written on the day, with the
+  // same shape toggleChore uses — including completed_by, so the audit trail
+  // says a parent put it in after the fact rather than pretending the kid did.
+  // RLS allows the backfill for adults only, and this sheet is adults only.
+  //
+  // With a member id it's one person's share rather than the occurrence: the
+  // tick means "this got done", a name means "by them". Valued at that
+  // person's own rate, since a tier is worth a different number to each kid —
+  // covering someone's turn pays what it's worth to whoever actually did it.
+  async function reviewToggle(choreId, day, mid) {
+    const chore = CHORES.filter(x => x.id === choreId)[0];
+    if (!chore) return;
+    const done = rvDone(choreId, day);
+    try {
+      if (mid) {
+        if (done.some(x => x.member_id === mid)) {
+          const { error } = await sb.from('chore_completions').delete()
+            .eq('chore_id', choreId).eq('due_on', day).eq('member_id', mid);
+          if (error) throw error;
+        } else {
+          const { error } = await sb.from('chore_completions').insert({
+            household_id: HH.id, chore_id: choreId, member_id: mid,
+            completed_by: ME.id, due_on: day,
+            points_earned: effPoints(chore, mid)
+          });
+          if (error && error.code !== '23505') throw error;
+        }
+      } else if (done.length) {
+        // Untick clears the occurrence, not one person's share, exactly as it
+        // does on the chores tab — the chore either got done or it didn't.
+        const { error } = await sb.from('chore_completions').delete()
+          .eq('chore_id', choreId).eq('due_on', day);
+        if (error) throw error;
+      } else {
+        const rows = creditFor(chore).map(id => ({
+          household_id: HH.id, chore_id: choreId, member_id: id,
+          completed_by: ME.id, due_on: day,
+          points_earned: effPoints(chore, id)
+        }));
+        const { error } = await sb.from('chore_completions').insert(rows);
+        if (error && error.code !== '23505') throw error;
+      }
+    } catch (e) { fail(e, 'correct that day'); return; }
+    // Re-read rather than patch, so the totals above are the database's answer
+    // and not this page's guess at it. The sheet is long by now, so it comes
+    // back where it was rather than at the top.
+    const sheet = $('sheet'), top = sheet.scrollTop;
+    await reviewSheet(0);
+    sheet.scrollTop = top;
   }
 
   function renderReview() {
@@ -2648,6 +2826,7 @@
     const label = RV_WEEK.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
                   ' – ' + addDays(RV_WEEK, 6).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const kids = MEMBERS.filter(m => m.role === 'kid');
+    const days = reviewDays();
 
     let html = '<h2>Weekly review</h2>' +
       '<div class="monthnav"><button class="navbtn" id="rv-prev" aria-label="Earlier">‹</button>' +
@@ -2658,6 +2837,7 @@
     html += kids.map(m => {
       const rows = RV_ROWS.filter(x => x.member_id === m.id);
       const s = settle(m, rows);
+      const miss = rvMissedFor(m.id, days);
       payable += s.cents;
       return '<div class="paperson">' +
         '<div class="patotal">' +
@@ -2669,6 +2849,11 @@
         (s.extra ? ' · ' + money(s.extra) + ' from extras' : '') +
         (s.bonus ? ' · ' + money(s.bonus) + ' perfect week 🎉'
                  : ' · no bonus (needed ' + s.threshold + ')') + '</div>' +
+        // Said here as well as in the day list, because this is the block you
+        // read out to them — and a missing bonus usually has a reason.
+        (miss ? '<div class="allowsplit"><span class="miss">' + miss +
+                (miss === 1 ? ' theirs was' : ' of theirs were') +
+                ' never ticked</span> — below</div>' : '') +
         '</div>';
     }).join('') || '<div class="empty">No kids in the household yet.</div>';
 
@@ -2677,9 +2862,47 @@
         money(payable) + '</h2></div>';
     }
 
+    // Day by day: what was due, and what nobody ticked. Tapping one here
+    // writes the completion the day should have had, which is the whole point
+    // of the screen — the week is settled from these numbers.
+    const totalMissed = days.reduce((n, d) => n + rvMissed(d).length, 0);
+    html += '<label style="margin-top:1.25rem">Day by day' +
+      (totalMissed ? ' · <span style="color:var(--amber)">' + totalMissed + ' missed</span>' : '') +
+      '</label>' +
+      '<div class="pickers">' +
+      '<button class="pick' + (RV_MISSED_ONLY ? ' on' : '') + '" id="rv-miss">Missed only</button>' +
+      '<button class="pick' + (RV_MISSED_ONLY ? '' : ' on') + '" id="rv-every">Everything due</button>' +
+      '</div>' +
+      // Said once here rather than on every row, where it would be six words
+      // of instructions against three of chore.
+      '<p class="allownote" style="margin:.5rem 0 .5rem .15rem">Tick a row to credit ' +
+      'whoever it belongs to. Tap a name to credit someone else — one tap on, ' +
+      'one tap off, when somebody covers a turn.</p>';
+
+    let dayHtml = '';
+    days.forEach(d => {
+      const missed = rvMissed(d);
+      const shown = RV_MISSED_ONLY ? missed : d.due;
+      if (!shown.length) return;
+      dayHtml += '<p class="dayhead rvday">' +
+        esc(parseYmd(d.day).toLocaleDateString(undefined,
+          { weekday: 'long', month: 'short', day: 'numeric' })) +
+        '<span class="n' + (missed.length ? ' miss' : '') + '">' +
+        (missed.length ? missed.length + ' missed' : 'all ticked') + '</span></p>' +
+        shown.map(c => rvRowHtml(c, d.day)).join('');
+    });
+    // "Nothing due" and "nothing missed" are different answers and shouldn't
+    // share a sentence — the first says the week was empty, the second says it
+    // went perfectly.
+    html += dayHtml || '<div class="empty">' +
+      (from > thisWeek ? "This week hasn't happened yet."
+       : !days.length ? 'Nothing was due this week.'
+       : RV_MISSED_ONLY ? 'Every chore due this week got ticked. 🎉'
+       : 'Nothing was due this week.') + '</div>';
+
     // The audit trail. Who ticked what, and when — which is the question you
     // have when a number looks wrong, and the reason completed_by exists.
-    html += '<label style="margin-top:1rem">Every tick this week</label>';
+    html += '<label style="margin-top:1.25rem">Every tick this week</label>';
     if (!RV_ROWS.length) {
       html += '<div class="empty">Nothing was marked done this week.</div>';
     } else {
@@ -2703,6 +2926,10 @@
     openSheet(html);
     $('rv-prev').addEventListener('click', () => reviewSheet(-1));
     $('rv-next').addEventListener('click', () => reviewSheet(1));
+    // Redraw in place: the filter changes which rows are listed, not which
+    // week is loaded, so there's nothing to re-fetch.
+    $('rv-miss').addEventListener('click', () => { RV_MISSED_ONLY = true; renderReview(); });
+    $('rv-every').addEventListener('click', () => { RV_MISSED_ONLY = false; renderReview(); });
     $('f-cancel').addEventListener('click', () => { RV_WEEK = null; closeSheet(); });
   }
 
@@ -3331,6 +3558,7 @@
       const c = CHORES.filter(x => x.id === t.dataset.extraToggle)[0];
       if (c) (extraDoneCount(c) ? removeExtra(c.id) : addExtra(c.id));
     }
+    else if (t.dataset.rvTick) reviewToggle(t.dataset.rvTick, t.dataset.rvDay, t.dataset.rvMid || null);
     else if (t.dataset.editChore) { const c = CHORES.find(x => x.id === t.dataset.editChore); if (c) choreSheet(c); }
     else if (t.dataset.item) toggleItem(t.dataset.item);
     else if (t.dataset.delItem) deleteItem(t.dataset.delItem);
