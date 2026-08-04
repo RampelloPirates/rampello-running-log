@@ -247,6 +247,21 @@
     .venue.at_friends { background: #E6EEF2; color: #3E6274; }
     .rlink { color: var(--green); text-decoration: none; font-size: 0.78rem; }
     .rlink:hover { text-decoration: underline; }
+    /* Photo-import review. Dense on purpose: a month is thirty-odd rows and
+       the point is to scan them against the calendar in one pass. */
+    .imp-bulk{background:var(--paper,#F4F1E9);border:1px solid var(--line,#E2DCCF);border-radius:12px;padding:10px;margin:6px 0;font-size:13px}
+    .imp-bulk > span{color:var(--muted,#71776B);font-weight:600;display:block;margin-bottom:6px}
+    .imp-who{display:flex;flex-wrap:wrap;gap:5px}
+    .imp-who .pick{font-size:12px;padding:4px 9px}
+    .imp-row{display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-bottom:1px dashed var(--line,#E2DCCF)}
+    .imp-row.off{opacity:.42}
+    .imp-tick input{width:19px;height:19px;margin-top:7px;accent-color:var(--green,#3A5A40)}
+    .imp-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+    .imp-title{font-weight:600;width:100%}
+    .imp-when{display:flex;gap:5px}
+    .imp-when input[type=date]{flex:1.4;min-width:0}
+    .imp-when input[type=time]{flex:1;min-width:0}
+    .imp-raw{font-size:11.5px;color:var(--muted,#71776B);font-style:italic}
   </style>
 </head>
 <body>
@@ -300,7 +315,9 @@
           <button class="pick on" id="v-agenda">Agenda</button>
           <button class="pick" id="v-month">Month</button>
         </div>
-        <div class="filterbar"><button class="pick" data-mine="1">Mine only</button></div>
+        <div class="filterbar"><button class="pick" data-mine="1">Mine only</button>
+          <button class="pick" id="cal-import">📷 From a photo</button></div>
+        <input id="cal-photos" type="file" accept="image/*" multiple style="display:none">
         <div id="month-wrap" style="display:none">
           <div class="monthnav">
             <button class="navbtn" id="m-prev" aria-label="Previous month">‹</button>
@@ -1469,6 +1486,244 @@
       closeSheet(); toast(id ? 'Updated' : 'Added'); await refresh();
     } catch (e) { fail(e, 'save the event'); }
   }
+
+  // ── Importing a calendar from a photo ──────────────────────────────────────
+  //
+  // A wall calendar is a photograph of intent: everything on it is already
+  // decided, and typing it in again is pure transcription. This reads it
+  // instead — but it never writes anything without being shown first, because
+  // an OCR mistake in a calendar is an appointment you don't turn up to.
+  //
+  // The month is asked for BEFORE the photo rather than inferred from it. A
+  // paper calendar shows "14" and trusts you to know the rest; a model that
+  // guesses the year puts every entry twelve months out, and that error is
+  // invisible in the review grid because each row looks perfectly reasonable.
+  let IMP = { rows: [], month: '' };
+
+  function monthNow() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+  function fileB64(file) {
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+  }
+  // The model returns names as written on the calendar; these have to become
+  // member ids. Matched on the first name too, since a calendar says "Porter"
+  // and the roster says "Porter Smith".
+  function membersByName(names) {
+    if (!Array.isArray(names)) return [];
+    const out = [];
+    names.forEach(n => {
+      const want = String(n || '').trim().toLowerCase();
+      if (!want) return;
+      const m = MEMBERS.find(x => {
+        const full = (x.display_name || '').toLowerCase();
+        return full === want || full.split(/\s+/)[0] === want || want.split(/\s+/)[0] === full.split(/\s+/)[0];
+      });
+      if (m && out.indexOf(m.id) < 0) out.push(m.id);
+    });
+    return out;
+  }
+
+  function importSheet() {
+    IMP = { rows: [], month: IMP.month || monthNow() };
+    openSheet(
+      '<h3>Read a calendar from a photo</h3>' +
+      '<div class="field"><label for="imp-month">Which month is it?</label>' +
+      '<input id="imp-month" type="month" value="' + esc(IMP.month) + '"></div>' +
+      '<p class="hint">Asked first on purpose: a paper calendar shows the day but not the year, ' +
+      'so this is what stops every entry landing twelve months out.</p>' +
+      '<div class="btnrow"><button class="btn ghost" id="imp-cancel">Cancel</button>' +
+      '<button class="btn" id="imp-pick">Choose photos</button></div>' +
+      '<p class="hint">Up to six at once — a wall calendar rarely fits in one shot. ' +
+      'Nothing is added until you have seen what it read.</p>'
+    );
+    $('imp-cancel').addEventListener('click', closeSheet);
+    $('imp-pick').addEventListener('click', () => {
+      IMP.month = $('imp-month').value || monthNow();
+      $('cal-photos').click();
+    });
+  }
+
+  async function runCalendarImport(files) {
+    if (!files || !files.length) return;
+    if (files.length > 6) { toast('Six photos at a time'); return; }
+    openSheet('<h3>Reading the calendar…</h3><p class="hint">This takes a few seconds — ' +
+      'longer for a photo of paper than a screenshot.</p>');
+    try {
+      const images = [], types = [];
+      for (let i = 0; i < files.length; i++) {
+        images.push(await fileB64(files[i]));
+        types.push(files[i].type || 'image/jpeg');
+      }
+      const { data: { session } } = await sb.auth.getSession();
+      const r = await fetch(SUPABASE_URL + '/functions/v1/ai-parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (session ? session.access_token : ''),
+          'apikey': SUPABASE_KEY
+        },
+        body: JSON.stringify({
+          mode: 'calendar', images: images, media_types: types,
+          month_hint: IMP.month,
+          members: MEMBERS.map(m => m.display_name)
+        })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Could not read that.');
+      reviewSheet(data);
+    } catch (e) { closeSheet(); fail(e, 'read the calendar'); }
+  }
+
+  function reviewSheet(data) {
+    IMP.rows = (data.events || []).map(e => ({
+      sel: true,
+      title: e.title || e.raw || 'Untitled',
+      date: e.date || (IMP.month + '-01'),
+      start: e.start || '',
+      end: e.end || '',
+      who: membersByName(e.who),
+      location: e.location || '',
+      raw: e.raw || '',
+      unsure: !!e.unsure
+    })).sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
+    IMP.missing = data.missing || '';
+    IMP.note = data.note || '';
+    drawReview();
+  }
+
+  function drawReview() {
+    const n = IMP.rows.filter(r => r.sel).length;
+    const unsure = IMP.rows.filter(r => r.unsure).length;
+    let h = '<h3>' + IMP.rows.length + ' entr' + (IMP.rows.length === 1 ? 'y' : 'ies') + ' read</h3>';
+
+    // Anything the photo could not show is stated before the list, not after
+    // it — it is the one thing the list itself cannot tell you.
+    if (IMP.missing) h += '<p class="hint" style="color:var(--danger)">⚠ ' + esc(IMP.missing) + '</p>';
+    if (IMP.note) h += '<p class="hint">' + esc(IMP.note) + '</p>';
+    if (unsure) h += '<p class="hint">' + unsure + ' marked ⚠ — the reading was uncertain. ' +
+      'Check those against the calendar before adding.</p>';
+
+    h += '<div class="imp-bulk"><span>Apply to the ' + n + ' ticked:</span>' +
+      '<div class="imp-who">' + MEMBERS.map(m =>
+        '<button class="pick imp-mw" data-mid="' + esc(m.id) + '">' + esc(m.display_name) + '</button>'
+      ).join('') + '<button class="pick imp-mw" data-mid="">Everyone</button></div>' +
+      '<div style="display:flex;gap:6px;margin-top:6px">' +
+      '<input id="imp-loc" placeholder="Where (optional)" style="flex:1">' +
+      '<button class="btn ghost" id="imp-loc-go">Set</button></div></div>';
+
+    h += '<div class="btnrow" style="margin:8px 0">' +
+      '<button class="btn ghost" id="imp-all">Tick all</button>' +
+      '<button class="btn ghost" id="imp-none">Untick all</button></div>';
+
+    h += IMP.rows.map((r, i) =>
+      '<div class="imp-row' + (r.sel ? '' : ' off') + '">' +
+      '<label class="imp-tick"><input type="checkbox" data-sel="' + i + '"' + (r.sel ? ' checked' : '') + '></label>' +
+      '<div class="imp-body">' +
+      '<input data-f="title" data-i="' + i + '" value="' + esc(r.title) + '" class="imp-title">' +
+      '<div class="imp-when">' +
+      '<input type="date" data-f="date" data-i="' + i + '" value="' + esc(r.date) + '">' +
+      '<input type="time" data-f="start" data-i="' + i + '" value="' + esc(r.start) + '">' +
+      '<input type="time" data-f="end" data-i="' + i + '" value="' + esc(r.end) + '">' +
+      '</div>' +
+      // Shown per row as well as set in bulk: a "where" you cannot see is a
+      // "where" you cannot check applied, or correct on the one row it's wrong on.
+      '<input data-f="location" data-i="' + i + '" value="' + esc(r.location) + '" placeholder="Where (optional)">' +
+      '<div class="imp-who">' + MEMBERS.map(m =>
+        '<button class="pick imp-rw' + (r.who.indexOf(m.id) >= 0 ? ' on' : '') +
+        '" data-i="' + i + '" data-mid="' + esc(m.id) + '">' + esc(m.display_name) + '</button>'
+      ).join('') + '</div>' +
+      (r.raw ? '<div class="imp-raw">' + (r.unsure ? '⚠ ' : '') + 'on the calendar: ' + esc(r.raw) + '</div>' : '') +
+      '</div></div>'
+    ).join('');
+
+    h += '<div class="btnrow"><button class="btn ghost" id="imp-back">Cancel</button>' +
+      '<button class="btn" id="imp-save"' + (n ? '' : ' disabled') + '>Add ' + n + ' event' + (n === 1 ? '' : 's') + '</button></div>';
+    openSheet(h);
+    wireReview();
+  }
+
+  function wireReview() {
+    document.querySelectorAll('[data-sel]').forEach(c => c.addEventListener('change', () => {
+      IMP.rows[+c.dataset.sel].sel = c.checked; drawReview();
+    }));
+    // Field edits write straight through without redrawing — a redraw on every
+    // keystroke would take the focus out of the box you are typing in.
+    document.querySelectorAll('.imp-body [data-f]').forEach(inp => inp.addEventListener('input', () => {
+      IMP.rows[+inp.dataset.i][inp.dataset.f] = inp.value;
+    }));
+    document.querySelectorAll('.imp-rw').forEach(b => b.addEventListener('click', () => {
+      const r = IMP.rows[+b.dataset.i], id = b.dataset.mid, at = r.who.indexOf(id);
+      if (at >= 0) r.who.splice(at, 1); else r.who.push(id);
+      b.classList.toggle('on', at < 0);
+    }));
+    document.querySelectorAll('.imp-mw').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.mid;
+      // "Everyone" is the empty selection, the same convention the event sheet
+      // uses — see the note above wireWho.
+      IMP.rows.forEach(r => { if (r.sel) r.who = id ? [id] : []; });
+      drawReview();
+    }));
+    $('imp-loc-go').addEventListener('click', () => {
+      const v = $('imp-loc').value.trim();
+      IMP.rows.forEach(r => { if (r.sel) r.location = v; });
+      drawReview();   // redraw so you can see it landed, and fix any row it's wrong on
+    });
+    $('imp-all').addEventListener('click', () => { IMP.rows.forEach(r => r.sel = true); drawReview(); });
+    $('imp-none').addEventListener('click', () => { IMP.rows.forEach(r => r.sel = false); drawReview(); });
+    $('imp-back').addEventListener('click', closeSheet);
+    $('imp-save').addEventListener('click', saveImported);
+  }
+
+  async function saveImported() {
+    const picked = IMP.rows.filter(r => r.sel && r.title.trim() && r.date);
+    if (!picked.length) { toast('Nothing ticked'); return; }
+    $('imp-save').disabled = true;
+    const rows = picked.map(r => {
+      const allDay = !r.start;
+      return {
+        household_id: HH.id,
+        title: r.title.trim(),
+        location: r.location.trim() || null,
+        // The raw reading is kept as the note so a row that looks odd on the
+        // wall can always be checked against what was actually written.
+        notes: r.raw ? 'From a photo: ' + r.raw : null,
+        all_day: allDay,
+        starts_at: allDay ? null : localIso(r.date, r.start),
+        // A single time with no end means one moment, not an invented hour.
+        ends_at: allDay ? null : localIso(r.date, r.end || r.start),
+        start_date: allDay ? r.date : null,
+        end_date: allDay ? r.date : null,
+        time_zone: HH.time_zone,
+        kind: 'in_town',
+        rrule: null,
+        attendee_ids: r.who,
+        // Nobody typed these. created_by stays null for the same reason the
+        // wall's own inserts do: naming a person who didn't enter it would be
+        // a worse record than naming nobody.
+        created_by: null
+      };
+    });
+    try {
+      const { error } = await sb.from('events').insert(rows);
+      if (error) throw error;
+      closeSheet();
+      toast('Added ' + rows.length + ' event' + (rows.length === 1 ? '' : 's'));
+      await refresh();
+    } catch (e) { $('imp-save').disabled = false; fail(e, 'add the events'); }
+  }
+
+  $('cal-import').addEventListener('click', importSheet);
+  $('cal-photos').addEventListener('change', function () {
+    const f = this.files; this.value = '';
+    runCalendarImport(f);
+  });
 
   // Deleting one occurrence of a series appends to exdates rather than
   // removing the series — see the exdates note in 34_household.sql.

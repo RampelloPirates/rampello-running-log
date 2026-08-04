@@ -13,6 +13,8 @@
 //   mode: "scrape"  → a recipe page URL  → { name, servings, instructions,
 //                                            ingredients:[...], note }
 //   mode: "barcode" → barcode string     → food per-100g shape via Open Food Facts
+//   mode: "calendar"→ base64 calendar    → { events:[...], missing, note }
+//                     photos (up to 6)     for family.html's photo import
 //
 // Deploy:  supabase functions deploy ai-parse
 // Secret:  supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
@@ -84,6 +86,37 @@ Return ONLY valid JSON, no markdown:
 - grams = estimated weight of that quantity of that ingredient.
 - calories/protein/fat/carbs/fiber = totals for the stated quantity. Macros in grams. Integers are fine.
 Use realistic USDA-style values. If an amount is unreadable, assume a sensible default and mention it in note.`;
+
+// A photographed wall calendar is a harder read than a screenshot, and both
+// arrive through here. The prompt spends its words on the four things that
+// actually go wrong:
+//
+//   1. The year. A paper calendar shows "14" and trusts you to know the rest,
+//      so the month is passed in rather than guessed at. Without it the model
+//      invents a year and every event lands in the wrong one.
+//   2. Who. On a family calendar that is carried by highlighter colour or an
+//      initial, never by a field. The household's names are passed in so it
+//      can map what it sees onto real people instead of returning "the pink
+//      one".
+//   3. What was actually written. Tidied titles are easier to read on a wall
+//      but impossible to check, so the raw text is kept alongside.
+//   4. What it could not read. A cut-off edge or an ambiguous scrawl is a fact
+//      about the photo, and silently dropping it is how a missing dentist
+//      appointment happens.
+const CALENDAR_PROMPT =
+  `These images show a calendar — a photographed paper one, a screenshot, or a printout. Read every entry you can see.
+Return ONLY valid JSON, no markdown, exactly:
+{"events":[{"title":"...","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","who":["..."],"location":null,"raw":"...","unsure":false}],"missing":"...","note":"..."}
+- date: full ISO date. The calendar may only show a day number — use the month given below to complete it. If an entry clearly belongs to a neighbouring month (a greyed-out leading or trailing day), date it to that month.
+- start/end: 24-hour "HH:MM", or null. A single time with no end gets a start and a null end — do not invent a duration. An entry with no time at all gets null for both, meaning all-day.
+- who: names from the household list below. Colour is usually the key on a family calendar — a highlighter, a pen colour, a coloured dot — as are initials and names written in the entry. Return [] when an entry is unmarked or clearly applies to everyone; never guess a person from the nature of the event.
+- title: what the entry means, tidied — expand obvious abbreviations, fix capitalisation, drop the time from the title when you have put it in start.
+- raw: the text exactly as written, before tidying. This is what gets checked against the calendar, so copy it literally including odd spacing or spelling.
+- unsure: true when you are not confident of the reading — a name you are guessing at, letters that could be something else, a smudged number. Better to return it flagged than to drop it.
+- location: only when the entry actually names a place. Do not infer one.
+- missing: one sentence naming anything you can see is there but cannot read — a column cut off by the edge of the photo, a covered corner, an entry too blurred to make out. Empty string if nothing is missing.
+- note: one sentence on anything else worth saying, or empty string.
+Return {"events":[]} if there is no calendar in the images at all.`;
 
 const BARCODE_PHOTO_PROMPT =
   `This image contains a product barcode (UPC or EAN). Return ONLY the barcode number — the digits printed beneath the bars — as a plain string of digits, no spaces and no other text. If you cannot read the digits clearly, return an empty string.`;
@@ -528,6 +561,42 @@ Deno.serve(async (req) => {
           { type: "text", text: LABEL_PROMPT },
         ]),
       );
+      return json(out);
+    }
+
+    if (mode === "calendar") {
+      // Several photos in one go, because a month rarely fits in one shot and
+      // stitching two half-months together afterwards is worse than letting
+      // the model see both at once.
+      const images = Array.isArray(body.images) ? body.images as string[] : [];
+      const types = Array.isArray(body.media_types) ? body.media_types as string[] : [];
+      if (!images.length) return json({ error: "Missing image" }, 400);
+      if (images.length > 6) return json({ error: "Six photos at a time is the limit." }, 400);
+
+      const month = String(body.month_hint || "").trim();
+      const names = Array.isArray(body.members)
+        ? (body.members as unknown[]).filter((n) => typeof n === "string").join(", ")
+        : "";
+
+      const context = [
+        month ? `The calendar covers ${month}. Complete bare day numbers into that month and year.` : "",
+        names ? `Household members, for the "who" field: ${names}. Use these names exactly.` : "",
+      ].filter(Boolean).join("\n");
+
+      const content: unknown[] = images.map((data, i) => ({
+        type: "image",
+        source: { type: "base64", media_type: types[i] || "image/jpeg", data },
+      }));
+      content.push({ type: "text", text: CALENDAR_PROMPT + (context ? "\n\n" + context : "") });
+
+      // A full month can be thirty-odd entries, each carrying its raw text too.
+      const out = parseJSON(await callClaude(content, 8000)) as Json;
+      if (!Array.isArray(out.events) || !out.events.length) {
+        return json({
+          error: "I couldn't find any calendar entries in that. Try a straighter, " +
+            "closer shot — or one month at a time if the whole year is in frame.",
+        }, 400);
+      }
       return json(out);
     }
 
