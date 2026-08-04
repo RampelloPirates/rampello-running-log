@@ -1582,6 +1582,12 @@
         })
       });
       const data = await r.json();
+      // "Unknown mode: calendar" means the function is deployed but predates
+      // this feature — pushing the page ships the client, not the function.
+      // Say that, rather than passing the raw string through to a toast.
+      if (r.status === 400 && /unknown mode/i.test(data.error || '')) {
+        throw new Error('The reader hasn\'t been deployed yet — run: supabase functions deploy ai-parse');
+      }
       if (!r.ok) throw new Error(data.error || 'Could not read that.');
       reviewSheet(data);
     } catch (e) { closeSheet(); fail(e, 'read the calendar'); }
