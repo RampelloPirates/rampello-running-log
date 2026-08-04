@@ -1512,7 +1512,7 @@
   // than one. The year is the part that usually isn't printed, so today's
   // date goes along to resolve it, and the review leads with the months it
   // decided on: a wrong year is invisible row by row but obvious as a list.
-  const IMPORT_BUILD = '8';
+  const IMPORT_BUILD = '9';
 
   // Nothing here is a fix. It is visibility.
   //
@@ -1673,11 +1673,20 @@
       }
       if (!r.ok) throw new Error(data.error || 'Could not read that.');
       stage('building the review');
-      reviewSheet(data);
+      importReview(data);
     } catch (e) { closeSheet(); showFault('import: ' + IMP_STAGE, e); }
   }
 
-  function reviewSheet(data) {
+  // importReview, not reviewSheet: this page already has a reviewSheet(delta)
+  // for the chore pay week, further down the file. Two function declarations
+  // of one name do not collide loudly — the later simply wins — so calling
+  // reviewSheet(data) from here reached the chores one with a parsed calendar
+  // where it expected a week offset, and every symptom in this feature came
+  // from that: delta * 7 is NaN, addDays returns an Invalid Date, and ymd
+  // either threw or (before it was guarded) produced "NaN-NaN-NaN" for a
+  // chore_completions query — which is the date error that looked for four
+  // builds like a fault in the importer.
+  function importReview(data) {
     IMP.rows = (data.events || []).map(e => ({
       sel: true,
       title: e.title || e.raw || 'Untitled',
