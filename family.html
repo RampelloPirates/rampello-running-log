@@ -1512,7 +1512,43 @@
   // than one. The year is the part that usually isn't printed, so today's
   // date goes along to resolve it, and the review leads with the months it
   // decided on: a wrong year is invisible row by row but obvious as a list.
-  const IMPORT_BUILD = '7';   // bump when changing anything in this block
+  const IMPORT_BUILD = '8';
+
+  // Nothing here is a fix. It is visibility.
+  //
+  // Seven builds were spent inferring failures from a one-line message on a
+  // phone with no console, and each fix was a guess that could not be checked.
+  // A throw that escapes a handler looks exactly like a stall, and on iOS
+  // there is nothing to inspect afterwards — so the app has to say it itself.
+  //
+  // Deliberately a panel and not a toast: a toast fades before it can be read,
+  // let alone photographed, and the stack is the whole value.
+  function showFault(where, err) {
+    const box = document.createElement('div');
+    box.setAttribute('style',
+      'position:fixed;inset:8px 8px auto 8px;z-index:9999;background:#2A1512;color:#FFE9E4;' +
+      'border:1px solid #A8443A;border-radius:12px;padding:12px;font:12px/1.45 ui-monospace,monospace;' +
+      'max-height:70vh;overflow:auto;white-space:pre-wrap;word-break:break-word');
+    const e = err || {};
+    box.textContent = 'FAULT @ ' + where + '  (import build ' + IMPORT_BUILD + ')\n\n' +
+      (e.message || String(err)) + '\n\n' + (e.stack || '(no stack)');
+    const x = document.createElement('button');
+    x.textContent = 'Dismiss';
+    x.setAttribute('style', 'margin-top:10px;padding:7px 12px;border-radius:8px;border:1px solid #A8443A;' +
+      'background:transparent;color:#FFE9E4;font:inherit');
+    x.addEventListener('click', () => box.remove());
+    box.appendChild(document.createElement('br'));
+    box.appendChild(x);
+    document.body.appendChild(box);
+  }
+  // Both kinds, because the two failures seen so far arrived as different
+  // events: a raised RangeError and a rejected promise nobody awaited.
+  window.addEventListener('error', ev => showFault('window.error', ev.error || ev));
+  window.addEventListener('unhandledrejection', ev => showFault('unhandled promise', ev.reason));
+
+  // Where the import got to, so a stall can be placed even if nothing throws.
+  let IMP_STAGE = 'idle';
+  function stage(s) { IMP_STAGE = s; const el = document.getElementById('imp-stage'); if (el) el.textContent = s; }   // bump when changing anything in this block
   let IMP = { rows: [], months: [] };
 
   function todayIso() {
@@ -1599,14 +1635,18 @@
     // that hasn't loaded is indistinguishable from a fix that didn't work.
     openSheet('<h3>Reading the calendar…</h3><p class="hint">This takes a few seconds — ' +
       'longer for a photo of paper than a screenshot.</p>' +
-      '<p class="hint" style="opacity:.6">reader build ' + IMPORT_BUILD + '</p>');
+      '<p class="hint" style="opacity:.6">reader build ' + IMPORT_BUILD +
+      ' · <span id="imp-stage">starting</span></p>');
+    stage('encoding photos');
     try {
       const images = [], types = [];
       for (let i = 0; i < files.length; i++) {
         images.push(await fileB64(files[i]));
         types.push(files[i].type || 'image/jpeg');
       }
+      stage('signing in');
       const { data: { session } } = await sb.auth.getSession();
+      stage('sending ' + images.length + ' photo' + (images.length === 1 ? '' : 's') + ' — this can take a minute');
       const r = await fetch(SUPABASE_URL + '/functions/v1/ai-parse', {
         method: 'POST',
         headers: {
@@ -1623,6 +1663,7 @@
           members: MEMBERS.map(m => m.display_name)
         })
       });
+      stage('reading the reply');
       const data = await r.json();
       // "Unknown mode: calendar" means the function is deployed but predates
       // this feature — pushing the page ships the client, not the function.
@@ -1631,8 +1672,9 @@
         throw new Error('The reader hasn\'t been deployed yet — run: supabase functions deploy ai-parse');
       }
       if (!r.ok) throw new Error(data.error || 'Could not read that.');
+      stage('building the review');
       reviewSheet(data);
-    } catch (e) { closeSheet(); fail(e, 'read the calendar'); }
+    } catch (e) { closeSheet(); showFault('import: ' + IMP_STAGE, e); }
   }
 
   function reviewSheet(data) {
@@ -1814,7 +1856,7 @@
     });
     } catch (e) {
       $('imp-save').disabled = false;
-      fail(e, 'work out the dates');
+      showFault('building rows', e);
       return;
     }
     // Check what is actually about to be sent, not what should be. Twice now a
@@ -1844,7 +1886,7 @@
       if (error) throw new Error(error.message + (error.details ? ' — ' + error.details : ''));
       closeSheet();
       toast('Added ' + rows.length + ' event' + (rows.length === 1 ? '' : 's'));
-    } catch (e) { $('imp-save').disabled = false; fail(e, 'add the events'); return; }
+    } catch (e) { $('imp-save').disabled = false; showFault('insert', e); return; }
     // Reloading is a separate failure from saving, and conflating them reports
     // a save that worked as a save that didn't. Only the insert is above.
     try { await refresh(); }
