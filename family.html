@@ -261,6 +261,7 @@
     .imp-when{display:flex;gap:5px}
     .imp-when input[type=date]{flex:1.4;min-width:0}
     .imp-when input[type=time]{flex:1;min-width:0}
+    .imp-month{font-weight:700;font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#71776B;margin:14px 0 2px;padding-top:6px;border-top:2px solid #E2DCCF}
     .imp-raw{font-size:11.5px;color:var(--muted,#71776B);font-style:italic}
   </style>
 </head>
@@ -1494,15 +1495,35 @@
   // instead — but it never writes anything without being shown first, because
   // an OCR mistake in a calendar is an appointment you don't turn up to.
   //
-  // The month is asked for BEFORE the photo rather than inferred from it. A
-  // paper calendar shows "14" and trusts you to know the rest; a model that
-  // guesses the year puts every entry twelve months out, and that error is
-  // invisible in the review grid because each row looks perfectly reasonable.
-  let IMP = { rows: [], month: '' };
+  // The month is READ, not asked for. Almost every calendar prints its own —
+  // a grid is headed, a school-year handout is captioned per block — and a
+  // single month chosen up front is simply wrong for anything spanning more
+  // than one. The year is the part that usually isn't printed, so today's
+  // date goes along to resolve it, and the review leads with the months it
+  // decided on: a wrong year is invisible row by row but obvious as a list.
+  let IMP = { rows: [], months: [] };
 
-  function monthNow() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  function todayIso() {
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function monthLabel(ym) {
+    const a = String(ym).split('-').map(Number);
+    if (a.length < 2 || !a[0]) return String(ym);
+    return new Date(a[0], a[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+  // Whole-calendar date arithmetic, for the one failure that hits every row at
+  // once: an unprinted year guessed wrong. Fixing that per row is forty edits;
+  // as a shift it is one.
+  function shiftIso(iso, years, months) {
+    const a = String(iso).split('-').map(Number);
+    if (a.length < 3 || !a[0]) return iso;
+    const d = new Date(a[0] + years, a[1] - 1 + months, 1);
+    // Clamp rather than roll over: shifting 31 Jan by a month should land on
+    // the 28th, not silently become the 2nd or 3rd of March.
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    const p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(Math.min(a[2], last));
   }
   function fileB64(file) {
     return new Promise((res, rej) => {
@@ -1530,26 +1551,6 @@
     return out;
   }
 
-  function importSheet() {
-    IMP = { rows: [], month: IMP.month || monthNow() };
-    openSheet(
-      '<h3>Read a calendar from a photo</h3>' +
-      '<div class="field"><label for="imp-month">Which month is it?</label>' +
-      '<input id="imp-month" type="month" value="' + esc(IMP.month) + '"></div>' +
-      '<p class="hint">Asked first on purpose: a paper calendar shows the day but not the year, ' +
-      'so this is what stops every entry landing twelve months out.</p>' +
-      '<div class="btnrow"><button class="btn ghost" id="imp-cancel">Cancel</button>' +
-      '<button class="btn" id="imp-pick">Choose photos</button></div>' +
-      '<p class="hint">Up to six at once — a wall calendar rarely fits in one shot. ' +
-      'Nothing is added until you have seen what it read.</p>'
-    );
-    $('imp-cancel').addEventListener('click', closeSheet);
-    $('imp-pick').addEventListener('click', () => {
-      IMP.month = $('imp-month').value || monthNow();
-      $('cal-photos').click();
-    });
-  }
-
   async function runCalendarImport(files) {
     if (!files || !files.length) return;
     if (files.length > 6) { toast('Six photos at a time'); return; }
@@ -1571,7 +1572,10 @@
         },
         body: JSON.stringify({
           mode: 'calendar', images: images, media_types: types,
-          month_hint: IMP.month,
+          // The year is what a calendar usually doesn't print; today resolves
+          // it. Sent from here rather than read on the server, whose clock is
+          // UTC — on the evening of the 31st that is already tomorrow.
+          today: todayIso(),
           members: MEMBERS.map(m => m.display_name)
         })
       });
@@ -1585,7 +1589,7 @@
     IMP.rows = (data.events || []).map(e => ({
       sel: true,
       title: e.title || e.raw || 'Untitled',
-      date: e.date || (IMP.month + '-01'),
+      date: e.date || todayIso(),
       start: e.start || '',
       end: e.end || '',
       who: membersByName(e.who),
@@ -1593,6 +1597,7 @@
       raw: e.raw || '',
       unsure: !!e.unsure
     })).sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
+    IMP.months = data.months || [];
     IMP.missing = data.missing || '';
     IMP.note = data.note || '';
     drawReview();
@@ -1610,6 +1615,27 @@
     if (unsure) h += '<p class="hint">' + unsure + ' marked ⚠ — the reading was uncertain. ' +
       'Check those against the calendar before adding.</p>';
 
+    // The months it settled on, up front. A wrong year is invisible row by row
+    // — every date looks plausible on its own — and obvious the moment they
+    // are listed together. Derived from the rows, not from what the model
+    // said, so it stays true after a shift or a hand edit.
+    const spans = [];
+    IMP.rows.forEach(r => { const ym = String(r.date).slice(0, 7); if (spans.indexOf(ym) < 0) spans.push(ym); });
+    spans.sort();
+    h += '<div class="imp-bulk"><span>Dates read as</span>' +
+      '<div style="font-weight:600;margin-bottom:6px">' +
+      esc(spans.length > 2
+        ? monthLabel(spans[0]) + ' – ' + monthLabel(spans[spans.length - 1]) + '  (' + spans.length + ' months)'
+        : spans.map(monthLabel).join(' · ')) + '</div>' +
+      '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
+      '<button class="pick imp-shift" data-y="-1" data-m="0">− year</button>' +
+      '<button class="pick imp-shift" data-y="1" data-m="0">+ year</button>' +
+      '<button class="pick imp-shift" data-y="0" data-m="-1">− month</button>' +
+      '<button class="pick imp-shift" data-y="0" data-m="1">+ month</button></div>' +
+      '<p class="hint" style="margin:6px 0 0">Shifts every entry, ticked or not. ' +
+      'The year is the one thing a calendar rarely prints — if it guessed wrong, ' +
+      'it guessed wrong for all of them.</p></div>';
+
     h += '<div class="imp-bulk"><span>Apply to the ' + n + ' ticked:</span>' +
       '<div class="imp-who">' + MEMBERS.map(m =>
         '<button class="pick imp-mw" data-mid="' + esc(m.id) + '">' + esc(m.display_name) + '</button>'
@@ -1622,7 +1648,14 @@
       '<button class="btn ghost" id="imp-all">Tick all</button>' +
       '<button class="btn ghost" id="imp-none">Untick all</button></div>';
 
-    h += IMP.rows.map((r, i) =>
+    // Grouped by month, because a school-year sheet is ten of them and a flat
+    // list of sixty rows can't be checked against anything.
+    let seen = '';
+    h += IMP.rows.map((r, i) => {
+      const ym = String(r.date).slice(0, 7);
+      const head = (spans.length > 1 && ym !== seen) ? (seen = ym,
+        '<div class="imp-month">' + esc(monthLabel(ym)) + '</div>') : '';
+      return head +
       '<div class="imp-row' + (r.sel ? '' : ' off') + '">' +
       '<label class="imp-tick"><input type="checkbox" data-sel="' + i + '"' + (r.sel ? ' checked' : '') + '></label>' +
       '<div class="imp-body">' +
@@ -1640,8 +1673,8 @@
         '" data-i="' + i + '" data-mid="' + esc(m.id) + '">' + esc(m.display_name) + '</button>'
       ).join('') + '</div>' +
       (r.raw ? '<div class="imp-raw">' + (r.unsure ? '⚠ ' : '') + 'on the calendar: ' + esc(r.raw) + '</div>' : '') +
-      '</div></div>'
-    ).join('');
+      '</div></div>';
+    }).join('');
 
     h += '<div class="btnrow"><button class="btn ghost" id="imp-back">Cancel</button>' +
       '<button class="btn" id="imp-save"' + (n ? '' : ' disabled') + '>Add ' + n + ' event' + (n === 1 ? '' : 's') + '</button></div>';
@@ -1675,6 +1708,12 @@
       IMP.rows.forEach(r => { if (r.sel) r.location = v; });
       drawReview();   // redraw so you can see it landed, and fix any row it's wrong on
     });
+    document.querySelectorAll('.imp-shift').forEach(b => b.addEventListener('click', () => {
+      const y = +b.dataset.y, m = +b.dataset.m;
+      IMP.rows.forEach(r => { r.date = shiftIso(r.date, y, m); });
+      IMP.rows.sort((a, c) => (a.date + (a.start || '')).localeCompare(c.date + (c.start || '')));
+      drawReview();
+    }));
     $('imp-all').addEventListener('click', () => { IMP.rows.forEach(r => r.sel = true); drawReview(); });
     $('imp-none').addEventListener('click', () => { IMP.rows.forEach(r => r.sel = false); drawReview(); });
     $('imp-back').addEventListener('click', closeSheet);
@@ -1719,7 +1758,7 @@
     } catch (e) { $('imp-save').disabled = false; fail(e, 'add the events'); }
   }
 
-  $('cal-import').addEventListener('click', importSheet);
+  $('cal-import').addEventListener('click', () => { IMP = { rows: [], months: [] }; $('cal-photos').click(); });
   $('cal-photos').addEventListener('change', function () {
     const f = this.files; this.value = '';
     runCalendarImport(f);

@@ -91,9 +91,11 @@ Use realistic USDA-style values. If an amount is unreadable, assume a sensible d
 // arrive through here. The prompt spends its words on the four things that
 // actually go wrong:
 //
-//   1. The year. A paper calendar shows "14" and trusts you to know the rest,
-//      so the month is passed in rather than guessed at. Without it the model
-//      invents a year and every event lands in the wrong one.
+//   1. The date. Almost every calendar prints its own month — a month grid is
+//      headed, a school-year handout is captioned per block — so the month is
+//      READ, not supplied. The year is the part that usually isn't printed,
+//      and a calendar that runs August to May crosses one, so that gets its
+//      own rule rather than a single hint value.
 //   2. Who. On a family calendar that is carried by highlighter colour or an
 //      initial, never by a field. The household's names are passed in so it
 //      can map what it sees onto real people instead of returning "the pink
@@ -104,10 +106,12 @@ Use realistic USDA-style values. If an amount is unreadable, assume a sensible d
 //      about the photo, and silently dropping it is how a missing dentist
 //      appointment happens.
 const CALENDAR_PROMPT =
-  `These images show a calendar — a photographed paper one, a screenshot, or a printout. Read every entry you can see.
+  `These images show a calendar — a photographed paper one, a screenshot, or a printout. It may be a single month, several months, or a whole season or school year on one sheet. Read every entry you can see, across every month shown.
 Return ONLY valid JSON, no markdown, exactly:
-{"events":[{"title":"...","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","who":["..."],"location":null,"raw":"...","unsure":false}],"missing":"...","note":"..."}
-- date: full ISO date. The calendar may only show a day number — use the month given below to complete it. If an entry clearly belongs to a neighbouring month (a greyed-out leading or trailing day), date it to that month.
+{"events":[{"title":"...","date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","who":["..."],"location":null,"raw":"...","unsure":false}],"months":["YYYY-MM"],"missing":"...","note":"..."}
+- date: full ISO date. Work out the month from the calendar itself — the heading over a grid, a caption on a block of dates, a printed month name or number, a date written out in an entry. Do not assume every entry shares one month; a sheet covering a season has several, and each entry belongs to the one it is printed under. If an entry sits on a greyed-out leading or trailing day, date it to the month that day actually falls in.
+- The year is usually not printed. Work it out from today's date, given below, choosing the year that puts the calendar in the near future or the current period rather than the past — a calendar handed out now is for what is coming. Where the months run past December (a school year, a season starting in autumn), roll the year forward at January so the later months land in the following year rather than the same one. If the calendar prints a year, that always wins.
+- months: every distinct "YYYY-MM" you assigned an entry to, so the dates can be sanity-checked in one glance.
 - start/end: 24-hour "HH:MM", or null. A single time with no end gets a start and a null end — do not invent a duration. An entry with no time at all gets null for both, meaning all-day.
 - who: names from the household list below. Colour is usually the key on a family calendar — a highlighter, a pen colour, a coloured dot — as are initials and names written in the entry. Return [] when an entry is unmarked or clearly applies to everyone; never guess a person from the nature of the event.
 - title: what the entry means, tidied — expand obvious abbreviations, fix capitalisation, drop the time from the title when you have put it in start.
@@ -573,13 +577,22 @@ Deno.serve(async (req) => {
       if (!images.length) return json({ error: "Missing image" }, 400);
       if (images.length > 6) return json({ error: "Six photos at a time is the limit." }, 400);
 
+      // Today comes from the client rather than Deno's clock: the container
+      // runs UTC, and on the evening of the 31st that is already tomorrow.
+      const today = String(body.today || "").trim();
+      // Only sent when the calendar genuinely prints no month — bare day
+      // numbers on a fridge sheet. It is a fallback, never an override.
       const month = String(body.month_hint || "").trim();
       const names = Array.isArray(body.members)
         ? (body.members as unknown[]).filter((n) => typeof n === "string").join(", ")
         : "";
 
       const context = [
-        month ? `The calendar covers ${month}. Complete bare day numbers into that month and year.` : "",
+        today ? `Today is ${today}. Use it to work out the year.` : "",
+        month
+          ? `If — and only if — the calendar prints no month anywhere, assume ${month}. ` +
+            `A month shown on the calendar always wins over this.`
+          : "",
         names ? `Household members, for the "who" field: ${names}. Use these names exactly.` : "",
       ].filter(Boolean).join("\n");
 
@@ -589,8 +602,9 @@ Deno.serve(async (req) => {
       }));
       content.push({ type: "text", text: CALENDAR_PROMPT + (context ? "\n\n" + context : "") });
 
-      // A full month can be thirty-odd entries, each carrying its raw text too.
-      const out = parseJSON(await callClaude(content, 8000)) as Json;
+      // A month is thirty-odd entries; a school year on one sheet is several
+      // times that, and each carries its raw text as well as its tidied title.
+      const out = parseJSON(await callClaude(content, 16000)) as Json;
       if (!Array.isArray(out.events) || !out.events.length) {
         return json({
           error: "I couldn't find any calendar entries in that. Try a straighter, " +
