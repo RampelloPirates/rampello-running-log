@@ -1501,6 +1501,7 @@
   // than one. The year is the part that usually isn't printed, so today's
   // date goes along to resolve it, and the review leads with the months it
   // decided on: a wrong year is invisible row by row but obvious as a list.
+  const IMPORT_BUILD = '3';   // bump when changing anything in this block
   let IMP = { rows: [], months: [] };
 
   function todayIso() {
@@ -1582,8 +1583,12 @@
     // exactly like nothing happening, which is the hardest kind to report.
     if (!files || !files.length) { toast('No photos came through — try again'); return; }
     if (files.length > 6) { toast('Six photos at a time'); return; }
+    // A build stamp, because "is this the new code?" was otherwise unanswerable
+    // from the phone — an installed web app caches its HTML hard, and a fix
+    // that hasn't loaded is indistinguishable from a fix that didn't work.
     openSheet('<h3>Reading the calendar…</h3><p class="hint">This takes a few seconds — ' +
-      'longer for a photo of paper than a screenshot.</p>');
+      'longer for a photo of paper than a screenshot.</p>' +
+      '<p class="hint" style="opacity:.6">reader build ' + IMPORT_BUILD + '</p>');
     try {
       const images = [], types = [];
       for (let i = 0; i < files.length; i++) {
