@@ -1501,7 +1501,7 @@
   // than one. The year is the part that usually isn't printed, so today's
   // date goes along to resolve it, and the review leads with the months it
   // decided on: a wrong year is invisible row by row but obvious as a list.
-  const IMPORT_BUILD = '3';   // bump when changing anything in this block
+  const IMPORT_BUILD = '4';   // bump when changing anything in this block
   let IMP = { rows: [], months: [] };
 
   function todayIso() {
@@ -1794,13 +1794,38 @@
         created_by: null
       };
     });
+    // Check what is actually about to be sent, not what should be. Twice now a
+    // guard on the source rows looked sufficient and the database still got a
+    // bad date, which means the fault is somewhere between the two — so this
+    // inspects the built rows themselves and names the row, field and value
+    // rather than letting Postgres report a type with no row attached.
+    const wrong = [];
+    rows.forEach((row, i) => {
+      ['start_date', 'end_date'].forEach(k => {
+        if (row[k] !== null && !ISO_DAY.test(String(row[k]))) wrong.push(k + '=' + row[k]);
+      });
+      ['starts_at', 'ends_at'].forEach(k => {
+        if (row[k] !== null && isNaN(new Date(row[k]).getTime())) wrong.push(k + '=' + row[k]);
+      });
+      if (wrong.length && wrong.length <= 2) wrong.push('in "' + row.title + '"');
+    });
+    if (wrong.length) {
+      $('imp-save').disabled = false;
+      toast('Bad date: ' + wrong.slice(0, 3).join(' · '));
+      return;
+    }
     try {
       const { error } = await sb.from('events').insert(rows);
-      if (error) throw error;
+      // Supabase returns the failure in `error` rather than throwing, and its
+      // `message` is the bit worth reading — surface it whole.
+      if (error) throw new Error(error.message + (error.details ? ' — ' + error.details : ''));
       closeSheet();
       toast('Added ' + rows.length + ' event' + (rows.length === 1 ? '' : 's'));
-      await refresh();
-    } catch (e) { $('imp-save').disabled = false; fail(e, 'add the events'); }
+    } catch (e) { $('imp-save').disabled = false; fail(e, 'add the events'); return; }
+    // Reloading is a separate failure from saving, and conflating them reports
+    // a save that worked as a save that didn't. Only the insert is above.
+    try { await refresh(); }
+    catch (e) { console.error('refresh after import', e); toast('Added — but the reload failed, pull to refresh'); }
   }
 
   $('cal-import').addEventListener('click', () => { IMP = { rows: [], months: [] }; $('cal-photos').click(); });
