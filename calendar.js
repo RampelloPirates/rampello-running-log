@@ -19,7 +19,25 @@
 // is what households.time_zone records; a date means that day where the family
 // is, not UTC.
 function pad2(n) { return String(n).padStart(2, '0'); }
-function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+// Every date string in either page comes from here, which is why the guard
+// belongs here and not at the call sites.
+//
+// An Invalid Date formats to "NaN-NaN-NaN" without complaint, and that string
+// then travels: into a query parameter, into a window bound, into a row about
+// to be inserted. It is compared as text, and "N" outranks every digit, so it
+// wins every > comparison it meets and sticks. The failure surfaces wherever
+// it is finally used — Postgres reports the date type and never the caller —
+// so it reads as a fault in some unrelated feature, arbitrarily far from
+// whatever actually produced the bad Date.
+//
+// Failing here costs one thrown error at the source, with the caller on the
+// stack. That is the whole point: the value must not be allowed to exist.
+function ymd(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) {
+    throw new Error('ymd(): not a valid Date — ' + String(d));
+  }
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+}
 function parseYmd(s) { const p = String(s).split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); }
 function todayYmd() { return ymd(new Date()); }
 function minYmd(a, b) { return a < b ? a : b; }
