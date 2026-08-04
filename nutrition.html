@@ -227,7 +227,9 @@
   // .meal_type's check constraint allows — the column has been in the schema
   // since 10_nutrition.sql and nothing has ever written to it until now, so
   // this needs no migration.
-  var MEALS = [['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snack','Snack']];
+  // Alcohol sits last rather than in clock order, because it isn't a time of
+  // day — it's a subdivision you pull out of one. Needs sql/66 run.
+  var MEALS = [['breakfast','Breakfast'],['lunch','Lunch'],['dinner','Dinner'],['snack','Snack'],['alcohol','Alcohol']];
   function mealLabel(k){
     for(var i=0;i<MEALS.length;i++) if(MEALS[i][0]===k) return MEALS[i][1];
     return 'Snack';
@@ -239,6 +241,9 @@
   // a backfill would put a guess on disk indistinguishable from a choice, and
   // these boundaries are only ever roughly right. Nothing stored claims the old
   // rows were told which meal they were.
+  // Note this never returns 'alcohol', and shouldn't: there is no hour that
+  // implies a drink, and a guess here would be a claim about someone's
+  // drinking invented by a clock. That category is only ever chosen.
   function inferMeal(ts){
     var hr = new Date(ts).getHours();
     if(hr >= 4  && hr < 11) return 'breakfast';
