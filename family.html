@@ -59,7 +59,7 @@
 
     .viewtoggle { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
     .viewtoggle .pick { flex: 1; text-align: center; padding: 0.5rem; }
-    .filterbar { display: flex; justify-content: flex-end; margin-bottom: 0.9rem; }
+    .filterbar { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 0.9rem; }
 
     .monthnav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
     .monthnav h3 { font-family: var(--f-display); font-size: 1.05rem; margin: 0; color: var(--green-deep); }
@@ -1552,7 +1552,9 @@
   }
 
   async function runCalendarImport(files) {
-    if (!files || !files.length) return;
+    // Say so rather than returning quietly. The bug this replaced looked
+    // exactly like nothing happening, which is the hardest kind to report.
+    if (!files || !files.length) { toast('No photos came through — try again'); return; }
     if (files.length > 6) { toast('Six photos at a time'); return; }
     openSheet('<h3>Reading the calendar…</h3><p class="hint">This takes a few seconds — ' +
       'longer for a photo of paper than a screenshot.</p>');
@@ -1760,8 +1762,15 @@
 
   $('cal-import').addEventListener('click', () => { IMP = { rows: [], months: [] }; $('cal-photos').click(); });
   $('cal-photos').addEventListener('change', function () {
-    const f = this.files; this.value = '';
-    runCalendarImport(f);
+    // Copy the FileList into a real array BEFORE resetting the input. `.files`
+    // is a live reference, so clearing it also empties anything still holding
+    // it — which silently reduced this to a no-op: picker opens, photos are
+    // chosen, nothing happens. The reset itself has to stay, or picking the
+    // same photo twice never fires change a second time.
+    const picked = Array.prototype.slice.call(this.files);
+    this.value = '';
+    if (!picked.length) return;
+    runCalendarImport(picked);
   });
 
   // Deleting one occurrence of a series appends to exdates rather than
