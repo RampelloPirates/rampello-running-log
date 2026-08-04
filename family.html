@@ -1515,10 +1515,36 @@
   // Whole-calendar date arithmetic, for the one failure that hits every row at
   // once: an unprinted year guessed wrong. Fixing that per row is forty edits;
   // as a shift it is one.
+  const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+  // The prompt asks for "HH:MM" and mostly gets it, but a calendar reading
+  // "6pm" invites "6:00 PM" back. That is worse than a wrong value: a time
+  // input renders anything it can't parse as blank while the state quietly
+  // keeps the bad string, so it survives the review unseen and only fails at
+  // the database. Coerced on the way in, and anything still unreadable becomes
+  // all-day — a wrong time is a worse lie than no time.
+  function normTime(t) {
+    if (!t) return '';
+    const s = String(t).trim().toUpperCase();
+    const m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/) || s.match(/^(\d{1,2})\s*(AM|PM)$/);
+    if (!m) return '';
+    const hasMin = m.length === 4;
+    let h = +m[1];
+    const min = hasMin ? +m[2] : 0;
+    const ap = hasMin ? m[3] : m[2];
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    if (h > 23 || min > 59) return '';
+    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  }
   function shiftIso(iso, years, months) {
+    // Checking the shape, not just that the pieces are present. A date with a
+    // part that isn't a number passes a length check, then becomes an Invalid
+    // Date, then stringifies to "NaN-NaN-NaN" — which travels all the way to
+    // Postgres before anything complains.
+    if (!ISO_DAY.test(String(iso))) return iso;
     const a = String(iso).split('-').map(Number);
-    if (a.length < 3 || !a[0]) return iso;
     const d = new Date(a[0] + years, a[1] - 1 + months, 1);
+    if (isNaN(d.getTime())) return iso;
     // Clamp rather than roll over: shifting 31 Jan by a month should land on
     // the 28th, not silently become the 2nd or 3rd of March.
     const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
@@ -1598,8 +1624,8 @@
       sel: true,
       title: e.title || e.raw || 'Untitled',
       date: e.date || todayIso(),
-      start: e.start || '',
-      end: e.end || '',
+      start: normTime(e.start),
+      end: normTime(e.end),
       who: membersByName(e.who),
       location: e.location || '',
       raw: e.raw || '',
@@ -1729,7 +1755,13 @@
   }
 
   async function saveImported() {
-    const picked = IMP.rows.filter(r => r.sel && r.title.trim() && r.date);
+    // Validate the date shape here rather than trusting it. Everything
+    // upstream is either model output or a text field, and a bad one reaches
+    // the database as an unreadable type error instead of a fixable row.
+    const ticked = IMP.rows.filter(r => r.sel && r.title.trim());
+    const picked = ticked.filter(r => ISO_DAY.test(String(r.date)));
+    const bad = ticked.length - picked.length;
+    if (bad) { toast(bad + ' row' + (bad === 1 ? ' has' : 's have') + ' an unreadable date — fix or untick'); return; }
     if (!picked.length) { toast('Nothing ticked'); return; }
     $('imp-save').disabled = true;
     const rows = picked.map(r => {
