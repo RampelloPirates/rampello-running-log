@@ -1512,7 +1512,7 @@
   // than one. The year is the part that usually isn't printed, so today's
   // date goes along to resolve it, and the review leads with the months it
   // decided on: a wrong year is invisible row by row but obvious as a list.
-  const IMPORT_BUILD = '6';   // bump when changing anything in this block
+  const IMPORT_BUILD = '7';   // bump when changing anything in this block
   let IMP = { rows: [], months: [] };
 
   function todayIso() {
@@ -1780,7 +1780,14 @@
     if (bad) { toast(bad + ' row' + (bad === 1 ? ' has' : 's have') + ' an unreadable date — fix or untick'); return; }
     if (!picked.length) { toast('Nothing ticked'); return; }
     $('imp-save').disabled = true;
-    const rows = picked.map(r => {
+    let rows;
+    // Building the rows sits inside the try because it can throw: localIso
+    // ends in toISOString(), which raises rather than returning anything for
+    // an invalid date. Thrown outside a handler it escaped everything — the
+    // button stayed disabled, no toast fired, and the sheet simply sat there,
+    // which reads as a hang rather than as the error it is.
+    try {
+    rows = picked.map(r => {
       const allDay = !r.start;
       return {
         household_id: HH.id,
@@ -1805,6 +1812,11 @@
         created_by: null
       };
     });
+    } catch (e) {
+      $('imp-save').disabled = false;
+      fail(e, 'work out the dates');
+      return;
+    }
     // Check what is actually about to be sent, not what should be. Twice now a
     // guard on the source rows looked sufficient and the database still got a
     // bad date, which means the fault is somewhere between the two — so this
