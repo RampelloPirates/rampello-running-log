@@ -265,9 +265,15 @@
     .imp-raw{font-size:11.5px;color:var(--muted,#71776B);font-style:italic}
     /* Week: seven columns, which is why it wants landscape. Each column
        scrolls on its own so a busy Tuesday can't push the grid taller. */
-    .wgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;align-items:start}
-    .wcol{background:#fff;border:1px solid #E2DCCF;border-radius:10px;padding:5px;min-height:96px;
-          max-height:calc(100vh - 190px);overflow-y:auto}
+    /* One band, not seven ragged ones. align-items:start sized every column to
+       its own contents, so the white blocks stopped at different heights and
+       the grid read as broken rather than as empty days. The row now has a
+       height and each column fills it; min-height:0 is what actually lets a
+       grid child scroll instead of growing past its track. */
+    .wgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;
+           height:calc(100dvh - 210px);min-height:200px}
+    .wcol{background:#fff;border:1px solid #E2DCCF;border-radius:10px;padding:5px;
+          height:100%;min-height:0;overflow-y:auto}
     .wcol.today{border-color:#3A5A40;box-shadow:0 0 0 1px #3A5A40 inset}
     .whead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px;
            position:sticky;top:-5px;background:#fff;padding:2px 0}
@@ -279,6 +285,12 @@
     .wt{display:block;font-size:10px;color:#71776B;font-family:ui-monospace,monospace}
     .wn{display:block;font-size:11.5px;line-height:1.3;font-weight:600;word-break:break-word}
     .wnone{text-align:center;color:#C9C2B2;font-size:13px;padding:6px 0}
+    @media (orientation: landscape) and (max-height: 560px) {
+      main { padding-top: .4rem; }
+      .viewtoggle, .filterbar { margin-bottom: .4rem; }
+      #week-wrap .monthnav { margin: 0 0 .4rem; }
+      .wgrid { height: calc(100dvh - 132px); }
+    }
   </style>
 </head>
 <body>
